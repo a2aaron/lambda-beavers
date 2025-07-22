@@ -444,4 +444,19 @@ mod tests {
     fn test_parse_invalid_leftovers() {
         assert_invalid("λa.b leftover");
     }
+
+    #[test]
+    fn test_parse_invalid_dot() {
+        assert_invalid(". λa.b");
+    }
+
+    #[test]
+    fn test_parse_invalid_paren() {
+        assert_invalid(") λa.b");
+    }
+
+    #[test]
+    fn test_parse_invalid_lambda_argument() {
+        assert_invalid("λ(a b).c");
+    }
 }
