@@ -1,5 +1,8 @@
 #![feature(iter_intersperse)]
 
+mod parse;
+
+use parse::{parse_program, pretty, tokenize, TokenStream};
 use std::fmt::Display;
 
 /// A literal
@@ -58,9 +61,6 @@ fn def(input: impl Into<Literal>, term: Term) -> Term {
 fn call(term1: Term, term2: Term) -> Term {
     Term::Application(Box::new(term1), Box::new(term2))
 }
-
-mod parse;
-use parse::{parse_program, pretty, tokenize, TokenStream};
 
 fn foo(program: &str) {
     println!("RAW   : {}", program);
