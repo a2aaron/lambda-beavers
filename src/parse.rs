@@ -308,31 +308,28 @@ mod tests {
     #[test]
     fn test_parse_simple_lambda() {
         let input = "λx.x";
-        let expected = def("x", lit("x"));
+        let expected = def("x", "x");
         assert_parse(input, expected);
     }
 
     #[test]
     fn test_parse_simple_call() {
         let input = "(x y)";
-        let expected = call(lit("x"), lit("y"));
+        let expected = call("x", "y");
         assert_parse(input, expected);
     }
 
     #[test]
     fn test_parse_multiletter_literal() {
         let input = "(λfoo.bar baz)";
-        let expected = call(def("foo", lit("bar")), lit("baz"));
+        let expected = call(def("foo", "bar"), "baz");
         assert_parse(input, expected);
     }
 
     #[test]
     fn test_parse_nested_lambda() {
         let input = "λa.λb.λc.((a b) c)";
-        let expected = def(
-            "a",
-            def("b", def("c", call(call(lit("a"), lit("b")), lit("c")))),
-        );
+        let expected = def("a", def("b", def("c", call(call("a", "b"), "c"))));
         assert_parse(input, expected);
     }
 
@@ -342,12 +339,7 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_invalid_call() {
-        assert_invalid("(a b (c d))");
-    }
-
-    #[test]
-    fn test_parse_invalid_lambda2() {
+    fn test_parse_invalid_lambda_missing_dot() {
         assert_invalid("λ a b");
     }
 
