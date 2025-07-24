@@ -3,7 +3,7 @@
 mod parse;
 mod term;
 
-use parse::{parse_program, pretty, tokenize, TokenStream};
+use parse::{parse_program, pretty, tokenize};
 
 use crate::term::{call, def, lit};
 
@@ -11,8 +11,7 @@ fn foo(program: &str) {
     println!("RAW   : {}", program);
     let tokens = tokenize(program);
     println!("TOKENS: {}", pretty(&tokens));
-    let mut token_stream = TokenStream::new(&tokens);
-    match parse_program(&mut token_stream) {
+    match parse_program(&tokens) {
         Ok(program) => println!("PARSED: {}", program),
         Err(err) => println!("ERROR : {:?}", err),
     }

@@ -1,6 +1,6 @@
 use std::fmt::Display;
 
-use crate::term::{Literal, Term};
+use crate::term::{self, Term};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
@@ -97,10 +97,6 @@ impl<'a> TokenStream<'a> {
             Err(ParseError::expected_literal(actual))
         }
     }
-
-    pub fn remaining(&self) -> Vec<Token> {
-        self.tokens[self.index..].to_vec()
-    }
 }
 
 #[derive(Debug, PartialEq, Eq)]
@@ -109,7 +105,7 @@ pub enum ParseError {
         expected: Vec<Token>,
         actual: Option<Token>,
     },
-    LeftoverTokens(Vec<Token>),
+    Empty,
 }
 
 impl ParseError {
@@ -127,14 +123,15 @@ impl ParseError {
         }
     }
 
-    pub fn expected_tokens(actual: Option<Token>) -> ParseError {
+    pub fn expected_tokens(actual: Token) -> ParseError {
         ParseError::UnexpectedToken {
             expected: vec![
                 Token::Lambda,
                 Token::LeftParen,
+                Token::RightParen,
                 Token::Literal("literal".to_string()),
             ],
-            actual,
+            actual: Some(actual),
         }
     }
 }
@@ -157,61 +154,68 @@ impl std::fmt::Display for ParseError {
                     }
                 )
             }
-            ParseError::LeftoverTokens(tokens) => {
-                write!(
-                    f,
-                    "Leftover tokens after parsing: [{}]",
-                    tokens
-                        .iter()
-                        .map(|t| format!("{}", t))
-                        .collect::<Vec<_>>()
-                        .join(", ")
-                )
-            }
+            ParseError::Empty => write!(f, "End of line too early"),
         }
     }
 }
 
-pub fn parse_program(tokens: &mut TokenStream) -> Result<Term, ParseError> {
-    let term = parse_term(tokens)?;
-    let remaining = tokens.remaining();
-    if !remaining.is_empty() {
-        Err(ParseError::LeftoverTokens(remaining))
+pub fn parse_program(tokens: &[Token]) -> Result<Term, ParseError> {
+    if tokens.is_empty() {
+        return Err(ParseError::Empty);
+    }
+
+    // Strip off first and last tokens if they are both parens
+    let tokens = if tokens[0] == Token::LeftParen && tokens[tokens.len() - 1] == Token::RightParen {
+        &tokens[1..tokens.len() - 1]
     } else {
-        Ok(term)
+        tokens
+    };
+
+    let mut tokens = TokenStream::new(tokens);
+    let term = parse_term_up_to_paren(&mut tokens)?;
+    Ok(term)
+}
+
+fn parse_term_up_to_paren(tokens: &mut TokenStream) -> Result<Term, ParseError> {
+    fn wrap(current_term: Option<Term>, term: Term) -> Option<Term> {
+        if let Some(term1) = current_term {
+            return Some(term::call(term1, term));
+        } else {
+            return Some(term);
+        }
     }
-}
 
-fn parse_term(tokens: &mut TokenStream) -> Result<Term, ParseError> {
-    match tokens.peek() {
-        Some(token) => match token {
-            Token::Literal(_) => parse_literal(tokens),
-            Token::LeftParen => parse_call(tokens),
-            Token::Lambda => parse_lambda(tokens),
-            Token::Dot | Token::RightParen => Err(ParseError::expected_tokens(Some(token))),
-        },
-        None => Err(ParseError::expected_tokens(None)),
+    let mut current_term: Option<Term> = None;
+    while let Some(token) = tokens.peek() {
+        match token {
+            Token::LeftParen => {
+                tokens.consume_one(Token::LeftParen).unwrap();
+                let term = parse_term_up_to_paren(tokens)?;
+                tokens.consume_one(Token::RightParen)?;
+                current_term = wrap(current_term, term);
+            }
+            Token::Lambda => {
+                tokens.consume_one(Token::Lambda).unwrap();
+                let arg = tokens.consume_literal()?;
+                tokens.consume_one(Token::Dot)?;
+                let body = parse_term_up_to_paren(tokens)?;
+                let term = term::def(arg, body);
+                current_term = wrap(current_term, term);
+            }
+            Token::Literal(_) => {
+                let literal = tokens.consume_literal().unwrap();
+                let term = term::lit(literal);
+                current_term = wrap(current_term, term);
+            }
+            Token::RightParen => break,
+            Token::Dot => return Err(ParseError::expected_tokens(token)),
+        }
     }
-}
-
-fn parse_literal(tokens: &mut TokenStream<'_>) -> Result<Term, ParseError> {
-    Ok(Term::Literal(Literal(tokens.consume_literal()?)))
-}
-
-fn parse_call(tokens: &mut TokenStream) -> Result<Term, ParseError> {
-    tokens.consume_one(Token::LeftParen)?;
-    let term1 = parse_term(tokens)?;
-    let term2 = parse_term(tokens)?;
-    tokens.consume_one(Token::RightParen)?;
-    Ok(Term::Application(Box::new(term1), Box::new(term2)))
-}
-
-fn parse_lambda(tokens: &mut TokenStream) -> Result<Term, ParseError> {
-    tokens.consume_one(Token::Lambda)?;
-    let literal = tokens.consume_literal()?;
-    tokens.consume_one(Token::Dot)?;
-    let term = parse_term(tokens)?;
-    Ok(Term::Abstraction(Literal(literal), Box::new(term)))
+    if let Some(current_term) = current_term {
+        Ok(current_term)
+    } else {
+        Err(ParseError::Empty)
+    }
 }
 
 #[cfg(test)]
@@ -220,18 +224,20 @@ mod tests {
 
     use super::*;
 
-    fn assert_parse(input: &str, expected: Term) {
-        let tokens = tokenize(input);
-        let mut stream = TokenStream::new(&tokens);
-        let actual = parse_program(&mut stream).unwrap();
-        assert_eq!(expected, actual);
+    macro_rules! assert_parse {
+        ($input:expr, $expected:expr) => {{
+            let tokens = tokenize($input);
+            let actual = parse_program(&tokens).unwrap();
+            assert_eq!($expected, actual);
+        }};
     }
 
-    fn assert_invalid(input: &str) {
-        let tokens = tokenize(input);
-        let mut stream = TokenStream::new(&tokens);
-        let actual = parse_program(&mut stream);
-        assert!(actual.is_err());
+    macro_rules! assert_invalid {
+        ($input:expr) => {{
+            let tokens = tokenize($input);
+            let actual = parse_program(&tokens);
+            assert!(actual.is_err());
+        }};
     }
 
     #[test]
@@ -302,64 +308,99 @@ mod tests {
     fn test_parse_simple_literal() {
         let input = "x";
         let expected = lit("x");
-        assert_parse(input, expected);
+        assert_parse!(input, expected);
     }
 
     #[test]
     fn test_parse_simple_lambda() {
         let input = "λx.x";
         let expected = def("x", "x");
-        assert_parse(input, expected);
+        assert_parse!(input, expected);
     }
 
     #[test]
     fn test_parse_simple_call() {
         let input = "(x y)";
         let expected = call("x", "y");
-        assert_parse(input, expected);
+        assert_parse!(input, expected);
     }
 
     #[test]
     fn test_parse_multiletter_literal() {
         let input = "(λfoo.bar baz)";
-        let expected = call(def("foo", "bar"), "baz");
-        assert_parse(input, expected);
+        let expected = def("foo", call("bar", "baz"));
+        assert_parse!(input, expected);
     }
 
     #[test]
     fn test_parse_nested_lambda() {
         let input = "λa.λb.λc.((a b) c)";
         let expected = def("a", def("b", def("c", call(call("a", "b"), "c"))));
-        assert_parse(input, expected);
+        assert_parse!(input, expected);
     }
 
     #[test]
-    fn test_parse_invalid_lambda() {
-        assert_invalid("λa.λb.λc.");
+    fn test_parse_drop_outer_parens1() {
+        assert_parse!("a", lit("a"));
+    }
+
+    #[test]
+    fn test_parse_drop_outer_parens2() {
+        assert_parse!("a b", call("a", "b"));
+    }
+
+    #[test]
+    fn test_parse_drop_outer_parens3() {
+        assert_parse!("λa.a", def("a", "a"));
+    }
+
+    #[test]
+    fn test_parse_left_associative() {
+        assert_parse!("a b c", call(call("a", "b"), "c"));
+    }
+
+    #[test]
+    fn test_parse_lambda_greedy_extend() {
+        assert_parse!("λx.M N", def("x", call("M", "N")));
+    }
+
+    #[test]
+    fn test_parse_invalid_empty() {
+        assert_invalid!("");
+    }
+
+    #[test]
+    fn test_parse_invalid_lambda_missing_body() {
+        assert_invalid!("λa.λb.λc.");
     }
 
     #[test]
     fn test_parse_invalid_lambda_missing_dot() {
-        assert_invalid("λ a b");
+        assert_invalid!("λ a b");
     }
 
     #[test]
-    fn test_parse_invalid_leftovers() {
-        assert_invalid("λa.b leftover");
+    fn test_parse_valid_leftovers() {
+        assert_parse!("λa.b leftover", def("a", call("b", "leftover")));
     }
 
     #[test]
     fn test_parse_invalid_dot() {
-        assert_invalid(". λa.b");
+        assert_invalid!(". λa.b");
     }
 
     #[test]
     fn test_parse_invalid_paren() {
-        assert_invalid(") λa.b");
+        assert_invalid!(") λa.b");
+    }
+
+    #[test]
+    fn test_parse_mismatched_paren() {
+        assert_invalid!("(λa.b");
     }
 
     #[test]
     fn test_parse_invalid_lambda_argument() {
-        assert_invalid("λ(a b).c");
+        assert_invalid!("λ(a b).c");
     }
 }
