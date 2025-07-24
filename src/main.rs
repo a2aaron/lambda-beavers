@@ -1,5 +1,6 @@
 #![feature(iter_intersperse)]
 
+mod debruijn;
 mod parse;
 mod term;
 

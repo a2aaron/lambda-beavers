@@ -1,10 +1,12 @@
-use std::fmt::Display;
+use std::{fmt::Display, str::FromStr};
+
+use crate::parse;
 
 /// A literal
 /// TODO: This should eventually become more sophisticated, possibly containing
 /// references to some manager struct that knows about all literals. For now, this can
 /// just be a string
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Literal(pub String);
 impl Display for Literal {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -30,6 +32,15 @@ pub enum Term {
     Literal(Literal),
     Abstraction(Literal, Box<Term>),
     Application(Box<Term>, Box<Term>),
+}
+
+impl FromStr for Term {
+    type Err = parse::ParseError;
+
+    fn from_str(expr: &str) -> Result<Self, Self::Err> {
+        let tokens = parse::tokenize(expr);
+        parse::parse_program(&tokens)
+    }
 }
 
 impl Display for Term {
