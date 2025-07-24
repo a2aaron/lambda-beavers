@@ -55,27 +55,37 @@ impl Display for Term {
 
 impl From<&str> for Term {
     fn from(value: &str) -> Self {
-        Term::Literal(Literal::from(value))
+        lit(value)
     }
 }
 
 impl From<String> for Term {
     fn from(value: String) -> Self {
-        Term::Literal(Literal::from(value))
+        lit(value)
+    }
+}
+
+impl<A, B> From<(A, B)> for Term
+where
+    A: Into<Term>,
+    B: Into<Term>,
+{
+    fn from((a, b): (A, B)) -> Self {
+        call(a, b)
     }
 }
 
 // Helper method to create a Literal
-pub fn lit(lit: impl Into<Literal>) -> Term {
-    Term::Literal(lit.into())
+pub fn lit(l: impl Into<Literal>) -> Term {
+    Term::Literal(l.into())
 }
 
 // Helper method to create a lambda abstraction
-pub fn def(input: impl Into<Literal>, term: impl Into<Term>) -> Term {
-    Term::Abstraction(input.into(), Box::new(term.into()))
+pub fn def(i: impl Into<Literal>, b: impl Into<Term>) -> Term {
+    Term::Abstraction(i.into(), Box::new(b.into()))
 }
 
 // Helper method to create a function application
-pub fn call(term1: impl Into<Term>, term2: impl Into<Term>) -> Term {
-    Term::Application(Box::new(term1.into()), Box::new(term2.into()))
+pub fn call(a: impl Into<Term>, b: impl Into<Term>) -> Term {
+    Term::Application(Box::new(a.into()), Box::new(b.into()))
 }

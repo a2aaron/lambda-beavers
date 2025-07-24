@@ -220,15 +220,15 @@ fn parse_term_up_to_paren(tokens: &mut TokenStream) -> Result<Term, ParseError> 
 
 #[cfg(test)]
 mod tests {
-    use crate::{call, def, lit};
+    use crate::term::{def, lit};
 
     use super::*;
-
     macro_rules! assert_parse {
         ($input:expr, $expected:expr) => {{
             let tokens = tokenize($input);
             let actual = parse_program(&tokens).unwrap();
-            assert_eq!($expected, actual);
+            let expected = Term::from($expected);
+            assert_eq!(expected, actual);
         }};
     }
 
@@ -321,21 +321,21 @@ mod tests {
     #[test]
     fn test_parse_simple_call() {
         let input = "(x y)";
-        let expected = call("x", "y");
+        let expected = ("x", "y");
         assert_parse!(input, expected);
     }
 
     #[test]
     fn test_parse_multiletter_literal() {
         let input = "(λfoo.bar baz)";
-        let expected = def("foo", call("bar", "baz"));
+        let expected = def("foo", ("bar", "baz"));
         assert_parse!(input, expected);
     }
 
     #[test]
     fn test_parse_nested_lambda() {
         let input = "λa.λb.λc.((a b) c)";
-        let expected = def("a", def("b", def("c", call(call("a", "b"), "c"))));
+        let expected = def("a", def("b", def("c", (("a", "b"), "c"))));
         assert_parse!(input, expected);
     }
 
@@ -346,7 +346,7 @@ mod tests {
 
     #[test]
     fn test_parse_drop_outer_parens2() {
-        assert_parse!("a b", call("a", "b"));
+        assert_parse!("a b", ("a", "b"));
     }
 
     #[test]
@@ -356,12 +356,12 @@ mod tests {
 
     #[test]
     fn test_parse_left_associative() {
-        assert_parse!("a b c", call(call("a", "b"), "c"));
+        assert_parse!("a b c", (("a", "b"), "c"));
     }
 
     #[test]
     fn test_parse_lambda_greedy_extend() {
-        assert_parse!("λx.M N", def("x", call("M", "N")));
+        assert_parse!("λx.M N", def("x", ("M", "N")));
     }
 
     #[test]
@@ -381,7 +381,7 @@ mod tests {
 
     #[test]
     fn test_parse_valid_leftovers() {
-        assert_parse!("λa.b leftover", def("a", call("b", "leftover")));
+        assert_parse!("λa.b leftover", def("a", ("b", "leftover")));
     }
 
     #[test]
