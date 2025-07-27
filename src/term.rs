@@ -37,8 +37,8 @@ pub enum Term {
 impl FromStr for Term {
     type Err = parse::ParseError;
 
-    fn from_str(expr: &str) -> Result<Self, Self::Err> {
-        let tokens = parse::tokenize(expr);
+    fn from_str(term: &str) -> Result<Self, Self::Err> {
+        let tokens = parse::tokenize(term);
         parse::parse_program(&tokens)
     }
 }

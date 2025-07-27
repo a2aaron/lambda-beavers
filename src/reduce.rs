@@ -5,8 +5,8 @@ use crate::debruijn::Debruijn;
 
 // ↑ n = n         if n < cutoff
 //       n + up_by otherwise
-// ↑ λ e = λ (↑ e) where up_by -> up_by and cutoff -> cutoff + 1
-// ↑ (e1 e2) = (↑ e1) (↑ e2)
+// ↑ λ t = λ (↑ t) where up_by -> up_by and cutoff -> cutoff + 1
+// ↑ (t1 t2) = (↑ t1) (↑ t2)
 
 fn up_one(term: &Debruijn) -> Debruijn {
     shift_cutoff(term, 1, 1)
@@ -69,7 +69,7 @@ fn substitute(term: &Debruijn, index: usize, term2: &Debruijn) -> Debruijn {
 
 /// (Note: assuming call by name semantics)
 /// Let's say we are beta reducing something like this (λu.λv.u x) (a b)
-/// In normal notation, what we do here is e1 {e2 / x}, which looks like the following:
+/// In normal notation, what we do here is t1 {t2 / x}, which looks like the following:
 /// λu.λv.u x | initial term
 /// λu.λv.u x | replace all instances of x by (a b)
 /// λu.λv.u (a b)
@@ -81,26 +81,26 @@ fn substitute(term: &Debruijn, index: usize, term2: &Debruijn) -> Debruijn {
 /// In λx.x λx.z, the x is bound and is not free so we do not replace it
 ///
 /// The overall procedure therefore, would look something like this:
-/// (λx. e1) e2 -> e1 {e2 / x}
+/// (λx. t1) t2 -> t1 {t2 / x}
 ///
-/// Where {e / x} is the substitution function, which looks like:
+/// Where {t / x} is the substitution function, which looks like:
 ///
 /// Substituting a literal:
-/// y {e / x} = e if y == x
+/// y {t / x} = t if y == x
 ///             y otherwise
-/// change literal y into term e if y is the literal being subtituted, otherwise leave it alone
+/// change literal y into term t if y is the literal being subtituted, otherwise leave it alone
 /// ex: y {λx.x / y} = λx.x
 /// ex: a {λx.x / b} = a
 ///
 /// Substituting an application
-/// (e1 e2) {e / x} = (e1 {e / x}  e2 {e / x})
+/// (t1 t2) {t / x} = (t1 {t / x}  t2 {t / x})
 /// this one is simple, just recurse into the function and argument
 ///
 /// Substituting an abstraction
-/// (λy.e1) {e / x} = λy.e1 {e / x} where y != x and y is not in fv(e)
-/// (where fv(e) means "the set of free variables of e")
+/// (λy.t1) {t / x} = λy.t1 {t / x} where y != x and y is not in fv(t)
+/// (where fv(t) means "the set of free variables of t")
 /// Those last two conditionals are important! The first means that we only
-/// substitute a literal in e1 if that literally is not being captured by the lambda (in this case, y)
+/// substitute a literal in t1 if that literally is not being captured by the lambda (in this case, y)
 ///
 /// so for example, (λa.x (λx.x)) {y / x}
 /// = (λa.y (λx.x))
@@ -113,9 +113,9 @@ fn substitute(term: &Debruijn, index: usize, term2: &Debruijn) -> Debruijn {
 /// eg: we would rather write (λy1.x) {y2 / x} = λy1.y2
 /// Fortunately, we can always rename variables so that this works out. That's what this second
 /// condition is doing--it's just ensuring that when we substitute, the argument of the lambda is
-/// not already a free variable in the substituted expression
-/// (in other words, all variables in the expression are assumed to be free with respect to the lambda,
-/// which makes sense! that expression came from outside the lambda anyways, so there's no way any
+/// not already a free variable in the substituted term
+/// (in other words, all variables in the term are assumed to be free with respect to the lambda,
+/// which makes sense! that term came from outside the lambda anyways, so there's no way any
 /// of them are already bound)
 ///
 /// Finally to actually do our beta-reduction, we just drop out the outermost lambda that we subtituted
@@ -152,36 +152,36 @@ fn substitute(term: &Debruijn, index: usize, term2: &Debruijn) -> Debruijn {
 /// So that means for our substitution operation, it needs to look like this:
 ///
 /// Substituting a literal:
-/// N {e / M} = e if N == M
+/// N {t / M} = t if N == M
 ///             N otherwise
 /// (basically the same)
 ///
 /// Substituting an abstraction:
-/// (e1 e2) {e / M} = (e1 {e / M}  e2 {e / M})
+/// (t1 t2) {t / M} = (t1 {t / M}  t2 {t / M})
 /// (basically the same)
 ///
 /// Substituting an abstraction
-/// (λ e1) {e / M} = λ e1 {up_one(e) / M + 1}
+/// (λ t1) {t / M} = λ t1 {up_one(t) / M + 1}
 ///
-/// For this one, when we recurse into e1, all of the variables we care about replacing
+/// For this one, when we recurse into t1, all of the variables we care about replacing
 /// are going to be one higher now, and we need to also bump up every variable in our substited
-/// expression by one to compensate for the depth
+/// term by one to compensate for the depth
 ///
 /// Note that up_one only modifies free varaibles within it's argument. This means that it won't
 /// modify anything whose index is equal to or lower than it's depth. See shift_cutoff for
 /// implementation.
 ///
-/// Finally, to complete the beta-reduction, we need to take the body of our substituted expression
+/// Finally, to complete the beta-reduction, we need to take the body of our substituted term
 /// and extract it from the lambda--this will drop every index in the term down by one.
 ///
 /// Hence, the final rule for beta reduction will look like:
-/// (λ e1) e2 = down_one(e1 {up_one(e) / 1})
-pub fn beta_reduce(func: &Debruijn, expr: &Debruijn) -> Debruijn {
-    let body = match func {
+/// (λ t1) t2 = down_one(t1 {up_one(t) / 1})
+pub fn beta_reduce(abs: &Debruijn, arg: &Debruijn) -> Debruijn {
+    let body = match abs {
         Debruijn::Abstraction(body) => body.clone(),
         _ => panic!("Expected an abstraction"),
     };
-    let term = up_one(&expr);
+    let term = up_one(&arg);
     let subsituted = substitute(&body, 1, &term);
     let unshift = down_one(&subsituted);
     unshift

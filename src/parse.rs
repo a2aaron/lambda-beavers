@@ -23,10 +23,10 @@ impl Display for Token {
     }
 }
 
-pub fn tokenize(expr: &str) -> Vec<Token> {
+pub fn tokenize(term: &str) -> Vec<Token> {
     let mut tokens = vec![];
     let mut string = String::new();
-    for char in expr.chars() {
+    for char in term.chars() {
         let (cut_string, push_token) = match char {
             'λ' => (true, Some(Token::Lambda)),
             '.' => (true, Some(Token::Dot)),
