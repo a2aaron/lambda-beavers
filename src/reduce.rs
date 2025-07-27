@@ -3,70 +3,6 @@ use crate::debruijn::Debruijn;
 // see https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture15.pdf
 // and also https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture13.pdf
 
-// ↑ n = n         if n < cutoff
-//       n + up_by otherwise
-// ↑ λ t = λ (↑ t) where up_by -> up_by and cutoff -> cutoff + 1
-// ↑ (t1 t2) = (↑ t1) (↑ t2)
-
-fn up_one(term: &Debruijn) -> Debruijn {
-    shift_cutoff(term, 1, 1)
-}
-
-fn down_one(term: &Debruijn) -> Debruijn {
-    shift_cutoff(term, -1, 1)
-}
-
-/// Shift the indicies for all terms up by an amount. Indicies below the cutoff are not modified
-/// This is useful during beta reduction because we need to "drop out" an abstraction.
-fn shift_cutoff(term: &Debruijn, up_by: isize, cutoff: usize) -> Debruijn {
-    match term {
-        Debruijn::Index(term_index) => {
-            if *term_index < cutoff {
-                Debruijn::Index(*term_index)
-            } else {
-                // Recall that an index starts at 1, so if cutoff is set to 1, then this branch
-                // will always be taken.
-                let index = term_index.checked_add_signed(up_by).unwrap();
-                Debruijn::Index(index)
-            }
-        }
-        Debruijn::Application(func, arg) => {
-            let call_func = shift_cutoff(func, up_by, cutoff);
-            let call_arg = shift_cutoff(arg, up_by, cutoff);
-            Debruijn::Application(Box::new(call_func), Box::new(call_arg))
-        }
-        Debruijn::Abstraction(func_body) => {
-            // We add one to the cutoff here because we don't want to modify bound variables
-            // For example, if we're at the outer-most lambda, then any Index(1)s in the lambda body
-            // are referring to that lambda's bound variable and we don't modify it.
-            let body = shift_cutoff(func_body, up_by, cutoff + 1);
-            Debruijn::Abstraction(Box::new(body))
-        }
-    }
-}
-
-fn substitute(term: &Debruijn, index: usize, term2: &Debruijn) -> Debruijn {
-    match term {
-        Debruijn::Index(term_index) => {
-            if *term_index == index {
-                term2.clone()
-            } else {
-                Debruijn::Index(*term_index)
-            }
-        }
-        Debruijn::Application(func, arg) => {
-            let call_func = substitute(func, index, term2);
-            let call_arg = substitute(arg, index, term2);
-            Debruijn::Application(Box::new(call_func), Box::new(call_arg))
-        }
-        Debruijn::Abstraction(func_body) => {
-            let term2 = up_one(&term2);
-            let body = substitute(func_body, index + 1, &term2);
-            Debruijn::Abstraction(Box::new(body))
-        }
-    }
-}
-
 /// (Note: assuming call by name semantics)
 /// Let's say we are beta reducing something like this (λu.λv.u x) (a b)
 /// In normal notation, what we do here is t1 {t2 / x}, which looks like the following:
@@ -182,9 +118,77 @@ pub fn beta_reduce(abs: &Debruijn, arg: &Debruijn) -> Debruijn {
         _ => panic!("Expected an abstraction"),
     };
     let term = up_one(&arg);
-    let subsituted = substitute(&body, 1, &term);
+    let subsituted = substitute(&body, &term);
     let unshift = down_one(&subsituted);
     unshift
+}
+
+fn substitute(term: &Debruijn, term2: &Debruijn) -> Debruijn {
+    _substitute(&term, 1, &term2)
+}
+
+fn _substitute(term: &Debruijn, index: usize, term2: &Debruijn) -> Debruijn {
+    match term {
+        Debruijn::Index(term_index) => {
+            if *term_index == index {
+                term2.clone()
+            } else {
+                Debruijn::Index(*term_index)
+            }
+        }
+        Debruijn::Application(func, arg) => {
+            let call_func = _substitute(func, index, term2);
+            let call_arg = _substitute(arg, index, term2);
+            Debruijn::Application(Box::new(call_func), Box::new(call_arg))
+        }
+        Debruijn::Abstraction(func_body) => {
+            let term2 = up_one(&term2);
+            let body = _substitute(func_body, index + 1, &term2);
+            Debruijn::Abstraction(Box::new(body))
+        }
+    }
+}
+
+// ↑ n = n         if n < cutoff
+//       n + up_by otherwise
+// ↑ λ t = λ (↑ t) where up_by -> up_by and cutoff -> cutoff + 1
+// ↑ (t1 t2) = (↑ t1) (↑ t2)
+
+fn up_one(term: &Debruijn) -> Debruijn {
+    shift_cutoff(term, 1, 1)
+}
+
+fn down_one(term: &Debruijn) -> Debruijn {
+    shift_cutoff(term, -1, 1)
+}
+
+/// Shift the indicies for all terms up by an amount. Indicies below the cutoff are not modified
+/// This is useful during beta reduction because we need to "drop out" an abstraction.
+fn shift_cutoff(term: &Debruijn, up_by: isize, cutoff: usize) -> Debruijn {
+    match term {
+        Debruijn::Index(term_index) => {
+            if *term_index < cutoff {
+                Debruijn::Index(*term_index)
+            } else {
+                // Recall that an index starts at 1, so if cutoff is set to 1, then this branch
+                // will always be taken.
+                let index = term_index.checked_add_signed(up_by).unwrap();
+                Debruijn::Index(index)
+            }
+        }
+        Debruijn::Application(func, arg) => {
+            let call_func = shift_cutoff(func, up_by, cutoff);
+            let call_arg = shift_cutoff(arg, up_by, cutoff);
+            Debruijn::Application(Box::new(call_func), Box::new(call_arg))
+        }
+        Debruijn::Abstraction(func_body) => {
+            // We add one to the cutoff here because we don't want to modify bound variables
+            // For example, if we're at the outer-most lambda, then any Index(1)s in the lambda body
+            // are referring to that lambda's bound variable and we don't modify it.
+            let body = shift_cutoff(func_body, up_by, cutoff + 1);
+            Debruijn::Abstraction(Box::new(body))
+        }
+    }
 }
 
 #[cfg(test)]
@@ -192,7 +196,7 @@ mod tests {
 
     use crate::{
         debruijn::{self, def, Context, Debruijn},
-        reduce::{beta_reduce, shift_cutoff, substitute},
+        reduce::{_substitute, beta_reduce, shift_cutoff},
         term::Term,
     };
 
@@ -217,7 +221,7 @@ mod tests {
         let term2: Debruijn = 1.into(); // x
 
         // Make the substitution "x = x" into the term "x"
-        let actual = substitute(&term, 1, &term2);
+        let actual = _substitute(&term, 1, &term2);
         // Just "x"
         let expected: Debruijn = 1.into();
         assert_eq!(actual, expected);
@@ -278,7 +282,7 @@ mod tests {
         let term2: Debruijn = 1.into(); // x
 
         // Make the substitution "x = x" into the term "λx.x"
-        let actual = substitute(&term, 1, &term2);
+        let actual = _substitute(&term, 1, &term2);
         // Result should be λx.x, because the inner x is shadowed
         let expected: Debruijn = def(1).into();
         assert_eq!(actual, expected);

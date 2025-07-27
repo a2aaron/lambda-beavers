@@ -119,14 +119,17 @@ where
     }
 }
 
+#[allow(dead_code)]
 pub fn idx(a: usize) -> Debruijn {
     Debruijn::Index(a)
 }
 
+#[allow(dead_code)]
 pub fn def(b: impl Into<Debruijn>) -> Debruijn {
     Debruijn::Abstraction(Box::new(b.into()))
 }
 
+#[allow(dead_code)]
 pub fn call(a: impl Into<Debruijn>, b: impl Into<Debruijn>) -> Debruijn {
     Debruijn::Application(Box::new(a.into()), Box::new(b.into()))
 }
