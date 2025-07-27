@@ -2,6 +2,7 @@
 
 mod debruijn;
 mod parse;
+mod reduce;
 mod term;
 
 use parse::{parse_program, pretty, tokenize};

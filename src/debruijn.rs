@@ -1,12 +1,33 @@
 use std::collections::HashMap;
 
 use crate::term::{Literal, Term};
+use std::fmt;
 
-#[derive(Debug, PartialEq, Eq)]
+/// A Debruijn term.
+/// Note that this notation is 1-indexed.
+/// So λx.x = λ 1
+/// More examples
+/// λx.x = λ 1
+/// λz.z = λ 1
+/// λx.λy.x = λ λ 2
+/// λx.λy.λs.λz.x s (y s z) = λ λ λ λ 4 2 (3 2 1)
+/// (λx.x x) (λx.x x) = (λ 1 1) (λ 1 1)
+/// (λx.λx.x) (λ y.y) = (λ λ 1) (λ 1)
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Debruijn {
     Index(usize),
     Application(Box<Debruijn>, Box<Debruijn>),
     Abstraction(Box<Debruijn>),
+}
+
+impl fmt::Display for Debruijn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Debruijn::Index(i) => write!(f, "{}", i),
+            Debruijn::Abstraction(body) => write!(f, "λ {}", body),
+            Debruijn::Application(lhs, rhs) => write!(f, "({} {})", lhs, rhs),
+        }
+    }
 }
 
 impl From<usize> for Debruijn {
@@ -29,11 +50,14 @@ impl TryFrom<Term> for Debruijn {
     type Error = String;
 
     fn try_from(term: Term) -> Result<Self, Self::Error> {
-        to_debruijn(term, &mut Context::default())
+        compile(term, &mut Context::default())
     }
 }
 
-fn to_debruijn(term: Term, ctx: &mut Context) -> Result<Debruijn, String> {
+/// Compile a term. Note that if there are any free variables (that is, a variable
+/// which does not appear in the binding of an Abstraction in the term), then it
+/// needs to be bound in the Context object.
+pub fn compile(term: Term, ctx: &mut Context) -> Result<Debruijn, String> {
     let term = match term {
         Term::Literal(literal) => match ctx.get_index(literal.clone()) {
             Some(index) => Debruijn::Index(index),
@@ -41,35 +65,38 @@ fn to_debruijn(term: Term, ctx: &mut Context) -> Result<Debruijn, String> {
         },
         Term::Abstraction(literal, term) => {
             ctx.push_literal(literal.clone());
-            let term = to_debruijn(*term, ctx)?;
+            let term = compile(*term, ctx)?;
             ctx.pop_literal(literal);
             Debruijn::Abstraction(Box::new(term))
         }
         Term::Application(term1, term2) => {
-            let term1 = to_debruijn(*term1, ctx)?;
-            let term2 = to_debruijn(*term2, ctx)?;
+            let term1 = compile(*term1, ctx)?;
+            let term2 = compile(*term2, ctx)?;
             Debruijn::Application(Box::new(term1), Box::new(term2))
         }
     };
     Ok(term)
 }
 
-#[derive(Default)]
+#[derive(Default, Debug, Clone)]
 pub struct Context {
     variable_to_level: HashMap<Literal, Vec<usize>>,
     current_depth: usize,
 }
 
 impl Context {
-    fn push_literal(&mut self, literal: Literal) {
+    pub fn push_literal(&mut self, literal: impl Into<Literal>) {
         self.variable_to_level
-            .entry(literal)
+            .entry(literal.into())
             .or_default()
             .push(self.current_depth);
         self.current_depth += 1;
     }
-    fn pop_literal(&mut self, literal: Literal) {
-        self.variable_to_level.get_mut(&literal).unwrap().pop();
+    fn pop_literal(&mut self, literal: impl Into<Literal>) {
+        self.variable_to_level
+            .get_mut(&literal.into())
+            .unwrap()
+            .pop();
         self.current_depth -= 1;
     }
 
@@ -79,18 +106,50 @@ impl Context {
     }
 }
 
+impl<L, const N: usize> From<[L; N]> for Context
+where
+    L: Into<Literal>,
+{
+    fn from(literals: [L; N]) -> Self {
+        let mut ctx = Context::default();
+        for literal in literals {
+            ctx.push_literal(literal);
+        }
+        ctx
+    }
+}
+
+pub fn idx(a: usize) -> Debruijn {
+    Debruijn::Index(a)
+}
+
+pub fn def(b: impl Into<Debruijn>) -> Debruijn {
+    Debruijn::Abstraction(Box::new(b.into()))
+}
+
+pub fn call(a: impl Into<Debruijn>, b: impl Into<Debruijn>) -> Debruijn {
+    Debruijn::Application(Box::new(a.into()), Box::new(b.into()))
+}
+
 #[cfg(test)]
 mod test {
-    use crate::{debruijn::Debruijn, term::Term};
-
-    fn def(b: impl Into<Debruijn>) -> Debruijn {
-        Debruijn::Abstraction(Box::new(b.into()))
-    }
+    use crate::{
+        debruijn::{call, def, idx, Context, Debruijn},
+        term::Term,
+    };
 
     macro_rules! assert_compile {
         ($input:expr, $expected:expr) => {{
             let term: Term = $input.parse().unwrap();
             let actual = term.try_into().unwrap();
+            assert_eq!($expected, actual);
+        }};
+    }
+
+    macro_rules! assert_compile_with_context {
+        ($input:expr, $expected:expr, $ctx:expr) => {{
+            let term: Term = $input.parse().unwrap();
+            let actual = crate::debruijn::compile(term, &mut $ctx).unwrap();
             assert_eq!($expected, actual);
         }};
     }
@@ -104,39 +163,92 @@ mod test {
     }
 
     #[test]
-    fn test_convert_i_is_for_identity() {
+    fn convert_i_is_for_identity() {
         assert_compile!("λx.x", def(1));
     }
 
     #[test]
-    fn test_convert_k_is_for_konstant() {
+    fn convert_k_is_for_konstant() {
         assert_compile!("λx. λy. x", def(def(2)));
     }
 
     #[test]
-    fn test_convert_s_is_for_substitution() {
+    fn convert_s_is_for_substitution() {
         assert_compile!("λx. λy. λz. x z (y z)", def(def(def(((3, 1), (2, 1))))));
     }
 
     #[test]
-    fn test_convert_w_is_for_wikipedia() {
+    fn convert_w_is_for_wikipedia() {
         let input = "λwikipedia. (λthe. the (λfree. free)) (λfree. wikipedia free) ";
         let expected = def((def((1, def(1))), def((2, 1))));
         assert_compile!(input, expected)
     }
 
     #[test]
-    fn test_convert_fail_unbound_trivial() {
+    fn convert_shadowed() {
+        let input = "λx.(λx.x) x";
+        let expected = def((def(1), 1));
+        assert_compile!(input, expected)
+    }
+
+    #[test]
+    fn convert_example() {
+        let input = "λx.λy.(λu.λv.u x) y";
+        let expected = def(def((def(def((2, 4))), 1)));
+        assert_compile!(input, expected)
+    }
+
+    #[test]
+    fn convert_example2() {
+        let input = "λy.λx.(λu.λv.u x) y";
+        let expected = def(def((def(def((2, 3))), 2)));
+        assert_compile!(input, expected)
+    }
+
+    #[test]
+    fn convert_example3() {
+        let input = "λw.(λx.λy.λz.x y z) w";
+        let expected = def((def(def(def(((3, 2), 1)))), 1));
+        assert_compile!(input, expected)
+    }
+
+    #[test]
+    fn convert_fail_unbound_trivial() {
         assert_invalid!("x")
     }
 
     #[test]
-    fn test_convert_fail_unbound() {
+    fn convert_fail_unbound() {
         assert_invalid!("λa.λb.a c")
     }
 
     #[test]
-    fn test_convert_fail_previously_bound() {
+    fn convert_fail_previously_bound() {
         assert_invalid!("(λx.x) x")
+    }
+
+    #[test]
+    fn convert_ok_unbound_trivial() {
+        let mut ctx = Context::from(["a"]);
+        assert_compile_with_context!("a", idx(1), ctx);
+    }
+
+    #[test]
+    fn convert_ok_unbound_in_context() {
+        let mut ctx = Context::from(["b"]);
+        assert_compile_with_context!("λa.b", def(2), ctx);
+    }
+
+    #[test]
+    fn convert_ok_unbound_multi() {
+        let mut ctx = Context::from(["d", "a", "b"]);
+        assert_compile_with_context!("λc.d", def(4), ctx);
+    }
+
+    #[test]
+    fn convert_ok_unbound_andbound() {
+        let mut ctx = Context::from(["a"]);
+        let expected = call(1, def(def(1)));
+        assert_compile_with_context!("a λb.λa.a", expected, ctx);
     }
 }

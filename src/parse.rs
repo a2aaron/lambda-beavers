@@ -241,7 +241,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tokenize_simple_lambda() {
+    fn tokenize_simple_lambda() {
         let input = "λx.x";
         let tokens = tokenize(input);
         let expected = vec![
@@ -254,7 +254,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tokenize_application() {
+    fn tokenize_application() {
         let input = "(λx.x y)";
         let tokens = tokenize(input);
         let expected = vec![
@@ -270,7 +270,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tokenize_nested_lambda() {
+    fn tokenize_nested_lambda() {
         let input = "λx.λy.(x y)";
         let tokens = tokenize(input);
         let expected = vec![
@@ -289,7 +289,7 @@ mod tests {
     }
 
     #[test]
-    fn test_tokenize_with_spaces() {
+    fn tokenize_with_spaces() {
         let input = " ( λ x . x y ) ";
         let tokens = tokenize(input);
         let expected = vec![
@@ -305,102 +305,102 @@ mod tests {
     }
 
     #[test]
-    fn test_parse_simple_literal() {
+    fn parse_simple_literal() {
         let input = "x";
         let expected = lit("x");
         assert_parse!(input, expected);
     }
 
     #[test]
-    fn test_parse_simple_lambda() {
+    fn parse_simple_lambda() {
         let input = "λx.x";
         let expected = def("x", "x");
         assert_parse!(input, expected);
     }
 
     #[test]
-    fn test_parse_simple_call() {
+    fn parse_simple_call() {
         let input = "(x y)";
         let expected = ("x", "y");
         assert_parse!(input, expected);
     }
 
     #[test]
-    fn test_parse_multiletter_literal() {
+    fn parse_multiletter_literal() {
         let input = "(λfoo.bar baz)";
         let expected = def("foo", ("bar", "baz"));
         assert_parse!(input, expected);
     }
 
     #[test]
-    fn test_parse_nested_lambda() {
+    fn parse_nested_lambda() {
         let input = "λa.λb.λc.((a b) c)";
         let expected = def("a", def("b", def("c", (("a", "b"), "c"))));
         assert_parse!(input, expected);
     }
 
     #[test]
-    fn test_parse_drop_outer_parens1() {
+    fn parse_drop_outer_parens1() {
         assert_parse!("a", lit("a"));
     }
 
     #[test]
-    fn test_parse_drop_outer_parens2() {
+    fn parse_drop_outer_parens2() {
         assert_parse!("a b", ("a", "b"));
     }
 
     #[test]
-    fn test_parse_drop_outer_parens3() {
+    fn parse_drop_outer_parens3() {
         assert_parse!("λa.a", def("a", "a"));
     }
 
     #[test]
-    fn test_parse_left_associative() {
+    fn parse_left_associative() {
         assert_parse!("a b c", (("a", "b"), "c"));
     }
 
     #[test]
-    fn test_parse_lambda_greedy_extend() {
+    fn parse_lambda_greedy_extend() {
         assert_parse!("λx.M N", def("x", ("M", "N")));
     }
 
     #[test]
-    fn test_parse_invalid_empty() {
+    fn parse_invalid_empty() {
         assert_invalid!("");
     }
 
     #[test]
-    fn test_parse_invalid_lambda_missing_body() {
+    fn parse_invalid_lambda_missing_body() {
         assert_invalid!("λa.λb.λc.");
     }
 
     #[test]
-    fn test_parse_invalid_lambda_missing_dot() {
+    fn parse_invalid_lambda_missing_dot() {
         assert_invalid!("λ a b");
     }
 
     #[test]
-    fn test_parse_valid_leftovers() {
+    fn parse_valid_leftovers() {
         assert_parse!("λa.b leftover", def("a", ("b", "leftover")));
     }
 
     #[test]
-    fn test_parse_invalid_dot() {
+    fn parse_invalid_dot() {
         assert_invalid!(". λa.b");
     }
 
     #[test]
-    fn test_parse_invalid_paren() {
+    fn parse_invalid_paren() {
         assert_invalid!(") λa.b");
     }
 
     #[test]
-    fn test_parse_mismatched_paren() {
+    fn parse_mismatched_paren() {
         assert_invalid!("(λa.b");
     }
 
     #[test]
-    fn test_parse_invalid_lambda_argument() {
+    fn parse_invalid_lambda_argument() {
         assert_invalid!("λ(a b).c");
     }
 }
