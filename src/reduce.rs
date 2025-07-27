@@ -124,29 +124,29 @@ pub fn beta_reduce(abs: &Debruijn, arg: &Debruijn) -> Debruijn {
 }
 
 fn substitute(term: &Debruijn, term2: &Debruijn) -> Debruijn {
-    _substitute(&term, 1, &term2)
-}
-
-fn _substitute(term: &Debruijn, index: usize, term2: &Debruijn) -> Debruijn {
-    match term {
-        Debruijn::Index(term_index) => {
-            if *term_index == index {
-                term2.clone()
-            } else {
-                Debruijn::Index(*term_index)
+    fn _substitute(term: &Debruijn, index: usize, term2: &Debruijn) -> Debruijn {
+        match term {
+            Debruijn::Index(term_index) => {
+                if *term_index == index {
+                    term2.clone()
+                } else {
+                    Debruijn::Index(*term_index)
+                }
+            }
+            Debruijn::Application(func, arg) => {
+                let call_func = _substitute(func, index, term2);
+                let call_arg = _substitute(arg, index, term2);
+                Debruijn::Application(Box::new(call_func), Box::new(call_arg))
+            }
+            Debruijn::Abstraction(func_body) => {
+                let term2 = up_one(&term2);
+                let body = _substitute(func_body, index + 1, &term2);
+                Debruijn::Abstraction(Box::new(body))
             }
         }
-        Debruijn::Application(func, arg) => {
-            let call_func = _substitute(func, index, term2);
-            let call_arg = _substitute(arg, index, term2);
-            Debruijn::Application(Box::new(call_func), Box::new(call_arg))
-        }
-        Debruijn::Abstraction(func_body) => {
-            let term2 = up_one(&term2);
-            let body = _substitute(func_body, index + 1, &term2);
-            Debruijn::Abstraction(Box::new(body))
-        }
     }
+
+    _substitute(&term, 1, &term2)
 }
 
 // ↑ n = n         if n < cutoff
@@ -196,7 +196,7 @@ mod tests {
 
     use crate::{
         debruijn::{self, def, Context, Debruijn},
-        reduce::{_substitute, beta_reduce, shift_cutoff},
+        reduce::{beta_reduce, shift_cutoff, substitute},
         term::Term,
     };
 
@@ -221,7 +221,7 @@ mod tests {
         let term2: Debruijn = 1.into(); // x
 
         // Make the substitution "x = x" into the term "x"
-        let actual = _substitute(&term, 1, &term2);
+        let actual = substitute(&term, &term2);
         // Just "x"
         let expected: Debruijn = 1.into();
         assert_eq!(actual, expected);
@@ -282,7 +282,7 @@ mod tests {
         let term2: Debruijn = 1.into(); // x
 
         // Make the substitution "x = x" into the term "λx.x"
-        let actual = _substitute(&term, 1, &term2);
+        let actual = substitute(&term, &term2);
         // Result should be λx.x, because the inner x is shadowed
         let expected: Debruijn = def(1).into();
         assert_eq!(actual, expected);
