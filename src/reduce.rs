@@ -1,4 +1,4 @@
-use crate::debruijn::Debruijn;
+use crate::debruijn::{call, def, idx, Debruijn};
 
 // see https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture15.pdf
 // and also https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture13.pdf
@@ -112,11 +112,21 @@ use crate::debruijn::Debruijn;
 ///
 /// Hence, the final rule for beta reduction will look like:
 /// (λ t1) t2 = down_one(t1 {up_one(t) / 1})
-pub fn beta_reduce(abs: &Debruijn, arg: &Debruijn) -> Debruijn {
-    let body = match abs {
-        Debruijn::Abstraction(body) => body.clone(),
+pub fn beta_reduce(term: &Debruijn) -> Debruijn {
+    match term {
+        Debruijn::Application { func, arg } => _beta_reduce(func, arg),
+        _ => panic!("Expected an application"),
+    }
+}
+
+pub fn _beta_reduce(func: &Debruijn, arg: &Debruijn) -> Debruijn {
+    match func {
+        Debruijn::Abstraction { body } => __beta_reduce(&body, arg),
         _ => panic!("Expected an abstraction"),
-    };
+    }
+}
+
+pub fn __beta_reduce(body: &Debruijn, arg: &Debruijn) -> Debruijn {
     let term = up_one(&arg);
     let subsituted = substitute(&body, &term);
     let unshift = down_one(&subsituted);
@@ -130,18 +140,18 @@ fn substitute(term: &Debruijn, term2: &Debruijn) -> Debruijn {
                 if *term_index == index {
                     term2.clone()
                 } else {
-                    Debruijn::Index(*term_index)
+                    idx(*term_index)
                 }
             }
-            Debruijn::Application(func, arg) => {
+            Debruijn::Application { func, arg } => {
                 let call_func = _substitute(func, index, term2);
                 let call_arg = _substitute(arg, index, term2);
-                Debruijn::Application(Box::new(call_func), Box::new(call_arg))
+                call(call_func, call_arg)
             }
-            Debruijn::Abstraction(func_body) => {
+            Debruijn::Abstraction { body } => {
                 let term2 = up_one(&term2);
-                let body = _substitute(func_body, index + 1, &term2);
-                Debruijn::Abstraction(Box::new(body))
+                let body = _substitute(body, index + 1, &term2);
+                def(body)
             }
         }
     }
@@ -173,20 +183,20 @@ fn shift_cutoff(term: &Debruijn, up_by: isize, cutoff: usize) -> Debruijn {
                 // Recall that an index starts at 1, so if cutoff is set to 1, then this branch
                 // will always be taken.
                 let index = term_index.checked_add_signed(up_by).unwrap();
-                Debruijn::Index(index)
+                idx(index)
             }
         }
-        Debruijn::Application(func, arg) => {
+        Debruijn::Application { func, arg } => {
             let call_func = shift_cutoff(func, up_by, cutoff);
             let call_arg = shift_cutoff(arg, up_by, cutoff);
-            Debruijn::Application(Box::new(call_func), Box::new(call_arg))
+            call(call_func, call_arg)
         }
-        Debruijn::Abstraction(func_body) => {
+        Debruijn::Abstraction { body } => {
             // We add one to the cutoff here because we don't want to modify bound variables
             // For example, if we're at the outer-most lambda, then any Index(1)s in the lambda body
             // are referring to that lambda's bound variable and we don't modify it.
-            let body = shift_cutoff(func_body, up_by, cutoff + 1);
-            Debruijn::Abstraction(Box::new(body))
+            let body = shift_cutoff(body, up_by, cutoff + 1);
+            def(body)
         }
     }
 }
@@ -195,12 +205,16 @@ fn shift_cutoff(term: &Debruijn, up_by: isize, cutoff: usize) -> Debruijn {
 mod tests {
 
     use crate::{
-        debruijn::{self, def, Context, Debruijn},
-        reduce::{beta_reduce, shift_cutoff, substitute},
+        debruijn::{self, call, def, Context, Debruijn},
+        reduce::{_beta_reduce, beta_reduce, shift_cutoff, substitute},
         term::Term,
     };
 
-    fn compile(input: &str, mut context: Context) -> Debruijn {
+    fn compile(input: &str) -> Debruijn {
+        _compile(input, Context::default())
+    }
+
+    fn _compile(input: &str, mut context: Context) -> Debruijn {
         let term: Term = input.parse().unwrap();
         let term = debruijn::compile(term, &mut context).unwrap();
         term
@@ -234,16 +248,16 @@ mod tests {
         let mut context = Context::default();
         context.push_literal("w");
 
-        let func_body = compile("λx.λy.λz. x y z", context.clone());
+        let func_body = _compile("λx.λy.λz. x y z", context.clone());
         assert_eq!(func_body, def(def(def(((3, 2), 1)))));
 
-        let term: Debruijn = compile("w", context.clone());
+        let term: Debruijn = _compile("w", context.clone());
         assert_eq!(term, 1.into());
 
         // beta reduce the term "(λx.λy.λz x y z) w"
-        let actual = beta_reduce(&func_body, &term);
+        let actual = _beta_reduce(&func_body, &term);
         // Result should be λw.λx.λy.λz. w y z
-        let expected: Debruijn = compile("λy.λz. w y z", context);
+        let expected: Debruijn = _compile("λy.λz. w y z", context);
         assert_eq!(expected, def(def(((3, 2), 1))));
         println!("{}", actual);
         println!("{}", expected);
@@ -257,17 +271,17 @@ mod tests {
         let mut context = Context::default();
         context.push_literal("y");
         context.push_literal("x");
-        let term = compile("λu.λv.u x", context.clone());
+        let term = _compile("λu.λv.u x", context.clone());
         assert_eq!(term, def(def((2, 3)))); // λu.λv.u x = λ λ 2 3
 
-        let term2 = compile("y", context.clone());
+        let term2 = _compile("y", context.clone());
         assert_eq!(term2, 2.into()); // y = 2
 
         // beta reduec the term "λx.(λu.λv.u x) y"
-        let actual = beta_reduce(&term, &term2);
+        let actual = _beta_reduce(&term, &term2);
 
         // Result should be λv.y x (full context is λy.λx.(λv.y x))
-        let expected = compile("λv.y x", context.clone());
+        let expected = _compile("λv.y x", context.clone());
 
         println!("{} {}", term, term2);
         println!("{}", actual);
@@ -285,6 +299,26 @@ mod tests {
         let actual = substitute(&term, &term2);
         // Result should be λx.x, because the inner x is shadowed
         let expected: Debruijn = def(1).into();
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn beta_reduce_and_false() {
+        let term = compile("(λp.λq.p q p) (λx.λy.y)");
+        assert_eq!(term, call(def(def(((2, 1), 2))), def(def(1))));
+        let actual = beta_reduce(&term);
+        let expected = compile("λq.(λy. λx. x) q (λy. λx. x)");
+        assert_eq!(expected, def(((def(def(1)), 1), def(def(1)))));
+        assert_eq!(actual, expected);
+    }
+
+    #[test]
+    fn beta_reduce_and_false_2() {
+        let ctx = Context::from(["q"]);
+        let term = _compile("(λy. λx. x) q", ctx);
+        assert_eq!(term, call(def(def(1)), 1));
+        let actual = beta_reduce(&term);
+        let expected = compile("λx. x");
         assert_eq!(actual, expected);
     }
 }

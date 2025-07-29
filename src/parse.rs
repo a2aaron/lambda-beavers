@@ -164,13 +164,6 @@ pub fn parse_program(tokens: &[Token]) -> Result<Term, ParseError> {
         return Err(ParseError::Empty);
     }
 
-    // Strip off first and last tokens if they are both parens
-    let tokens = if tokens[0] == Token::LeftParen && tokens[tokens.len() - 1] == Token::RightParen {
-        &tokens[1..tokens.len() - 1]
-    } else {
-        tokens
-    };
-
     let mut tokens = TokenStream::new(tokens);
     let term = parse_term_up_to_paren(&mut tokens)?;
     Ok(term)
@@ -220,7 +213,7 @@ fn parse_term_up_to_paren(tokens: &mut TokenStream) -> Result<Term, ParseError> 
 
 #[cfg(test)]
 mod tests {
-    use crate::term::{def, lit};
+    use crate::term::{call, def, lit};
 
     use super::*;
     macro_rules! assert_parse {
@@ -402,5 +395,26 @@ mod tests {
     #[test]
     fn parse_invalid_lambda_argument() {
         assert_invalid!("λ(a b).c");
+    }
+
+    #[test]
+    fn parse_and_false() {
+        assert_parse!(
+            "(λp.λq.p q p) (λx.λy.y)",
+            call(
+                def("p", def("q", (("p", "q"), "p"))),
+                def("x", def("y", "y"))
+            )
+        );
+    }
+
+    #[test]
+    fn parse_and() {
+        assert_parse!("λp.λq.p q p", def("p", def("q", (("p", "q"), "p"))));
+    }
+
+    #[test]
+    fn parse_false() {
+        assert_parse!("λx.λy.y", def("x", def("y", "y")));
     }
 }

@@ -16,16 +16,21 @@ use std::fmt;
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Debruijn {
     Index(usize),
-    Application(Box<Debruijn>, Box<Debruijn>),
-    Abstraction(Box<Debruijn>),
+    Application {
+        func: Box<Debruijn>,
+        arg: Box<Debruijn>,
+    },
+    Abstraction {
+        body: Box<Debruijn>,
+    },
 }
 
 impl fmt::Display for Debruijn {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Debruijn::Index(i) => write!(f, "{}", i),
-            Debruijn::Abstraction(body) => write!(f, "λ {}", body),
-            Debruijn::Application(lhs, rhs) => write!(f, "({} {})", lhs, rhs),
+            Debruijn::Abstraction { body } => write!(f, "λ [{}]", body),
+            Debruijn::Application { func, arg } => write!(f, "({} {})", func, arg),
         }
     }
 }
@@ -42,7 +47,10 @@ where
     B: Into<Debruijn>,
 {
     fn from((a, b): (A, B)) -> Self {
-        Debruijn::Application(Box::new(a.into()), Box::new(b.into()))
+        Debruijn::Application {
+            func: Box::new(a.into()),
+            arg: Box::new(b.into()),
+        }
     }
 }
 
@@ -60,19 +68,19 @@ impl TryFrom<Term> for Debruijn {
 pub fn compile(term: Term, ctx: &mut Context) -> Result<Debruijn, String> {
     let term = match term {
         Term::Literal(literal) => match ctx.get_index(literal.clone()) {
-            Some(index) => Debruijn::Index(index),
+            Some(index) => idx(index),
             None => return Err(format!("unbound variable {}", literal)),
         },
         Term::Abstraction(literal, term) => {
             ctx.push_literal(literal.clone());
             let term = compile(*term, ctx)?;
             ctx.pop_literal(literal);
-            Debruijn::Abstraction(Box::new(term))
+            def(term)
         }
         Term::Application(term1, term2) => {
             let term1 = compile(*term1, ctx)?;
             let term2 = compile(*term2, ctx)?;
-            Debruijn::Application(Box::new(term1), Box::new(term2))
+            call(term1, term2)
         }
     };
     Ok(term)
@@ -126,12 +134,17 @@ pub fn idx(a: usize) -> Debruijn {
 
 #[allow(dead_code)]
 pub fn def(b: impl Into<Debruijn>) -> Debruijn {
-    Debruijn::Abstraction(Box::new(b.into()))
+    Debruijn::Abstraction {
+        body: Box::new(b.into()),
+    }
 }
 
 #[allow(dead_code)]
 pub fn call(a: impl Into<Debruijn>, b: impl Into<Debruijn>) -> Debruijn {
-    Debruijn::Application(Box::new(a.into()), Box::new(b.into()))
+    Debruijn::Application {
+        func: Box::new(a.into()),
+        arg: Box::new(b.into()),
+    }
 }
 
 #[cfg(test)]
