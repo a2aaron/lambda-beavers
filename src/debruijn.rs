@@ -29,7 +29,7 @@ impl fmt::Display for Debruijn {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Debruijn::Index(i) => write!(f, "{}", i),
-            Debruijn::Abstraction { body } => write!(f, "λ [{}]", body),
+            Debruijn::Abstraction { body } => write!(f, "[λ {}]", body),
             Debruijn::Application { func, arg } => write!(f, "({} {})", func, arg),
         }
     }

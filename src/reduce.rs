@@ -321,4 +321,18 @@ mod tests {
         let expected = compile("λx. x");
         assert_eq!(actual, expected);
     }
+
+    #[test]
+    fn beta_reduce_succ() {
+        let succ = compile("λn.λf.λx.f (n f x)");
+        assert_eq!(succ, def(def(def((2, ((3, 2), 1))))));
+        let zero = compile("λf.λx.x");
+        assert_eq!(zero, def(def(1)));
+
+        let expected = compile("λf.λx.f ((λg.λy.y) f x)");
+        assert_eq!(expected, def(def((2, (((def(def(1)), 2), 1))))));
+
+        let actual = _beta_reduce(&succ, &zero);
+        assert_eq!(expected, actual)
+    }
 }
