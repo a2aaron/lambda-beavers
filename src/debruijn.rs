@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::{collections::HashMap, fmt::Binary};
 
 use crate::term::{Literal, Term};
 use std::fmt;
@@ -23,6 +23,16 @@ pub enum Debruijn {
     Abstraction {
         body: Box<Debruijn>,
     },
+}
+
+impl Binary for Debruijn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Debruijn::Index(index) => write!(f, "{}0", "1".repeat(*index)),
+            Debruijn::Application { func, arg } => write!(f, "01{:b}{:b}", **func, **arg),
+            Debruijn::Abstraction { body } => write!(f, "00{:b}", **body),
+        }
+    }
 }
 
 impl fmt::Display for Debruijn {
@@ -266,5 +276,14 @@ mod test {
         let mut ctx = Context::from(["a"]);
         let expected = call(1, def(def(1)));
         assert_compile_with_context!("a λb.λa.a", expected, ctx);
+    }
+
+    #[test]
+    fn print_binary() {
+        let term = def(def(def(((1, 3), 2))));
+        assert_compile!("λx.λy.λz.z x y", term);
+
+        let binary = format!("{:b}", term);
+        assert_eq!("0000000101101110110", binary);
     }
 }
