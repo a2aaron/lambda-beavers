@@ -227,6 +227,6 @@ fn get_reductions(term: &Debruijn) -> Vec<Debruijn> {
 
 pub fn print_nodes(graph: &ReductionGraph) {
     for (i, node) in graph.nodes.iter().enumerate() {
-        println!("{}. {}", i, node);
+        println!("{}. {:b}", i, node);
     }
 }

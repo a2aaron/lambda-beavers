@@ -3,6 +3,7 @@
 mod debruijn;
 mod graph;
 mod parse;
+mod parse_debruijn;
 mod reduce;
 mod term;
 
