@@ -1,7 +1,7 @@
-use std::{collections::HashMap, fmt::Binary, str::FromStr};
+use std::{collections::HashMap, error::Error, fmt::Binary, str::FromStr};
 
 use crate::{
-    parse_debruijn,
+    parse_debruijn, parse_term,
     term::{Literal, Term},
 };
 use std::fmt;
@@ -67,12 +67,31 @@ where
     }
 }
 
+impl From<&str> for Debruijn {
+    fn from(s: &str) -> Self {
+        Debruijn::from_str(s).unwrap()
+    }
+}
+
+impl From<String> for Debruijn {
+    fn from(s: String) -> Self {
+        Debruijn::from_str(&s).unwrap()
+    }
+}
+
 impl FromStr for Debruijn {
-    type Err = parse_debruijn::ParseError;
+    type Err = Box<dyn Error>;
 
     fn from_str(term: &str) -> Result<Self, Self::Err> {
-        let tokens = parse_debruijn::tokenize(term)?;
-        parse_debruijn::parse_program(&tokens)
+        match parse_debruijn::tokenize(term) {
+            Ok(debruijn_tokens) => Ok(parse_debruijn::parse_program(&debruijn_tokens)?),
+            Err(_) => {
+                let classic_tokenized = parse_term::tokenize(term);
+                let classic_parsed = parse_term::parse_program(&classic_tokenized)?;
+                let debruijn = Debruijn::try_from(classic_parsed)?;
+                Ok(debruijn)
+            }
+        }
     }
 }
 
@@ -172,7 +191,7 @@ pub fn call(a: impl Into<Debruijn>, b: impl Into<Debruijn>) -> Debruijn {
 #[cfg(test)]
 mod test {
     use crate::{
-        debruijn::{call, def, idx, Context, Debruijn},
+        debruijn::{Context, Debruijn, call, def, idx},
         term::Term,
     };
 

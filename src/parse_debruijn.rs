@@ -1,4 +1,4 @@
-use std::{fmt::Display, num::ParseIntError};
+use std::{error::Error, fmt::Display, num::ParseIntError};
 
 use crate::debruijn::{self, Debruijn};
 
@@ -55,14 +55,6 @@ pub fn tokenize(term: &str) -> Result<Vec<Token>, ParseError> {
     Ok(tokens)
 }
 
-pub fn pretty(tokens: &[Token]) -> String {
-    tokens
-        .iter()
-        .map(|token| format!("{}", token))
-        .intersperse(" ".to_string())
-        .collect()
-}
-
 pub struct TokenStream<'a> {
     pub tokens: &'a [Token],
     pub index: usize,
@@ -109,29 +101,17 @@ pub enum ParseError {
 }
 
 impl ParseError {
-    pub fn expected_index(actual: Option<Token>) -> ParseError {
+    fn expected_index(actual: Option<Token>) -> ParseError {
         ParseError::UnexpectedToken {
             expected: vec![Token::Index(0)],
             actual,
         }
     }
 
-    pub fn expected_token(expected: Token, actual: Option<Token>) -> ParseError {
+    fn expected_token(expected: Token, actual: Option<Token>) -> ParseError {
         ParseError::UnexpectedToken {
             expected: vec![expected],
             actual,
-        }
-    }
-
-    pub fn expected_tokens(actual: Token) -> ParseError {
-        ParseError::UnexpectedToken {
-            expected: vec![
-                Token::Lambda,
-                Token::LeftParen,
-                Token::RightParen,
-                Token::Index(0),
-            ],
-            actual: Some(actual),
         }
     }
 }
@@ -141,6 +121,8 @@ impl From<ParseIntError> for ParseError {
         ParseError::ParseIntError(value)
     }
 }
+
+impl Error for ParseError {}
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

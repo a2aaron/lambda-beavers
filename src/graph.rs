@@ -58,27 +58,6 @@ impl ReductionGraph {
     pub fn any_reducible(&self) -> bool {
         !self.unreduced_nodes.is_empty()
     }
-
-    fn contains_node(&self, node: &Debruijn) -> bool {
-        self.nodes.contains(node)
-    }
-
-    fn contains_edge(&self, a: &Debruijn, b: &Debruijn) -> bool {
-        if let Some(a) = self.get_index(a)
-            && let Some(b) = self.get_index(b)
-        {
-            self.edges.contains(&(a, b))
-        } else {
-            false
-        }
-    }
-
-    fn get_index(&self, node: &Debruijn) -> Option<NodeIndex> {
-        self.nodes
-            .iter()
-            .position(|the_node| the_node == node)
-            .map(NodeIndex)
-    }
 }
 
 #[cfg(test)]
@@ -89,6 +68,29 @@ mod test {
         debruijn::Debruijn,
         graph::{NodeIndex, ReductionGraph},
     };
+
+    impl ReductionGraph {
+        fn contains_node(&self, node: &Debruijn) -> bool {
+            self.nodes.contains(node)
+        }
+
+        fn contains_edge(&self, a: &Debruijn, b: &Debruijn) -> bool {
+            if let Some(a) = self.get_index(a)
+                && let Some(b) = self.get_index(b)
+            {
+                self.edges.contains(&(a, b))
+            } else {
+                false
+            }
+        }
+
+        fn get_index(&self, node: &Debruijn) -> Option<NodeIndex> {
+            self.nodes
+                .iter()
+                .position(|the_node| the_node == node)
+                .map(NodeIndex)
+        }
+    }
 
     #[test]
     fn graph_and_true_false() {
@@ -111,7 +113,6 @@ mod test {
         ];
 
         let nodes = nodes.map(|node| Debruijn::from_str(node).unwrap());
-        let node_indicies = nodes.clone().map(|term| graph.add_node(term));
 
         let edges = [
             (0, 1),

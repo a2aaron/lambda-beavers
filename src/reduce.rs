@@ -1,7 +1,7 @@
 use std::fmt::Display;
 
 use crate::{
-    debruijn::{call, def, idx, Debruijn},
+    debruijn::{Debruijn, call, def, idx},
     replace,
 };
 
@@ -237,12 +237,9 @@ fn shift_cutoff(term: &Debruijn, up_by: isize, cutoff: usize) -> Debruijn {
 
 #[cfg(test)]
 mod tests {
-
-    use std::str::FromStr;
-
     use crate::{
-        debruijn::{self, call, def, Context, Debruijn},
-        reduce::{_beta_reduce, beta_reduce, get_reductions, shift_cutoff, substitute},
+        debruijn::{self, Context, Debruijn, call, def},
+        reduce::{_beta_reduce, beta_reduce, shift_cutoff, substitute},
         term::Term,
     };
 

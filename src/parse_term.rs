@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{error::Error, fmt::Display};
 
 use crate::term::{self, Term};
 
@@ -101,21 +101,21 @@ pub enum ParseError {
 }
 
 impl ParseError {
-    pub fn expected_literal(actual: Option<Token>) -> ParseError {
+    fn expected_literal(actual: Option<Token>) -> ParseError {
         ParseError::UnexpectedToken {
             expected: vec![Token::Literal("expected a literal".to_string())],
             actual,
         }
     }
 
-    pub fn expected_token(expected: Token, actual: Option<Token>) -> ParseError {
+    fn expected_token(expected: Token, actual: Option<Token>) -> ParseError {
         ParseError::UnexpectedToken {
             expected: vec![expected],
             actual,
         }
     }
 
-    pub fn expected_tokens(actual: Token) -> ParseError {
+    fn expected_tokens(actual: Token) -> ParseError {
         ParseError::UnexpectedToken {
             expected: vec![
                 Token::Lambda,
@@ -127,6 +127,8 @@ impl ParseError {
         }
     }
 }
+
+impl Error for ParseError {}
 
 impl std::fmt::Display for ParseError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
