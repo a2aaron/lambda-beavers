@@ -11,7 +11,11 @@ pub struct ReductionGraph {
 }
 
 impl ReductionGraph {
-    pub fn new(root: Debruijn) -> ReductionGraph {
+    pub fn new() -> ReductionGraph {
+        ReductionGraph::default()
+    }
+
+    pub fn with_root(root: Debruijn) -> ReductionGraph {
         let mut graph = ReductionGraph::default();
         graph.add_node(root);
         graph
@@ -53,5 +57,81 @@ impl ReductionGraph {
 
     pub fn any_reducible(&self) -> bool {
         !self.unreduced_nodes.is_empty()
+    }
+
+    fn contains_node(&self, node: &Debruijn) -> bool {
+        self.nodes.contains(node)
+    }
+
+    fn contains_edge(&self, a: &Debruijn, b: &Debruijn) -> bool {
+        if let Some(a) = self.get_index(a)
+            && let Some(b) = self.get_index(b)
+        {
+            self.edges.contains(&(a, b))
+        } else {
+            false
+        }
+    }
+
+    fn get_index(&self, node: &Debruijn) -> Option<NodeIndex> {
+        self.nodes
+            .iter()
+            .position(|the_node| the_node == node)
+            .map(NodeIndex)
+    }
+}
+
+#[cfg(test)]
+mod test {
+    use std::str::FromStr;
+
+    use crate::{
+        debruijn::Debruijn,
+        graph::{NodeIndex, ReductionGraph},
+    };
+
+    #[test]
+    fn graph_and_true_false() {
+        let root = "(((λ (λ ((2 1) 2))) (λ (λ 2))) (λ (λ 1)))";
+        let root = Debruijn::from_str(root).unwrap();
+        let mut graph = ReductionGraph::with_root(root);
+
+        while graph.any_reducible() {
+            graph.reduce_node(graph.unreduced_nodes[0]);
+        }
+
+        let nodes = [
+            "(((λ (λ ((2 1) 2))) (λ (λ 2))) (λ (λ 1)))", // 0
+            "((λ (((λ (λ 2)) 1) (λ (λ 2)))) (λ (λ 1)))", // 1
+            "(((λ (λ 2)) (λ (λ 1))) (λ (λ 2)))",         // 2
+            "((λ ((λ 2) (λ (λ 2)))) (λ (λ 1)))",         // 3
+            "((λ (λ (λ 1))) (λ (λ 2)))",                 // 4
+            "((λ 1) (λ (λ 1)))",                         // 5
+            "(λ (λ 1))",                                 // 6
+        ];
+
+        let nodes = nodes.map(|node| Debruijn::from_str(node).unwrap());
+        let node_indicies = nodes.clone().map(|term| graph.add_node(term));
+
+        let edges = [
+            (0, 1),
+            (1, 2),
+            (1, 3),
+            (2, 4),
+            (3, 4),
+            (3, 5),
+            (4, 6),
+            (5, 6),
+        ];
+
+        for node in &nodes {
+            assert!(graph.contains_node(node))
+        }
+
+        for (a, b) in edges {
+            let a = &nodes[a];
+            let b = &nodes[b];
+            assert!(graph.contains_edge(&a, &&b));
+        }
     }
 }

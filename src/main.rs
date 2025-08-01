@@ -62,17 +62,17 @@ fn main() {
     // println!("THREE = {}", three_term);
     // println!("FOUR = {}", four_term);
     // println!("FIVE = {}", five_term);
-    let combined = call(call(and_term, true_term), false_term);
+    // let combined = call(call(and_term, true_term), false_term);
     // println!("AND TRUE FALSE = {}", combined);
-    let combined = call(succ_term, zero_term);
+    // let combined = call(succ_term, zero_term);
     // println!("SUCC ZERO = {}", combined);
-    let combined = call(call(plus_term, three_term.clone()), five_term.clone());
+    // let combined = call(call(plus_term, three_term.clone()), five_term.clone());
     // println!("PLUS THREE FIVE = {}", combined);
     // println!("---");
     // let mult_term = compile("λm.λn.λf.m (n f)");
     let mult_term = compile("λn. λm. λf. λx. (λa. (λm. λn. λf. λx. m f (n f x)) n a f x) m f x");
-    let combined = call(call(mult_term, three_term), five_term);
-    let mut graph = ReductionGraph::new(combined);
+    let combined = call(call(and_term, true_term), false_term);
+    let mut graph = ReductionGraph::with_root(combined);
     reduce_full(&mut graph);
     print(&graph);
 }
