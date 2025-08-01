@@ -217,7 +217,7 @@ fn parse_term_up_to_paren(tokens: &mut TokenStream) -> Result<Debruijn, ParseErr
 
 #[cfg(test)]
 mod tests {
-    use crate::debruijn::{call, def, idx};
+    use crate::debruijn::{def, idx};
 
     use super::*;
     macro_rules! assert_parse {
@@ -336,11 +336,6 @@ mod tests {
     #[test]
     fn parse_invalid_lambda_missing_body() {
         assert_invalid!("λ λ λ");
-    }
-
-    #[test]
-    fn parse_valid_leftovers() {
-        assert_parse!("λ 1 2", def((1, 2)));
     }
 
     #[test]

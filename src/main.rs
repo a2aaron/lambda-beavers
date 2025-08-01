@@ -2,8 +2,8 @@
 #![feature(hash_set_entry)]
 mod debruijn;
 mod graph;
-mod parse;
 mod parse_debruijn;
+mod parse_term;
 mod reduce;
 mod term;
 

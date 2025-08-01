@@ -1,6 +1,6 @@
 use std::{fmt::Display, str::FromStr};
 
-use crate::parse;
+use crate::parse_term;
 
 /// A literal
 /// TODO: This should eventually become more sophisticated, possibly containing
@@ -35,11 +35,11 @@ pub enum Term {
 }
 
 impl FromStr for Term {
-    type Err = parse::ParseError;
+    type Err = parse_term::ParseError;
 
     fn from_str(term: &str) -> Result<Self, Self::Err> {
-        let tokens = parse::tokenize(term);
-        parse::parse_program(&tokens)
+        let tokens = parse_term::tokenize(term);
+        parse_term::parse_program(&tokens)
     }
 }
 
