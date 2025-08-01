@@ -1,7 +1,7 @@
 use crate::{debruijn::Debruijn, reduce};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NodeIndex(usize);
+pub struct NodeIndex(pub usize);
 
 #[derive(Default, Debug)]
 pub struct ReductionGraph {
@@ -53,11 +53,5 @@ impl ReductionGraph {
 
     pub fn any_reducible(&self) -> bool {
         !self.unreduced_nodes.is_empty()
-    }
-}
-
-pub fn print_nodes(graph: &ReductionGraph) {
-    for (i, node) in graph.nodes.iter().enumerate() {
-        println!("{}. {:b}", i, node);
     }
 }

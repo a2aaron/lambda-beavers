@@ -238,9 +238,11 @@ fn shift_cutoff(term: &Debruijn, up_by: isize, cutoff: usize) -> Debruijn {
 #[cfg(test)]
 mod tests {
 
+    use std::str::FromStr;
+
     use crate::{
         debruijn::{self, call, def, Context, Debruijn},
-        reduce::{_beta_reduce, beta_reduce, shift_cutoff, substitute},
+        reduce::{_beta_reduce, beta_reduce, get_reductions, shift_cutoff, substitute},
         term::Term,
     };
 
@@ -368,5 +370,35 @@ mod tests {
 
         let actual = _beta_reduce(&succ, &zero);
         assert_eq!(expected, actual)
+    }
+
+    #[test]
+    fn beta_reduce_plus_full() {
+        let reductions = [
+            "(((λ (λ (λ (λ ((4 2) ((3 2) 1)))))) (λ (λ (2 (2 (2 1)))))) (λ (λ (2 (2 (2 (2 (2 1))))))))",
+            "((λ (λ (λ (((λ (λ (2 (2 (2 1))))) 2) ((3 2) 1))))) (λ (λ (2 (2 (2 (2 (2 1))))))))",
+            "(λ (λ (((λ (λ (2 (2 (2 1))))) 2) (((λ (λ (2 (2 (2 (2 (2 1))))))) 2) 1))))",
+            "((λ (λ (λ ((λ (3 (3 (3 1)))) ((3 2) 1))))) (λ (λ (2 (2 (2 (2 (2 1))))))))",
+            "(λ (λ ((λ (3 (3 (3 1)))) (((λ (λ (2 (2 (2 (2 (2 1))))))) 2) 1))))",
+            "(λ (λ (((λ (λ (2 (2 (2 1))))) 2) ((λ (3 (3 (3 (3 (3 1)))))) 1))))",
+            "((λ (λ (λ (2 (2 (2 ((3 2) 1))))))) (λ (λ (2 (2 (2 (2 (2 1))))))))",
+            "(λ (λ (2 (2 (2 (((λ (λ (2 (2 (2 (2 (2 1))))))) 2) 1))))))",
+            "(λ (λ ((λ (3 (3 (3 1)))) ((λ (3 (3 (3 (3 (3 1)))))) 1))))",
+            "(λ (λ (((λ (λ (2 (2 (2 1))))) 2) (2 (2 (2 (2 (2 1))))))))",
+            "(λ (λ (2 (2 (2 ((λ (3 (3 (3 (3 (3 1)))))) 1))))))",
+            "(λ (λ ((λ (3 (3 (3 1)))) (2 (2 (2 (2 (2 1))))))))",
+            "(λ (λ (2 (2 (2 (2 (2 (2 (2 (2 1))))))))))",
+        ];
+        for i in 0..reductions.len() - 1 {
+            let term = Debruijn::from_str(reductions[i]).unwrap();
+            let expected = Debruijn::from_str(reductions[i + 1]).unwrap();
+
+            let reductions = get_reductions(&term);
+            assert_eq!(reductions.len(), 1);
+            let actual = reductions[0].clone();
+            println!("{}", actual);
+            println!("{}", expected);
+            assert_eq!(expected, actual);
+        }
     }
 }

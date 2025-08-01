@@ -1,6 +1,9 @@
-use std::{collections::HashMap, fmt::Binary};
+use std::{collections::HashMap, fmt::Binary, str::FromStr};
 
-use crate::term::{Literal, Term};
+use crate::{
+    parse_debruijn,
+    term::{Literal, Term},
+};
 use std::fmt;
 
 /// A Debruijn term.
@@ -39,7 +42,7 @@ impl fmt::Display for Debruijn {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Debruijn::Index(i) => write!(f, "{}", i),
-            Debruijn::Abstraction { body } => write!(f, "[λ {}]", body),
+            Debruijn::Abstraction { body } => write!(f, "(λ {})", body),
             Debruijn::Application { func, arg } => write!(f, "({} {})", func, arg),
         }
     }
@@ -61,6 +64,15 @@ where
             func: Box::new(a.into()),
             arg: Box::new(b.into()),
         }
+    }
+}
+
+impl FromStr for Debruijn {
+    type Err = parse_debruijn::ParseError;
+
+    fn from_str(term: &str) -> Result<Self, Self::Err> {
+        let tokens = parse_debruijn::tokenize(term)?;
+        parse_debruijn::parse_program(&tokens)
     }
 }
 

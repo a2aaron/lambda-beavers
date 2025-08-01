@@ -16,6 +16,18 @@ use crate::{
     term::Term,
 };
 
+pub fn print(graph: &ReductionGraph) {
+    println!("digraph G {{");
+
+    for (i, node) in graph.nodes.iter().enumerate() {
+        println!("{} [label = \"{}\"];", i, node);
+    }
+    for (a, b) in &graph.edges {
+        println!("{} -> {}", a.0, b.0);
+    }
+    println!("}}");
+}
+
 pub fn reduce_full(graph: &mut ReductionGraph) {
     loop {
         if graph.nodes.len() > 100 || !graph.any_reducible() {
@@ -31,6 +43,7 @@ fn main() {
     let and_term = compile("λp.λq.p q p");
     let succ_term = compile("λn.λf.λx.f (n f x)");
     let plus_term = compile("λm.λn.λf.λx.m f (n f x)");
+    let mult_term = compile("λm.λn.λf.λx.m m ");
     let zero_term = compile("λf.λx.x");
     let one_term = compile("λf.λx.f x");
     let two_term = compile("λf.λx.f (f x)");
@@ -38,28 +51,30 @@ fn main() {
     let four_term = compile("λf.λx.f (f (f (f x)))");
     let five_term = compile("λf.λx.f (f (f (f (f x))))");
 
-    println!("IDENT = {}", ident_term);
-    println!("TRUE = {}", true_term);
-    println!("FALSE = {}", false_term);
-    println!("AND = {}", and_term);
-    println!("PLUS = {}", plus_term);
-    println!("ZERO = {}", zero_term);
-    println!("ONE = {}", one_term);
-    println!("TWO = {}", two_term);
-    println!("THREE = {}", three_term);
-    println!("FOUR = {}", four_term);
-    println!("FIVE = {}", five_term);
+    // println!("IDENT = {}", ident_term);
+    // println!("TRUE = {}", true_term);
+    // println!("FALSE = {}", false_term);
+    // println!("AND = {}", and_term);
+    // println!("PLUS = {}", plus_term);
+    // println!("ZERO = {}", zero_term);
+    // println!("ONE = {}", one_term);
+    // println!("TWO = {}", two_term);
+    // println!("THREE = {}", three_term);
+    // println!("FOUR = {}", four_term);
+    // println!("FIVE = {}", five_term);
     let combined = call(call(and_term, true_term), false_term);
-    println!("AND TRUE FALSE = {}", combined);
+    // println!("AND TRUE FALSE = {}", combined);
     let combined = call(succ_term, zero_term);
-    println!("SUCC ZERO = {}", combined);
+    // println!("SUCC ZERO = {}", combined);
     let combined = call(call(plus_term, three_term.clone()), five_term.clone());
-    println!("PLUS THREE FIVE = {}", combined);
-    println!("---");
-
+    // println!("PLUS THREE FIVE = {}", combined);
+    // println!("---");
+    // let mult_term = compile("λm.λn.λf.m (n f)");
+    let mult_term = compile("λn. λm. λf. λx. (λa. (λm. λn. λf. λx. m f (n f x)) n a f x) m f x");
+    let combined = call(call(mult_term, three_term), five_term);
     let mut graph = ReductionGraph::new(combined);
     reduce_full(&mut graph);
-    graph::print_nodes(&graph);
+    print(&graph);
 }
 
 fn compile(arg: &str) -> Debruijn {
