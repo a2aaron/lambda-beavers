@@ -56,14 +56,6 @@ pub fn tokenize(term: &str) -> Vec<Token> {
     tokens
 }
 
-pub fn pretty(tokens: &[Token]) -> String {
-    tokens
-        .iter()
-        .map(|token| format!("{}", token))
-        .intersperse(" ".to_string())
-        .collect()
-}
-
 pub struct TokenStream<'a> {
     pub tokens: &'a [Token],
     pub index: usize,

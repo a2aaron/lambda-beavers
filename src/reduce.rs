@@ -1,4 +1,9 @@
-use crate::debruijn::{call, def, idx, Debruijn};
+use std::fmt::Display;
+
+use crate::{
+    debruijn::{call, def, idx, Debruijn},
+    replace,
+};
 
 // see https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture15.pdf
 // and also https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture13.pdf
@@ -112,21 +117,50 @@ use crate::debruijn::{call, def, idx, Debruijn};
 ///
 /// Hence, the final rule for beta reduction will look like:
 /// (λ t1) t2 = down_one(t1 {up_one(t) / 1})
-pub fn beta_reduce(term: &Debruijn) -> Debruijn {
+
+pub fn get_reductions(term: &Debruijn) -> Vec<Debruijn> {
+    replace::treepath_filter(term, beta_reduce_if_possible)
+        .into_iter()
+        .map(|(treepath, reduced_fragment)| {
+            replace::replace(term.clone(), reduced_fragment.clone(), &treepath)
+        })
+        .collect()
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fragment(pub Debruijn);
+
+impl Display for Fragment {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+fn beta_reduce_if_possible(term: &Debruijn) -> Option<Fragment> {
+    match term {
+        Debruijn::Application { func, arg } => match &**func {
+            Debruijn::Abstraction { body } => Some(Fragment(__beta_reduce(body, arg))),
+            _ => None,
+        },
+        _ => None,
+    }
+}
+
+fn beta_reduce(term: &Debruijn) -> Debruijn {
     match term {
         Debruijn::Application { func, arg } => _beta_reduce(func, arg),
         _ => panic!("Expected an application"),
     }
 }
 
-pub fn _beta_reduce(func: &Debruijn, arg: &Debruijn) -> Debruijn {
+fn _beta_reduce(func: &Debruijn, arg: &Debruijn) -> Debruijn {
     match func {
         Debruijn::Abstraction { body } => __beta_reduce(&body, arg),
         _ => panic!("Expected an abstraction"),
     }
 }
 
-pub fn __beta_reduce(body: &Debruijn, arg: &Debruijn) -> Debruijn {
+fn __beta_reduce(body: &Debruijn, arg: &Debruijn) -> Debruijn {
     let term = up_one(&arg);
     let subsituted = substitute(&body, &term);
     let unshift = down_one(&subsituted);

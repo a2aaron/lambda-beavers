@@ -5,6 +5,7 @@ mod graph;
 mod parse_debruijn;
 mod parse_term;
 mod reduce;
+mod replace;
 mod term;
 
 use std::str::FromStr;
@@ -14,6 +15,15 @@ use crate::{
     graph::ReductionGraph,
     term::Term,
 };
+
+pub fn reduce_full(graph: &mut ReductionGraph) {
+    loop {
+        if graph.nodes.len() > 100 || !graph.any_reducible() {
+            break;
+        }
+        graph.reduce_node(graph.unreduced_nodes[0]);
+    }
+}
 fn main() {
     let ident_term = compile("λx.x");
     let true_term = compile("λx.λy.x");
@@ -48,7 +58,7 @@ fn main() {
     println!("---");
 
     let mut graph = ReductionGraph::new(combined);
-    graph::reduce_full(&mut graph);
+    reduce_full(&mut graph);
     graph::print_nodes(&graph);
 }
 
