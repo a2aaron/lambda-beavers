@@ -1,6 +1,6 @@
 use std::{fmt::Display, str::FromStr};
 
-use crate::parse_term;
+use crate::{debruijn::Debruijn, parse_term};
 
 /// A literal
 /// TODO: This should eventually become more sophisticated, possibly containing
@@ -47,7 +47,7 @@ impl Display for Term {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Term::Literal(literal) => write!(f, "{}", literal.0),
-            Term::Abstraction(literal, term) => write!(f, "(λ {} . {})", literal, term),
+            Term::Abstraction(literal, term) => write!(f, "(λ{}.{})", literal, term),
             Term::Application(term1, term2) => write!(f, "({} {})", term1, term2),
         }
     }
@@ -72,6 +72,52 @@ where
 {
     fn from((a, b): (A, B)) -> Self {
         call(a, b)
+    }
+}
+
+struct Context {
+    variables: Vec<Literal>,
+}
+impl Context {
+    fn new() -> Context {
+        Context { variables: vec![] }
+    }
+
+    fn get(&self, index: usize) -> Literal {
+        self.variables[index - 1].clone()
+    }
+
+    fn push_variable(&mut self) -> Literal {
+        let alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+        let literal = alphabet.chars().nth(self.variables.len()).unwrap();
+        let literal = Literal(literal.to_string());
+        self.variables.push(literal.clone());
+        literal
+    }
+
+    fn pop_variable(&mut self) {
+        self.variables.pop();
+    }
+}
+
+impl From<&Debruijn> for Term {
+    fn from(debruijn: &Debruijn) -> Self {
+        from_debruijn(debruijn, &mut Context::new())
+    }
+}
+
+fn from_debruijn(debruijn: &Debruijn, ctx: &mut Context) -> Term {
+    match debruijn {
+        Debruijn::Index(index) => lit(ctx.get(*index)),
+        Debruijn::Application { func, arg } => {
+            call(from_debruijn(&func, ctx), from_debruijn(&arg, ctx))
+        }
+        Debruijn::Abstraction { body } => {
+            let literal = ctx.push_variable();
+            let term = def(literal, from_debruijn(&body, ctx));
+            ctx.pop_variable();
+            term
+        }
     }
 }
 
