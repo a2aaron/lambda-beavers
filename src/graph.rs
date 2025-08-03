@@ -8,6 +8,14 @@ pub struct ReductionGraph {
     pub nodes: Vec<Debruijn>,
     pub unreduced_nodes: Vec<NodeIndex>,
     pub edges: Vec<(NodeIndex, NodeIndex)>,
+    pub beta_reduced_normal_form: Option<NodeIndex>,
+    pub root: Option<NodeIndex>,
+}
+
+pub struct GraphUpdate {
+    pub new_nodes: Vec<NodeIndex>,
+    pub new_edges: Vec<(NodeIndex, NodeIndex)>,
+    pub is_brnf: bool,
 }
 
 impl ReductionGraph {
@@ -17,19 +25,20 @@ impl ReductionGraph {
 
     pub fn with_root(root: Debruijn) -> ReductionGraph {
         let mut graph = ReductionGraph::default();
-        graph.add_node(root);
+        let root = graph.add_node(root).0;
+        graph.root = Some(root);
         graph
     }
 
-    fn add_node(&mut self, node: Debruijn) -> NodeIndex {
+    fn add_node(&mut self, node: Debruijn) -> (NodeIndex, bool) {
         let index = self.nodes.iter().position(|n| *n == node);
         match index {
-            Some(index) => NodeIndex(index),
+            Some(index) => (NodeIndex(index), false),
             None => {
                 self.nodes.push(node);
                 let index = NodeIndex(self.nodes.len() - 1);
                 self.unreduced_nodes.push(index);
-                index
+                (index, true)
             }
         }
     }
@@ -38,7 +47,7 @@ impl ReductionGraph {
         self.edges.push((start, end));
     }
 
-    pub fn reduce_node(&mut self, node_index: NodeIndex) {
+    pub fn reduce_node(&mut self, node_index: NodeIndex) -> GraphUpdate {
         let index = self
             .unreduced_nodes
             .iter()
@@ -49,14 +58,55 @@ impl ReductionGraph {
         let node = &self.nodes[node_index.0];
         let reductions = reduce::get_reductions(&node);
 
-        for reduced_node in reductions {
-            let reduced_node_index = self.add_node(reduced_node);
-            self.add_edge(node_index, reduced_node_index);
+        let is_brnf = reductions.len() == 0;
+
+        if is_brnf {
+            assert!(
+                self.beta_reduced_normal_form.is_none()
+                    || self.beta_reduced_normal_form == Some(node_index)
+            );
+
+            self.beta_reduced_normal_form = Some(node_index);
         }
+
+        let reductions: Vec<(NodeIndex, bool)> = reductions
+            .into_iter()
+            .map(|node| self.add_node(node))
+            .collect();
+        let new_edges: Vec<(NodeIndex, NodeIndex)> = reductions
+            .iter()
+            .map(|(new_node, _already_added)| (node_index, *new_node))
+            .collect();
+
+        for (existing_node, new_node) in &new_edges {
+            self.add_edge(*existing_node, *new_node);
+        }
+
+        // nodes not already in the tree (note: this means new_edges may contain edges not in new_nodes due to
+        // the end node being in the tree already)
+        let new_nodes: Vec<NodeIndex> = reductions
+            .iter()
+            .filter_map(|(node_index, already_added)| {
+                if *already_added {
+                    None
+                } else {
+                    Some(*node_index)
+                }
+            })
+            .collect();
+        return GraphUpdate {
+            new_nodes,
+            new_edges,
+            is_brnf,
+        };
     }
 
     pub fn any_reducible(&self) -> bool {
         !self.unreduced_nodes.is_empty()
+    }
+
+    pub fn get(&self, node: NodeIndex) -> Option<Debruijn> {
+        self.nodes.get(node.0).cloned()
     }
 }
 
