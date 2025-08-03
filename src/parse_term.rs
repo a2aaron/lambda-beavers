@@ -32,7 +32,7 @@ pub fn tokenize(term: &str) -> Vec<Token> {
             '.' => (true, Some(Token::Dot)),
             '(' => (true, Some(Token::LeftParen)),
             ')' => (true, Some(Token::RightParen)),
-            ' ' => (true, None),
+            c if c.is_whitespace() => (true, None),
             _ => (false, None),
         };
 

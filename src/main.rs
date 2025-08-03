@@ -2,10 +2,12 @@
 #![feature(hash_set_entry)]
 #![feature(macro_metavar_expr_concat)]
 #![feature(type_alias_impl_trait)]
+#![feature(never_type)]
 
 mod common_terms;
 mod debruijn;
 mod graph;
+mod parse_binary;
 mod parse_debruijn;
 mod parse_term;
 mod reduce;

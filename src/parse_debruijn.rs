@@ -22,6 +22,16 @@ impl Display for Token {
 }
 
 pub fn tokenize(term: &str) -> Result<Vec<Token>, ParseError> {
+    fn try_tokenize_int(string: &str) -> Result<usize, ParseError> {
+        match string.parse::<usize>() {
+            Ok(int) => Ok(int),
+            Err(err) => Err(ParseError::ParseIntError {
+                err,
+                token: string.to_string(),
+            }),
+        }
+    }
+
     let mut tokens = vec![];
     let mut string = String::new();
     for char in term.chars() {
@@ -29,13 +39,13 @@ pub fn tokenize(term: &str) -> Result<Vec<Token>, ParseError> {
             'λ' => (true, Some(Token::Lambda)),
             '(' => (true, Some(Token::LeftParen)),
             ')' => (true, Some(Token::RightParen)),
-            ' ' => (true, None),
+            c if c.is_whitespace() => (true, None),
             _ => (false, None),
         };
 
         if cut_string {
             if !string.is_empty() {
-                let index = string.parse::<usize>()?;
+                let index = try_tokenize_int(&string)?;
                 tokens.push(Token::Index(index));
                 string.clear();
             }
@@ -49,7 +59,7 @@ pub fn tokenize(term: &str) -> Result<Vec<Token>, ParseError> {
     }
 
     if !string.is_empty() {
-        let index = string.parse::<usize>()?;
+        let index = try_tokenize_int(&string)?;
         tokens.push(Token::Index(index));
     }
     Ok(tokens)
@@ -96,7 +106,10 @@ pub enum ParseError {
         expected: Vec<Token>,
         actual: Option<Token>,
     },
-    ParseIntError(ParseIntError),
+    ParseIntError {
+        err: ParseIntError,
+        token: String,
+    },
     Empty,
 }
 
@@ -113,12 +126,6 @@ impl ParseError {
             expected: vec![expected],
             actual,
         }
-    }
-}
-
-impl From<ParseIntError> for ParseError {
-    fn from(value: ParseIntError) -> Self {
-        ParseError::ParseIntError(value)
     }
 }
 
@@ -143,7 +150,9 @@ impl std::fmt::Display for ParseError {
                 )
             }
             ParseError::Empty => write!(f, "End of line too early"),
-            ParseError::ParseIntError(parse_int_error) => write!(f, "{}", parse_int_error),
+            ParseError::ParseIntError { err, token } => {
+                write!(f, "Couldn't parse {} as integer: {}", token, err)
+            }
         }
     }
 }

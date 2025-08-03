@@ -83,14 +83,14 @@ impl FromStr for Debruijn {
     type Err = Box<dyn Error>;
 
     fn from_str(term: &str) -> Result<Self, Self::Err> {
-        match parse_debruijn::tokenize(term) {
-            Ok(debruijn_tokens) => Ok(parse_debruijn::parse_program(&debruijn_tokens)?),
-            Err(_) => {
-                let classic_tokenized = parse_term::tokenize(term);
-                let classic_parsed = parse_term::parse_program(&classic_tokenized)?;
-                let debruijn = Debruijn::try_from(classic_parsed)?;
-                Ok(debruijn)
-            }
+        if term.chars().any(|c| c.is_numeric()) {
+            let tokens = parse_debruijn::tokenize(term)?;
+            Ok(parse_debruijn::parse_program(&tokens)?)
+        } else {
+            let classic_tokenized = parse_term::tokenize(term);
+            let classic_parsed = parse_term::parse_program(&classic_tokenized)?;
+            let debruijn = Debruijn::try_from(classic_parsed)?;
+            Ok(debruijn)
         }
     }
 }
