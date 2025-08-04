@@ -124,7 +124,11 @@ pub enum ParseError {
 mod test {
     use std::str::FromStr;
 
-    use crate::{debruijn::Debruijn, parse_binary::BinaryTokenStream};
+    use crate::{
+        debruijn::Debruijn,
+        parse_binary::{self, BinaryTokenStream},
+        term::Term,
+    };
 
     #[test]
     fn parse_universal_machine() {
@@ -144,5 +148,18 @@ mod test {
         println!("{}", stream);
         let actual = parse.unwrap();
         assert_eq!(expected, actual);
+    }
+
+    #[test]
+    fn parse_omega() {
+        let term_classic = Term::from_str("(λx.x x)(λx.x x)").unwrap();
+        let term_classic = Debruijn::try_from(term_classic).unwrap();
+
+        let term_debruijn = Debruijn::from_str("(λ 1 1)(λ 1 1)").unwrap();
+
+        let term_binary = parse_binary::from_str("01 00 10 10 00 10 10").unwrap();
+
+        assert_eq!(term_classic, term_debruijn);
+        assert_eq!(term_debruijn, term_binary);
     }
 }

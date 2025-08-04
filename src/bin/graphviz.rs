@@ -1,3 +1,5 @@
+use std::str::FromStr;
+
 use lambda_beaver::common_terms::{self, MULT};
 
 use lambda_beaver::reduce::ReductionStrategy;
@@ -96,7 +98,21 @@ pub fn reduce_with_stats(
 }
 
 fn main() {
-    let term = call(call(MULT(), CHURCH(5)), CHURCH(3));
+    // let term = call(call(MULT(), CHURCH(5)), CHURCH(3));
+    let term = match std::env::args().nth(1) {
+        Some(term) => term,
+        None => {
+            println!("expected an argument");
+            std::process::exit(1);
+        }
+    };
+    let term = match Debruijn::from_str(&term) {
+        Ok(term) => term,
+        Err(err) => {
+            println!("Couldn't parse {term}. Reason: {err}");
+            std::process::exit(1);
+        }
+    };
     let mut graph = ReductionGraph::with_root(term);
     reduce_with_stats(&mut graph, ReductionStrategy::DFS, 1000000);
     std::fs::write("out.dot", to_graphviz(&graph, NodeLabelType::Debruijn)).unwrap();
