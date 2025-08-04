@@ -1,5 +1,6 @@
 use crate::debruijn::Debruijn;
-use std::str::FromStr;
+use core::fmt;
+use std::{fmt::Display, str::FromStr};
 
 type ParseResult<T> = Result<T, ParseError>;
 
@@ -64,6 +65,25 @@ impl BinaryTokenStream {
     }
 }
 
+impl Display for BinaryTokenStream {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let bits: String = self
+            .bits
+            .iter()
+            .map(|bit| if *bit { '1' } else { '0' })
+            .collect();
+        writeln!(f, "{bits}")?;
+        for idx in 0..self.bits.len() {
+            if idx == self.i {
+                write!(f, "^")?;
+            } else {
+                write!(f, " ")?;
+            }
+        }
+        Ok(())
+    }
+}
+
 impl From<Vec<bool>> for BinaryTokenStream {
     fn from(bits: Vec<bool>) -> Self {
         BinaryTokenStream { bits, i: 0 }
@@ -122,17 +142,17 @@ mod test {
         01 01 00 01 10 10 00 00 00 01 01 01 10 00 00 00 00 01 1110 00 01 01 111110 01 1110 
         00 01 01 110 01 1110 00 00 01 1110 00 01 01 10 110 1110 01 11110 00 01 11110 00 
         01 01 1110 10 01 110 10 01 01 10 01 110 00 01 10 110 00 01 01 11110 00 01 11110 00
-        01 110 01 10 11110 111110 01 1110 1110 110 00 01 10 01 00 01 10 10 00 01 10 10  
-        00 1110 01 10 11110 111110 01 1110 1110 110 00 01 10 01 00 01 10 10 00 01 10 10";
+        01110 01 10 11110 111110 01 1110 1110 110 00 01 10 01 00 01 10 10 00 01 10 10";
 
         let expected =
             "(λ 1 1)(λλλ 1 (λλλλ 3 (λ 5 (3 (λ 2 (3 (λλ 3 (λ 1 2 3)))(4 (λ 4 (λ3 1 (2 1))))))
         (1 (2 (λ1 2))(λ4 (λ4 (λ2 (1 4))) 5)))) (3 3) 2)(λ 1 ((λ 1 1)(λ 1 1)))";
         let expected = Debruijn::from_str(expected).unwrap();
 
-        let mut actual = BinaryTokenStream::from_str(binary).unwrap();
-        let actual = actual.parse().unwrap();
-
+        let mut stream = BinaryTokenStream::from_str(binary).unwrap();
+        let parse = stream.parse();
+        println!("{}", stream);
+        let actual = parse.unwrap();
         assert_eq!(expected, actual);
     }
 }
