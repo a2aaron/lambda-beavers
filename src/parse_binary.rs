@@ -107,21 +107,11 @@ impl FromStr for BinaryTokenStream {
 }
 
 pub fn from_vec(bits: Vec<bool>) -> ParseResult<Debruijn> {
-    let mut stream = BinaryTokenStream::from(bits);
-    let term = stream._parse()?;
-    if stream.has_next() {
-        return Err(ParseError::LeftoverInput);
-    }
-    Ok(term)
+    BinaryTokenStream::from(bits).parse()
 }
 
 pub fn from_str(string: &str) -> ParseResult<Debruijn> {
-    let mut stream = BinaryTokenStream::from_str(string).unwrap();
-    let term = stream._parse()?;
-    if stream.has_next() {
-        return Err(ParseError::LeftoverInput);
-    }
-    Ok(term)
+    BinaryTokenStream::from_str(string).unwrap().parse()
 }
 
 #[derive(Debug)]

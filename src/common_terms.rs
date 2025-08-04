@@ -1,10 +1,10 @@
 #![allow(non_snake_case)]
-#![allow(dead_code)]
 
 use crate::debruijn::{self, Debruijn, call, def, idx};
 
 macro_rules! define_term {
     ($name:ident, $value:expr) => {
+        #[allow(dead_code)]
         fn ${concat($name, _STR)}() -> String { $value.to_string() }
 
         pub fn $name() -> Debruijn {

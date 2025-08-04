@@ -1,8 +1,13 @@
-use std::fmt::Display;
+use std::{
+    fmt::Display,
+    time::{SystemTime, UNIX_EPOCH},
+};
 
 use crate::{
     debruijn::{Debruijn, call, def, idx},
+    graph::{NodeIndex, ReductionGraph},
     replace,
+    utils::Rng,
 };
 
 // see https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture15.pdf
@@ -118,6 +123,34 @@ use crate::{
 /// Hence, the final rule for beta reduction will look like:
 /// (λ t1) t2 = down_one(t1 {up_one(t) / 1})
 
+pub enum ReductionStrategy {
+    DFS,
+    BFS,
+    Random,
+}
+
+impl ReductionStrategy {
+    pub fn get_node(&self, graph: &mut ReductionGraph) -> Option<NodeIndex> {
+        if graph.unreduced_nodes.is_empty() {
+            return None;
+        }
+        let node = match self {
+            ReductionStrategy::DFS => graph.unreduced_nodes[graph.unreduced_nodes.len() - 1],
+            ReductionStrategy::BFS => graph.unreduced_nodes[0],
+            ReductionStrategy::Random => {
+                let seed = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                let mut rng = Rng::from_seed(seed);
+                let index = rng.rand_usize() % graph.unreduced_nodes.len();
+                graph.unreduced_nodes[index]
+            }
+        };
+        Some(node)
+    }
+}
+
 pub fn get_reductions(term: &Debruijn) -> Vec<Debruijn> {
     replace::treepath_filter(term, beta_reduce_if_possible)
         .into_iter()
@@ -143,13 +176,6 @@ fn beta_reduce_if_possible(term: &Debruijn) -> Option<Fragment> {
             _ => None,
         },
         _ => None,
-    }
-}
-
-fn beta_reduce(term: &Debruijn) -> Debruijn {
-    match term {
-        Debruijn::Application { func, arg } => _beta_reduce(func, arg),
-        _ => panic!("Expected an application"),
     }
 }
 
@@ -239,9 +265,16 @@ fn shift_cutoff(term: &Debruijn, up_by: isize, cutoff: usize) -> Debruijn {
 mod tests {
     use crate::{
         debruijn::{self, Context, Debruijn, call, def},
-        reduce::{_beta_reduce, beta_reduce, shift_cutoff, substitute},
+        reduce::{_beta_reduce, shift_cutoff, substitute},
         term::Term,
     };
+
+    fn beta_reduce(term: &Debruijn) -> Debruijn {
+        match term {
+            Debruijn::Application { func, arg } => _beta_reduce(func, arg),
+            _ => panic!("Expected an application"),
+        }
+    }
 
     fn compile(input: &str) -> Debruijn {
         _compile(input, Context::default())

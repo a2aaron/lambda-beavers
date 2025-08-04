@@ -3,5 +3,5 @@
 version = 4
 
 [[package]]
-name = "lambda-transpiler"
+name = "lambda-beaver"
 version = "0.1.0"
