@@ -1,5 +1,7 @@
-use crate::{debruijn::Debruijn, parse_debruijn};
+use crate::debruijn::Debruijn;
 use std::str::FromStr;
+
+type ParseResult<T> = Result<T, ParseError>;
 
 struct BinaryTokenStream {
     bits: Vec<bool>,
@@ -20,18 +22,27 @@ impl BinaryTokenStream {
         }
     }
 
-    fn parse(&mut self) -> Result<Debruijn, ParseError> {
+    fn parse(&mut self) -> ParseResult<Debruijn> {
+        let term = self._parse()?;
+        if self.has_next() {
+            Err(ParseError::LeftoverInput)
+        } else {
+            Ok(term)
+        }
+    }
+
+    fn _parse(&mut self) -> ParseResult<Debruijn> {
         match self.next() {
             // 00 and 01
             Some(false) => match self.next() {
                 // Abstraction: blc(λM) = 00 blc(M)
                 Some(false) => Ok(Debruijn::Abstraction {
-                    body: Box::new(self.parse()?),
+                    body: Box::new(self._parse()?),
                 }),
                 // Application = blc(M N) = 01 blc(M) blc(N)
                 Some(true) => Ok(Debruijn::Application {
-                    func: Box::new(self.parse()?),
-                    arg: Box::new(self.parse()?),
+                    func: Box::new(self._parse()?),
+                    arg: Box::new(self._parse()?),
                 }),
                 None => Err(ParseError::EOF),
             },
@@ -53,6 +64,12 @@ impl BinaryTokenStream {
     }
 }
 
+impl From<Vec<bool>> for BinaryTokenStream {
+    fn from(bits: Vec<bool>) -> Self {
+        BinaryTokenStream { bits, i: 0 }
+    }
+}
+
 impl FromStr for BinaryTokenStream {
     type Err = !;
 
@@ -69,9 +86,28 @@ impl FromStr for BinaryTokenStream {
     }
 }
 
+pub fn from_vec(bits: Vec<bool>) -> ParseResult<Debruijn> {
+    let mut stream = BinaryTokenStream::from(bits);
+    let term = stream._parse()?;
+    if stream.has_next() {
+        return Err(ParseError::LeftoverInput);
+    }
+    Ok(term)
+}
+
+pub fn from_str(string: &str) -> ParseResult<Debruijn> {
+    let mut stream = BinaryTokenStream::from_str(string).unwrap();
+    let term = stream._parse()?;
+    if stream.has_next() {
+        return Err(ParseError::LeftoverInput);
+    }
+    Ok(term)
+}
+
 #[derive(Debug)]
 pub enum ParseError {
     EOF,
+    LeftoverInput,
 }
 
 #[cfg(test)]

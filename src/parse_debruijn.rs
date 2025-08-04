@@ -2,6 +2,8 @@ use std::{error::Error, fmt::Display, num::ParseIntError};
 
 use crate::debruijn::{self, Debruijn};
 
+pub type ParseResult<T> = Result<T, ParseError>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     LeftParen,
@@ -21,8 +23,8 @@ impl Display for Token {
     }
 }
 
-pub fn tokenize(term: &str) -> Result<Vec<Token>, ParseError> {
-    fn try_tokenize_int(string: &str) -> Result<usize, ParseError> {
+pub fn tokenize(term: &str) -> ParseResult<Vec<Token>> {
+    fn try_tokenize_int(string: &str) -> ParseResult<usize> {
         match string.parse::<usize>() {
             Ok(int) => Ok(int),
             Err(err) => Err(ParseError::ParseIntError {
@@ -79,7 +81,7 @@ impl<'a> TokenStream<'a> {
         self.tokens.get(self.index).cloned()
     }
 
-    pub fn consume_one(&mut self, expected: Token) -> Result<(), ParseError> {
+    pub fn consume_one(&mut self, expected: Token) -> ParseResult<()> {
         let actual = self.peek();
         if actual == Some(expected.clone()) {
             self.index += 1;
@@ -89,7 +91,7 @@ impl<'a> TokenStream<'a> {
         }
     }
 
-    pub fn consume_index(&mut self) -> Result<usize, ParseError> {
+    pub fn consume_index(&mut self) -> ParseResult<usize> {
         let actual = self.peek();
         if let Some(Token::Index(index)) = actual {
             self.index += 1;
@@ -157,7 +159,7 @@ impl std::fmt::Display for ParseError {
     }
 }
 
-pub fn parse_program(tokens: &[Token]) -> Result<Debruijn, ParseError> {
+pub fn parse_program(tokens: &[Token]) -> ParseResult<Debruijn> {
     if tokens.is_empty() {
         return Err(ParseError::Empty);
     }
@@ -167,7 +169,7 @@ pub fn parse_program(tokens: &[Token]) -> Result<Debruijn, ParseError> {
     Ok(term)
 }
 
-fn parse_term_up_to_paren(tokens: &mut TokenStream) -> Result<Debruijn, ParseError> {
+fn parse_term_up_to_paren(tokens: &mut TokenStream) -> ParseResult<Debruijn> {
     fn wrap(current_term: Option<Debruijn>, term: Debruijn) -> Option<Debruijn> {
         if let Some(term1) = current_term {
             return Some(debruijn::call(term1, term));
@@ -353,4 +355,7 @@ mod tests {
     fn parse_false() {
         assert_parse!("λ λ 1", def(def(1)));
     }
+
+    #[test]
+    fn pretty_print_roundtrip() {}
 }

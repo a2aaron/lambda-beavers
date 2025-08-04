@@ -2,6 +2,8 @@ use std::{error::Error, fmt::Display};
 
 use crate::term::{self, Term};
 
+pub type ParseResult<T> = Result<T, ParseError>;
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Token {
     LeftParen,
@@ -70,7 +72,7 @@ impl<'a> TokenStream<'a> {
         self.tokens.get(self.index).cloned()
     }
 
-    pub fn consume_one(&mut self, expected: Token) -> Result<(), ParseError> {
+    pub fn consume_one(&mut self, expected: Token) -> ParseResult<()> {
         let actual = self.peek();
         if actual == Some(expected.clone()) {
             self.index += 1;
@@ -80,7 +82,7 @@ impl<'a> TokenStream<'a> {
         }
     }
 
-    pub fn consume_literal(&mut self) -> Result<String, ParseError> {
+    pub fn consume_literal(&mut self) -> ParseResult<String> {
         let actual = self.peek();
         if let Some(Token::Literal(literal)) = actual {
             self.index += 1;
@@ -153,7 +155,7 @@ impl std::fmt::Display for ParseError {
     }
 }
 
-pub fn parse_program(tokens: &[Token]) -> Result<Term, ParseError> {
+pub fn parse_program(tokens: &[Token]) -> ParseResult<Term> {
     if tokens.is_empty() {
         return Err(ParseError::Empty);
     }
@@ -163,7 +165,7 @@ pub fn parse_program(tokens: &[Token]) -> Result<Term, ParseError> {
     Ok(term)
 }
 
-fn parse_term_up_to_paren(tokens: &mut TokenStream) -> Result<Term, ParseError> {
+fn parse_term_up_to_paren(tokens: &mut TokenStream) -> ParseResult<Term> {
     fn wrap(current_term: Option<Term>, term: Term) -> Option<Term> {
         if let Some(term1) = current_term {
             return Some(term::call(term1, term));

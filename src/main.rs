@@ -17,7 +17,7 @@ mod term;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::{
-    common_terms::*,
+    common_terms::{CHURCH, MULT},
     debruijn::{Debruijn, call},
     graph::{NodeIndex, ReductionGraph},
 };
@@ -94,8 +94,11 @@ pub fn to_graphviz(graph: &ReductionGraph, node_label: NodeLabelType) -> String 
     output.join("\n")
 }
 
-pub fn reduce_with_stats(graph: &mut ReductionGraph, reduction_strategy: ReductionStrategy) {
-    let max = 10_000;
+pub fn reduce_with_stats(
+    graph: &mut ReductionGraph,
+    reduction_strategy: ReductionStrategy,
+    max: usize,
+) {
     let mut brnf_found_at = None;
     for i in 0..max {
         let node_to_reduce = reduction_strategy.get_node(graph);
@@ -136,6 +139,27 @@ pub fn reduce_with_stats(graph: &mut ReductionGraph, reduction_strategy: Reducti
     );
 }
 
+pub fn reduce(
+    graph: &mut ReductionGraph,
+    reduction_strategy: ReductionStrategy,
+    max: usize,
+) -> Option<(Debruijn, usize)> {
+    for i in 0..max {
+        let node_to_reduce = reduction_strategy.get_node(graph);
+        match node_to_reduce {
+            Some(node_to_reduce) => {
+                let graph_update = graph.reduce_node(node_to_reduce);
+                if graph_update.is_brnf {
+                    let reduced_term = graph.get(node_to_reduce).unwrap();
+                    return Some((reduced_term, i));
+                }
+            }
+            _ => (),
+        }
+    }
+    None
+}
+
 pub enum ReductionStrategy {
     DFS,
     BFS,
@@ -164,12 +188,55 @@ impl ReductionStrategy {
     }
 }
 
+pub fn bitstring_permutations(n: usize) -> impl Iterator<Item = Vec<bool>> {
+    let two_pow_n = 1 << n;
+    (0..two_pow_n).map(move |value| {
+        // note: we want the first bool in the array to represent the high order bit
+        // so we must iterate the bits in reverse order
+        (0..n)
+            .rev()
+            .map(|bit_to_extract| {
+                let extracted_bit = value >> bit_to_extract;
+                let bottom_bit_is_one = (extracted_bit & 1) != 0;
+                bottom_bit_is_one
+            })
+            .collect()
+    })
+}
+
 #[allow(unused_variables)]
 fn main() {
-    // let combined = call(call(call(PLUS(), PLUS()), CHURCH(3)), CHURCH(3));
-    let combined = call(call(MULT_2(), CHURCH(5)), CHURCH(5));
-    let mut graph = ReductionGraph::with_root(combined);
-    reduce_with_stats(&mut graph, ReductionStrategy::Random);
+    // for length in 0..16 {
+    //     let terms = bitstring_permutations(length)
+    //         .filter_map(|bitstring| parse_binary::from_vec(bitstring.to_vec()).ok());
 
-    std::fs::write("out.dot", to_graphviz(&graph, NodeLabelType::BinaryLen)).unwrap();
+    //     for term in terms {
+    //         let mut graph = ReductionGraph::with_root(term.clone());
+    //         let brnf = reduce(&mut graph, ReductionStrategy::DFS, 10_000);
+    //         if let Some((brnf, reductions_used)) = brnf {
+    //             let binary_term = format!("{:b}", term);
+    //             let binary_brnf = format!("{:b}", brnf);
+    //             println!(
+    //                 "{} -> {} | {} -> {} | lengths: {} -> {} | found in {}",
+    //                 binary_term,
+    //                 binary_brnf,
+    //                 term,
+    //                 brnf,
+    //                 binary_term.len(),
+    //                 binary_brnf.len(),
+    //                 reductions_used
+    //             );
+    //         } else {
+    //             println!(
+    //                 "{:b} [{}] -> <not found after 10000 reductions>",
+    //                 term, term
+    //             );
+    //         }
+    //     }
+    // }
+
+    let term = call(call(MULT(), CHURCH(5)), CHURCH(3));
+    let mut graph = ReductionGraph::with_root(term);
+    reduce(&mut graph, ReductionStrategy::DFS, 1000000);
+    std::fs::write("out.dot", to_graphviz(&graph, NodeLabelType::Debruijn)).unwrap();
 }

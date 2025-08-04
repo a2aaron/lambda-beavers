@@ -40,10 +40,62 @@ impl Binary for Debruijn {
 
 impl fmt::Display for Debruijn {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.print(f, PrintContext::TopLevel)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrintContext {
+    TopLevel,
+    InAbs,
+    InAppLeft,
+    InAppRight,
+}
+
+impl Debruijn {
+    fn print(&self, f: &mut fmt::Formatter<'_>, ctx: PrintContext) -> fmt::Result {
         match self {
             Debruijn::Index(i) => write!(f, "{}", i),
-            Debruijn::Abstraction { body } => write!(f, "(λ {})", body),
-            Debruijn::Application { func, arg } => write!(f, "({} {})", func, arg),
+            // Suppose we have this program:
+            // λ 1 λ 2
+            // We want to distinguish the following parses
+            // (λ 1) (λ 2)
+            // λ (1 λ 2)
+            // In the first one, we can reduce the parenthesis to this:
+            // (λ 1) λ 2
+            // In the second one, we can reduce to this:
+            // λ 1 λ 2
+            // So the only case we need parens is InAppLeft
+            Debruijn::Abstraction { body } => match ctx {
+                PrintContext::TopLevel | PrintContext::InAbs | PrintContext::InAppRight => {
+                    write!(f, "λ ")?;
+                    body.print(f, PrintContext::InAbs)
+                }
+                PrintContext::InAppLeft => {
+                    write!(f, "(λ ")?;
+                    body.print(f, PrintContext::InAbs)?;
+                    write!(f, ")")
+                }
+            },
+            // Suppose we have
+            // 1 2 3
+            // We need to distinguish the following parses:
+            // (1 2) 3, which is the default and can be written just as 1 2 3
+            // and 1 (2 3), which needs parens
+            Debruijn::Application { func, arg } => match ctx {
+                PrintContext::TopLevel | PrintContext::InAbs | PrintContext::InAppLeft => {
+                    func.print(f, PrintContext::InAppLeft)?;
+                    write!(f, " ")?;
+                    arg.print(f, PrintContext::InAppRight)
+                }
+                PrintContext::InAppRight => {
+                    write!(f, "(")?;
+                    func.print(f, PrintContext::InAppLeft)?;
+                    write!(f, " ")?;
+                    arg.print(f, PrintContext::InAppRight)?;
+                    write!(f, ")")
+                }
+            },
         }
     }
 }
