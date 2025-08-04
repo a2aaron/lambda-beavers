@@ -1,13 +1,9 @@
 use std::str::FromStr;
 
-use lambda_beaver::common_terms::{self, MULT};
+use lambda_beaver::common_terms::{self};
 
 use lambda_beaver::reduce::ReductionStrategy;
-use lambda_beaver::{
-    common_terms::*,
-    debruijn::{Debruijn, call},
-    graph::ReductionGraph,
-};
+use lambda_beaver::{debruijn::Debruijn, graph::ReductionGraph};
 
 pub enum NodeLabelType {
     Debruijn,
@@ -114,6 +110,6 @@ fn main() {
         }
     };
     let mut graph = ReductionGraph::with_root(term);
-    reduce_with_stats(&mut graph, ReductionStrategy::DFS, 1000000);
+    reduce_with_stats(&mut graph, ReductionStrategy::DFS, 10000);
     std::fs::write("out.dot", to_graphviz(&graph, NodeLabelType::Debruijn)).unwrap();
 }

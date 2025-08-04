@@ -157,8 +157,7 @@ mod test {
 
         let term_debruijn = Debruijn::from_str("(λ 1 1)(λ 1 1)").unwrap();
 
-        let term_binary = parse_binary::from_str("01 00 10 10 00 10 10").unwrap();
-
+        let term_binary = parse_binary::from_str("01 00 01 10 10 00 01 10 10").unwrap();
         assert_eq!(term_classic, term_debruijn);
         assert_eq!(term_debruijn, term_binary);
     }
