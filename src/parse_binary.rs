@@ -1,4 +1,4 @@
-use crate::debruijn::Debruijn;
+use crate::debruijn::{Debruijn, call, def};
 use core::fmt;
 use std::{fmt::Display, str::FromStr};
 
@@ -37,14 +37,9 @@ impl BinaryTokenStream {
             // 00 and 01
             Some(false) => match self.next() {
                 // Abstraction: blc(λM) = 00 blc(M)
-                Some(false) => Ok(Debruijn::Abstraction {
-                    body: Box::new(self._parse()?),
-                }),
+                Some(false) => Ok(def(self._parse()?)),
                 // Application = blc(M N) = 01 blc(M) blc(N)
-                Some(true) => Ok(Debruijn::Application {
-                    func: Box::new(self._parse()?),
-                    arg: Box::new(self._parse()?),
-                }),
+                Some(true) => Ok(call(self._parse()?, self._parse()?)),
                 None => Err(ParseError::EOF),
             },
             // 1_i0

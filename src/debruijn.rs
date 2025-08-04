@@ -16,7 +16,7 @@ use std::fmt;
 /// λx.λy.λs.λz.x s (y s z) = λ λ λ λ 4 2 (3 2 1)
 /// (λx.x x) (λx.x x) = (λ 1 1) (λ 1 1)
 /// (λx.λx.x) (λ y.y) = (λ λ 1) (λ 1)
-#[derive(Clone, Debug, PartialEq, Eq)]
+#[derive(Clone, Debug, PartialEq, Eq, Hash)]
 pub enum Debruijn {
     Index(usize),
     Application {

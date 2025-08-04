@@ -35,12 +35,12 @@ pub fn to_graphviz(graph: &ReductionGraph, node_label: NodeLabelType) -> String 
         let brnf = format!("{} [color = blue];", brnf.0);
         output.push(brnf);
     }
-    for (i, node) in graph.nodes.iter().enumerate() {
+    for (i, node) in graph.nodes().iter().enumerate() {
         let label = node_label.to_string(node);
         let node = format!("{} [label = \"{}\"];", i, label);
         output.push(node);
     }
-    for (a, b) in &graph.edges {
+    for (a, b) in graph.edges() {
         let edge = format!("{} -> {}", a.0, b.0);
         output.push(edge);
     }
@@ -70,18 +70,18 @@ pub fn reduce_with_stats(
                 };
                 println!(
                     "{i}/{max} - {} unreduced nodes remain (+{} this reduction) | BRNF: {}",
-                    graph.unreduced_nodes.len(),
+                    graph.unreduced_nodes().len(),
                     graph_update.new_nodes.len(),
                     brnf_message
                 );
             }
             None => {
-                assert!(graph.unreduced_nodes.is_empty());
+                assert!(graph.unreduced_nodes().is_empty());
                 println!("SUCCESS, no unreduced nodes remain");
                 println!(
                     "{} total nodes, {} total edges",
-                    graph.nodes.len(),
-                    graph.edges.len()
+                    graph.nodes().len(),
+                    graph.edges().len()
                 );
                 return;
             }
@@ -89,7 +89,7 @@ pub fn reduce_with_stats(
     }
     println!(
         "TIMEOUT REACHED - {} unreduced nodes remain",
-        graph.unreduced_nodes.len()
+        graph.unreduced_nodes().len()
     );
 }
 

@@ -1,3 +1,5 @@
+use std::collections::HashMap;
+
 use crate::{debruijn::Debruijn, reduce};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -5,9 +7,11 @@ pub struct NodeIndex(pub usize);
 
 #[derive(Default, Debug)]
 pub struct ReductionGraph {
-    pub nodes: Vec<Debruijn>,
-    pub unreduced_nodes: Vec<NodeIndex>,
-    pub edges: Vec<(NodeIndex, NodeIndex)>,
+    nodes: Vec<Debruijn>,
+    nodes_set: HashMap<Debruijn, NodeIndex>,
+    // TODO: consider moving the reduction strategy stuff to be in graph.rs
+    pub(crate) unreduced_nodes: Vec<NodeIndex>,
+    edges: Vec<(NodeIndex, NodeIndex)>,
     pub beta_reduced_normal_form: Option<NodeIndex>,
     pub root: Option<NodeIndex>,
 }
@@ -31,12 +35,13 @@ impl ReductionGraph {
     }
 
     fn add_node(&mut self, node: Debruijn) -> (NodeIndex, bool) {
-        let index = self.nodes.iter().position(|n| *n == node);
+        let index = self.nodes_set.get(&node).copied();
         match index {
-            Some(index) => (NodeIndex(index), false),
+            Some(index) => (index, false),
             None => {
-                self.nodes.push(node);
+                self.nodes.push(node.clone());
                 let index = NodeIndex(self.nodes.len() - 1);
+                self.nodes_set.insert(node, index);
                 self.unreduced_nodes.push(index);
                 (index, true)
             }
@@ -107,6 +112,18 @@ impl ReductionGraph {
 
     pub fn get(&self, node: NodeIndex) -> Option<Debruijn> {
         self.nodes.get(node.0).cloned()
+    }
+
+    pub fn nodes(&self) -> &[Debruijn] {
+        &self.nodes
+    }
+
+    pub fn edges(&self) -> &[(NodeIndex, NodeIndex)] {
+        &self.edges
+    }
+
+    pub fn unreduced_nodes(&self) -> &[NodeIndex] {
+        &self.unreduced_nodes
     }
 }
 

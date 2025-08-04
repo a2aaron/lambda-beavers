@@ -131,7 +131,7 @@ pub enum ReductionStrategy {
 
 impl ReductionStrategy {
     pub fn get_node(&self, graph: &mut ReductionGraph) -> Option<NodeIndex> {
-        if graph.unreduced_nodes.is_empty() {
+        if !graph.any_reducible() {
             return None;
         }
         let node = match self {
