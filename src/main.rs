@@ -4,7 +4,7 @@
 #![feature(type_alias_impl_trait)]
 #![feature(never_type)]
 
-use std::{collections::HashMap, hash::Hash};
+use std::collections::HashMap;
 
 use lambda_beaver::{
     debruijn::Debruijn,
@@ -22,7 +22,7 @@ enum ReductionResult {
 
 fn reduce(
     graph: &mut ReductionGraph,
-    reduction_strategy: ReductionStrategy,
+    reduction_strategy: &mut ReductionStrategy,
     max: usize,
 ) -> (ReductionResult, usize) {
     for i in 0..max {
@@ -71,6 +71,7 @@ impl Histogram {
 
 #[allow(unused_variables)]
 fn main() {
+    let mut reduction_strategy = ReductionStrategy::random();
     let max = 1_000;
     let mut histogram_lengths = Histogram::new();
     let mut histogram_time = Histogram::new();
@@ -81,7 +82,7 @@ fn main() {
 
         for term in terms {
             let mut graph = ReductionGraph::with_root(term.clone());
-            let (result, reductions_used) = reduce(&mut graph, ReductionStrategy::BFS, max);
+            let (result, reductions_used) = reduce(&mut graph, &mut reduction_strategy, max);
             match result {
                 ReductionResult::NormalForm(brnf) => {
                     let binary_term = format!("{:b}", term);

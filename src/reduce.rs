@@ -1,7 +1,4 @@
-use std::{
-    fmt::Display,
-    time::{SystemTime, UNIX_EPOCH},
-};
+use std::fmt::Display;
 
 use crate::{
     debruijn::{Debruijn, call, def, idx},
@@ -126,28 +123,27 @@ use crate::{
 pub enum ReductionStrategy {
     DFS,
     BFS,
-    Random,
+    Random(Rng),
 }
 
 impl ReductionStrategy {
-    pub fn get_node(&self, graph: &mut ReductionGraph) -> Option<NodeIndex> {
+    pub fn get_node(&mut self, graph: &mut ReductionGraph) -> Option<NodeIndex> {
         if !graph.any_reducible() {
             return None;
         }
         let node = match self {
             ReductionStrategy::DFS => graph.unreduced_nodes[graph.unreduced_nodes.len() - 1],
             ReductionStrategy::BFS => graph.unreduced_nodes[0],
-            ReductionStrategy::Random => {
-                let seed = SystemTime::now()
-                    .duration_since(UNIX_EPOCH)
-                    .unwrap()
-                    .as_secs();
-                let mut rng = Rng::from_seed(seed);
+            ReductionStrategy::Random(rng) => {
                 let index = rng.rand_usize() % graph.unreduced_nodes.len();
                 graph.unreduced_nodes[index]
             }
         };
         Some(node)
+    }
+
+    pub fn random() -> ReductionStrategy {
+        ReductionStrategy::Random(Rng::new())
     }
 }
 

@@ -50,7 +50,7 @@ pub fn to_graphviz(graph: &ReductionGraph, node_label: NodeLabelType) -> String 
 
 pub fn reduce_with_stats(
     graph: &mut ReductionGraph,
-    reduction_strategy: ReductionStrategy,
+    mut reduction_strategy: ReductionStrategy,
     max: usize,
 ) {
     let mut brnf_found_at = None;

@@ -5,6 +5,15 @@ pub struct Rng {
 }
 
 impl Rng {
+    pub fn new() -> Self {
+        let system_time = std::time::SystemTime::now();
+        let seed = system_time
+            .duration_since(std::time::UNIX_EPOCH)
+            .expect("Time went backwards")
+            .as_nanos() as u64;
+        Rng::from_seed(seed)
+    }
+
     pub fn from_seed(seed: u64) -> Self {
         Self {
             state: (
