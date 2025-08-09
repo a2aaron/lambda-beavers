@@ -4,6 +4,8 @@
 #![feature(type_alias_impl_trait)]
 #![feature(never_type)]
 
+use std::{collections::HashMap, hash::Hash};
+
 use lambda_beaver::{
     debruijn::Debruijn,
     graph::ReductionGraph,
@@ -39,9 +41,39 @@ fn reduce(
     (ReductionResult::MaxReductionsReached, max)
 }
 
+struct Histogram(HashMap<String, usize>);
+impl Histogram {
+    fn new() -> Histogram {
+        Histogram(HashMap::new())
+    }
+
+    fn add_irreducable(&mut self) {
+        *self.0.entry("TO".to_string()).or_insert(0) += 1;
+    }
+
+    fn add_timeout(&mut self) {
+        *self.0.entry("IR".to_string()).or_insert(0) += 1;
+    }
+
+    fn add(&mut self, value: usize) {
+        *self.0.entry(format!("{value:02}")).or_insert(0) += 1;
+    }
+
+    fn print(&self) {
+        let mut keys: Vec<String> = self.0.keys().cloned().collect();
+        keys.sort();
+        for key in keys {
+            let value = self.0[&key];
+            println!("{key}: {value}");
+        }
+    }
+}
+
 #[allow(unused_variables)]
 fn main() {
-    let max = 10_0;
+    let max = 1_000;
+    let mut histogram_lengths = Histogram::new();
+    let mut histogram_time = Histogram::new();
 
     for length in 0..=22 {
         let terms = utils::bitstring_permutations(length)
@@ -49,7 +81,7 @@ fn main() {
 
         for term in terms {
             let mut graph = ReductionGraph::with_root(term.clone());
-            let (result, reductions_used) = reduce(&mut graph, ReductionStrategy::DFS, max);
+            let (result, reductions_used) = reduce(&mut graph, ReductionStrategy::BFS, max);
             match result {
                 ReductionResult::NormalForm(brnf) => {
                     let binary_term = format!("{:b}", term);
@@ -59,14 +91,26 @@ fn main() {
                         binary_term.len(),
                         binary_brnf.len(),
                     );
+                    histogram_lengths.add(binary_brnf.len());
+                    histogram_time.add(reductions_used);
                 }
-                ReductionResult::Irreducible => println!(
-                    "{term:b} [{term}] -> <proved irreducible after {reductions_used} reductions>"
-                ),
+                ReductionResult::Irreducible => {
+                    println!(
+                        "{term:b} [{term}] -> <proved irreducible after {reductions_used} reductions>"
+                    );
+                    histogram_lengths.add_irreducable();
+                    histogram_time.add_irreducable();
+                }
                 ReductionResult::MaxReductionsReached => {
-                    println!("{term:b} [{term}] -> <not found after {reductions_used} reductions>")
+                    println!("{term:b} [{term}] -> <not found after {reductions_used} reductions>");
+                    histogram_lengths.add_timeout();
+                    histogram_time.add_timeout();
                 }
             }
         }
     }
+    println!("Histogram - Lengths");
+    histogram_lengths.print();
+    println!("Histogram - Time");
+    histogram_time.print();
 }
