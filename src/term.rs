@@ -1,4 +1,7 @@
-use std::{fmt::Display, str::FromStr};
+use std::{
+    fmt::{self, Display},
+    str::FromStr,
+};
 
 use crate::{debruijn::Debruijn, parse_term};
 
@@ -43,12 +46,64 @@ impl FromStr for Term {
     }
 }
 
-impl Display for Term {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+impl fmt::Display for Term {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        self.print(f, PrintContext::TopLevel)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum PrintContext {
+    TopLevel,
+    InAbs,
+    InAppLeft,
+    InAppRight,
+}
+
+impl Term {
+    fn print(&self, f: &mut fmt::Formatter<'_>, ctx: PrintContext) -> fmt::Result {
         match self {
-            Term::Literal(literal) => write!(f, "{}", literal.0),
-            Term::Abstraction(literal, term) => write!(f, "(λ{}.{})", literal, term),
-            Term::Application(term1, term2) => write!(f, "({} {})", term1, term2),
+            Term::Literal(lit) => write!(f, "{}", lit),
+            // Suppose we have this program:
+            // λ 1 λ 2
+            // We want to distinguish the following parses
+            // (λ 1) (λ 2)
+            // λ (1 λ 2)
+            // In the first one, we can reduce the parenthesis to this:
+            // (λ 1) λ 2
+            // In the second one, we can reduce to this:
+            // λ 1 λ 2
+            // So the only case we need parens is InAppLeft
+            Term::Abstraction(arg, body) => match ctx {
+                PrintContext::TopLevel | PrintContext::InAbs | PrintContext::InAppRight => {
+                    write!(f, "λ{arg}.")?;
+                    body.print(f, PrintContext::InAbs)
+                }
+                PrintContext::InAppLeft => {
+                    write!(f, "(λ{arg}.")?;
+                    body.print(f, PrintContext::InAbs)?;
+                    write!(f, ")")
+                }
+            },
+            // Suppose we have
+            // 1 2 3
+            // We need to distinguish the following parses:
+            // (1 2) 3, which is the default and can be written just as 1 2 3
+            // and 1 (2 3), which needs parens
+            Term::Application(func, arg) => match ctx {
+                PrintContext::TopLevel | PrintContext::InAbs | PrintContext::InAppLeft => {
+                    func.print(f, PrintContext::InAppLeft)?;
+                    write!(f, " ")?;
+                    arg.print(f, PrintContext::InAppRight)
+                }
+                PrintContext::InAppRight => {
+                    write!(f, "(")?;
+                    func.print(f, PrintContext::InAppLeft)?;
+                    write!(f, " ")?;
+                    arg.print(f, PrintContext::InAppRight)?;
+                    write!(f, ")")
+                }
+            },
         }
     }
 }
@@ -83,8 +138,8 @@ impl Context {
         Context { variables: vec![] }
     }
 
-    fn get(&self, index: usize) -> Literal {
-        self.variables[index - 1].clone()
+    fn get(&self, index: usize) -> Option<Literal> {
+        self.variables.iter().rev().nth(index - 1).cloned()
     }
 
     fn push_variable(&mut self) -> Literal {
@@ -108,7 +163,9 @@ impl From<&Debruijn> for Term {
 
 fn from_debruijn(debruijn: &Debruijn, ctx: &mut Context) -> Term {
     match debruijn {
-        Debruijn::Index(index) => lit(ctx.get(*index)),
+        Debruijn::Index(index) => lit(ctx
+            .get(*index)
+            .unwrap_or_else(|| format!("unbound_{index}").into())),
         Debruijn::Application { func, arg } => {
             call(from_debruijn(&func, ctx), from_debruijn(&arg, ctx))
         }

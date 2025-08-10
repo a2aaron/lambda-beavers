@@ -11,6 +11,7 @@ use lambda_beaver::{
     graph::ReductionGraph,
     parse_binary,
     reduce::ReductionStrategy,
+    term::Term,
     utils::{self},
 };
 
@@ -48,11 +49,11 @@ impl Histogram {
     }
 
     fn add_irreducable(&mut self) {
-        *self.0.entry("TO".to_string()).or_insert(0) += 1;
+        *self.0.entry("IR".to_string()).or_insert(0) += 1;
     }
 
     fn add_timeout(&mut self) {
-        *self.0.entry("IR".to_string()).or_insert(0) += 1;
+        *self.0.entry("TO".to_string()).or_insert(0) += 1;
     }
 
     fn add(&mut self, value: usize) {
@@ -96,14 +97,18 @@ fn main() {
                     histogram_time.add(reductions_used);
                 }
                 ReductionResult::Irreducible => {
+                    let term_classic = Term::from(&term);
                     println!(
-                        "{term:b} [{term}] -> <proved irreducible after {reductions_used} reductions>"
+                        "{term:b} [{term}] [{term_classic}] -> <proved irreducible after {reductions_used} reductions>"
                     );
                     histogram_lengths.add_irreducable();
                     histogram_time.add_irreducable();
                 }
                 ReductionResult::MaxReductionsReached => {
-                    println!("{term:b} [{term}] -> <not found after {reductions_used} reductions>");
+                    let term_classic = Term::from(&term);
+                    println!(
+                        "{term:b} [{term}] [{term_classic}] -> <not found after {reductions_used} reductions>"
+                    );
                     histogram_lengths.add_timeout();
                     histogram_time.add_timeout();
                 }

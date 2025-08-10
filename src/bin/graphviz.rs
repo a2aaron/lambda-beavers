@@ -110,6 +110,6 @@ fn main() {
         }
     };
     let mut graph = ReductionGraph::with_root(term);
-    reduce_with_stats(&mut graph, ReductionStrategy::BFS, 250);
+    reduce_with_stats(&mut graph, ReductionStrategy::BFS, 10);
     std::fs::write("out.dot", to_graphviz(&graph, NodeLabelType::Debruijn)).unwrap();
 }
