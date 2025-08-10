@@ -1,5 +1,7 @@
 use std::fmt::Display;
 
+use clap::ValueEnum;
+
 use crate::{
     debruijn::{Debruijn, call, def, idx},
     graph::{NodeIndex, ReductionGraph},
@@ -144,6 +146,23 @@ impl ReductionStrategy {
 
     pub fn random() -> ReductionStrategy {
         ReductionStrategy::Random(Rng::new())
+    }
+}
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum ReductionStrategyKind {
+    DFS,
+    BFS,
+    Random,
+}
+
+impl From<ReductionStrategyKind> for ReductionStrategy {
+    fn from(value: ReductionStrategyKind) -> Self {
+        match value {
+            ReductionStrategyKind::DFS => ReductionStrategy::DFS,
+            ReductionStrategyKind::BFS => ReductionStrategy::BFS,
+            ReductionStrategyKind::Random => ReductionStrategy::random(),
+        }
     }
 }
 

@@ -1,5 +1,6 @@
 /// Xorshift128+ implementation stolen from tiny-rng
 /// https://docs.rs/tiny-rng/
+#[derive(Clone, Copy)]
 pub struct Rng {
     state: (u64, u64),
 }

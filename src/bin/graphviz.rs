@@ -1,15 +1,19 @@
 use std::str::FromStr;
 
+use clap::{Parser, ValueEnum, command};
 use lambda_beaver::common_terms::{self};
 
-use lambda_beaver::reduce::ReductionStrategy;
+use lambda_beaver::reduce::{ReductionStrategy, ReductionStrategyKind};
+use lambda_beaver::term::Term;
 use lambda_beaver::{debruijn::Debruijn, graph::ReductionGraph};
 
+#[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum NodeLabelType {
     Debruijn,
     DebruijnCommonTerm,
     Binary,
     BinaryLen,
+    Classic,
 }
 
 impl NodeLabelType {
@@ -19,6 +23,7 @@ impl NodeLabelType {
             NodeLabelType::DebruijnCommonTerm => common_terms::to_string(term),
             NodeLabelType::Binary => format!("{:b}", term),
             NodeLabelType::BinaryLen => format!("{:b}", term).len().to_string(),
+            NodeLabelType::Classic => format!("{}", Term::from(term)),
         }
     }
 }
@@ -93,15 +98,29 @@ pub fn reduce_with_stats(
     );
 }
 
+#[derive(Parser, Debug)]
+#[command(about, long_about = None)]
+struct Args {
+    /// Term to parse. This can be a classic or Debruijn term
+    term: String,
+    /// Maximum number of reductions to perform
+    #[arg(short, long, default_value = "100")]
+    max_reductions: usize,
+    /// Reduction strategy to use
+    #[arg(short, long, default_value = "bfs")]
+    strategy: ReductionStrategyKind,
+    /// Node label type to use in the graphviz output
+    #[arg(short, long, default_value = "debruijn")]
+    node_label: NodeLabelType,
+    /// Output file for the graphviz representation
+    #[arg(short, long("out"), default_value = "out.dot")]
+    output: String,
+}
+
 fn main() {
-    // let term = call(call(MULT(), CHURCH(5)), CHURCH(3));
-    let term = match std::env::args().nth(1) {
-        Some(term) => term,
-        None => {
-            println!("expected an argument");
-            std::process::exit(1);
-        }
-    };
+    let args = Args::parse();
+
+    let term = args.term;
     let term = match Debruijn::from_str(&term) {
         Ok(term) => term,
         Err(err) => {
@@ -109,7 +128,13 @@ fn main() {
             std::process::exit(1);
         }
     };
+    let max_reductions = args.max_reductions;
+    let strategy = ReductionStrategy::from(args.strategy);
+    let node_label = args.node_label;
+
     let mut graph = ReductionGraph::with_root(term);
-    reduce_with_stats(&mut graph, ReductionStrategy::BFS, 10);
-    std::fs::write("out.dot", to_graphviz(&graph, NodeLabelType::Debruijn)).unwrap();
+
+    reduce_with_stats(&mut graph, strategy, max_reductions);
+    let graphviz = to_graphviz(&graph, node_label);
+    std::fs::write(&args.output, graphviz).expect("Failed to write Graphviz output");
 }
