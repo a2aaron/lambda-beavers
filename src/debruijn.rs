@@ -289,6 +289,24 @@ mod test {
         }};
     }
 
+    impl Debruijn {
+        fn is_closed_term(&self) -> bool {
+            fn _is_closed_term(term: &Debruijn, depth: usize) -> bool {
+                match term {
+                    // eg: in λ λ λ N, the depth is 3, so we need N to be 1, 2, or 3 for it to be
+                    // bound. Otherwise it's unbound.
+                    Debruijn::Index(index) => *index <= depth,
+                    Debruijn::Application { func, arg } => {
+                        _is_closed_term(func, depth) && _is_closed_term(arg, depth)
+                    }
+                    Debruijn::Abstraction { body } => _is_closed_term(body, depth + 1),
+                }
+            }
+
+            _is_closed_term(self, 0)
+        }
+    }
+
     #[test]
     fn convert_i_is_for_identity() {
         assert_compile!("λx.x", def(1));
@@ -397,7 +415,7 @@ mod test {
     }
 
     #[test]
-    fn bitstring_parse() {
+    fn bitstring_parse_to_debruijn() {
         for length in 0..=20 {
             for bitstring in utils::bitstring_permutations(length) {
                 let bitstring_string: String = bitstring
@@ -411,6 +429,29 @@ mod test {
                         binary_term, normal_term,
                         "terms did not match! binary {bitstring_string} -> {string} -> {normal_term}"
                     );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn bitstring_parse_to_classic_closed_only() {
+        for length in 0..=20 {
+            for bitstring in utils::bitstring_permutations(length) {
+                let bitstring_string: String = bitstring
+                    .iter()
+                    .map(|b| if *b { "1" } else { "0" })
+                    .collect();
+                if let Ok(binary_term) = parse_binary::from_vec(bitstring) {
+                    if binary_term.is_closed_term() {
+                        let classic_term: Term = Term::from(&binary_term);
+                        let string = format!("{}", classic_term);
+                        let classic_term_reparsed: Term = string.parse().unwrap();
+                        assert_eq!(
+                            classic_term, classic_term_reparsed,
+                            "terms did not match! binary {bitstring_string} -> {binary_term} -> {string} -> {classic_term_reparsed}"
+                        );
+                    }
                 }
             }
         }

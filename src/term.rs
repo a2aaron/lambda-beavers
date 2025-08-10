@@ -48,62 +48,68 @@ impl FromStr for Term {
 
 impl fmt::Display for Term {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.print(f, PrintContext::TopLevel)
+        self.print(
+            f,
+            PrintContext {
+                left_app_needs_parens: false,
+                right_app_immediate: false,
+            },
+        )
     }
 }
-
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum PrintContext {
-    TopLevel,
-    InAbs,
-    InAppLeft,
-    InAppRight,
+struct PrintContext {
+    left_app_needs_parens: bool,
+    right_app_immediate: bool,
 }
 
 impl Term {
     fn print(&self, f: &mut fmt::Formatter<'_>, ctx: PrintContext) -> fmt::Result {
         match self {
-            Term::Literal(lit) => write!(f, "{}", lit),
-            // Suppose we have this program:
-            // λ 1 λ 2
-            // We want to distinguish the following parses
-            // (λ 1) (λ 2)
-            // λ (1 λ 2)
-            // In the first one, we can reduce the parenthesis to this:
-            // (λ 1) λ 2
-            // In the second one, we can reduce to this:
-            // λ 1 λ 2
-            // So the only case we need parens is InAppLeft
-            Term::Abstraction(arg, body) => match ctx {
-                PrintContext::TopLevel | PrintContext::InAbs | PrintContext::InAppRight => {
-                    write!(f, "λ{arg}.")?;
-                    body.print(f, PrintContext::InAbs)
-                }
-                PrintContext::InAppLeft => {
+            Term::Literal(literal) => write!(f, "{literal}"),
+            Term::Abstraction(arg, body) => {
+                if ctx.left_app_needs_parens {
+                    // Clear the left app flag, since we no longer have any chance of being ambigious
+                    let ctx = PrintContext {
+                        left_app_needs_parens: false,
+                        right_app_immediate: false,
+                    };
                     write!(f, "(λ{arg}.")?;
-                    body.print(f, PrintContext::InAbs)?;
+                    body.print(f, ctx)?;
                     write!(f, ")")
+                } else {
+                    let ctx = PrintContext {
+                        left_app_needs_parens: ctx.left_app_needs_parens,
+                        right_app_immediate: false,
+                    };
+                    write!(f, "λ{arg}.")?;
+                    body.print(f, ctx)
                 }
-            },
-            // Suppose we have
-            // 1 2 3
-            // We need to distinguish the following parses:
-            // (1 2) 3, which is the default and can be written just as 1 2 3
-            // and 1 (2 3), which needs parens
-            Term::Application(func, arg) => match ctx {
-                PrintContext::TopLevel | PrintContext::InAbs | PrintContext::InAppLeft => {
-                    func.print(f, PrintContext::InAppLeft)?;
-                    write!(f, " ")?;
-                    arg.print(f, PrintContext::InAppRight)
-                }
-                PrintContext::InAppRight => {
+            }
+            Term::Application(func, arg) => {
+                // Set the left app flag, since terms inside of it may need parenethsization to
+                // avoid being ambigious.
+                let func_ctx = PrintContext {
+                    left_app_needs_parens: true,
+                    right_app_immediate: false,
+                };
+                let arg_ctx = PrintContext {
+                    left_app_needs_parens: ctx.left_app_needs_parens,
+                    right_app_immediate: true,
+                };
+
+                if ctx.right_app_immediate {
                     write!(f, "(")?;
-                    func.print(f, PrintContext::InAppLeft)?;
+                    func.print(f, func_ctx)?;
                     write!(f, " ")?;
-                    arg.print(f, PrintContext::InAppRight)?;
+                    arg.print(f, arg_ctx)?;
                     write!(f, ")")
+                } else {
+                    func.print(f, func_ctx)?;
+                    write!(f, " ")?;
+                    arg.print(f, arg_ctx)
                 }
-            },
+            }
         }
     }
 }
@@ -165,6 +171,7 @@ fn from_debruijn(debruijn: &Debruijn, ctx: &mut Context) -> Term {
     match debruijn {
         Debruijn::Index(index) => lit(ctx
             .get(*index)
+            // TODO: this ends up rebinding unbound vars to different values even if they should be the same...
             .unwrap_or_else(|| format!("unbound_{index}").into())),
         Debruijn::Application { func, arg } => {
             call(from_debruijn(&func, ctx), from_debruijn(&arg, ctx))
