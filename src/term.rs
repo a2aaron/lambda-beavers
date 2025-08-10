@@ -96,12 +96,20 @@ impl From<&Debruijn> for Term {
     }
 }
 
+// Turn a Debruijn term into a classic Term.
+// depth refers to how many layers of
 fn from_debruijn(debruijn: &Debruijn, ctx: &mut Context) -> Term {
     match debruijn {
-        Debruijn::Index(index) => lit(ctx
-            .get(*index)
-            // TODO: this ends up rebinding unbound vars to different values even if they should be the same...
-            .unwrap_or_else(|| format!("unbound_{index}").into())),
+        Debruijn::Index(index) => lit(ctx.get(*index).unwrap_or_else(|| {
+            // Indicies which are greater than the current depth are unbound.
+            // Note that they can end up refering to the same values.
+            // Eg: in λ (λ (λ 4) 3) 2, all of these refer to the same unbound variable
+            // (which would be named unbound_1 in this case)
+            let depth = ctx.variables.len();
+            assert!(*index > depth);
+            let unbound_name = format!("u_{}", index - depth).into();
+            unbound_name
+        })),
         Debruijn::Application { func, arg } => {
             call(from_debruijn(&func, ctx), from_debruijn(&arg, ctx))
         }

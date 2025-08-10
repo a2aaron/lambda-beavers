@@ -82,32 +82,32 @@ fn main() {
             .filter_map(|bitstring| parse::binary::from_vec(bitstring.to_vec()).ok());
 
         for term in terms {
+            let term_classic = Term::from(&term);
             let mut graph = ReductionGraph::with_root(term.clone());
             let (result, reductions_used) = reduce(&mut graph, &mut reduction_strategy, max);
             match result {
                 ReductionResult::NormalForm(brnf) => {
-                    let binary_term = format!("{:b}", term);
-                    let binary_brnf = format!("{:b}", brnf);
+                    let brnf_classic = Term::from(&brnf);
+                    let term_binary = format!("{:b}", term);
+                    let brnf_binary = format!("{:b}", brnf);
                     println!(
-                        "{binary_term} -> {binary_brnf} | {term} -> {brnf} | lengths: {} -> {} | found in {reductions_used}",
-                        binary_term.len(),
-                        binary_brnf.len(),
+                        "{term_binary} -> {brnf_binary} | {term} -> {brnf} | {term_classic} -> {brnf_classic} | lengths: {} -> {} | found in {reductions_used}",
+                        term_binary.len(),
+                        brnf_binary.len(),
                     );
-                    histogram_lengths.add(binary_brnf.len());
+                    histogram_lengths.add(brnf_binary.len());
                     histogram_time.add(reductions_used);
                 }
                 ReductionResult::Irreducible => {
-                    let term_classic = Term::from(&term);
                     println!(
-                        "{term:b} [{term}] [{term_classic}] -> <proved irreducible after {reductions_used} reductions>"
+                        "{term:b} | {term} | {term_classic} | <proved irreducible after {reductions_used} reductions>"
                     );
                     histogram_lengths.add_irreducable();
                     histogram_time.add_irreducable();
                 }
                 ReductionResult::MaxReductionsReached => {
-                    let term_classic = Term::from(&term);
                     println!(
-                        "{term:b} [{term}] [{term_classic}] -> <not found after {reductions_used} reductions>"
+                        "{term:b} | {term} | {term_classic} | <not found after {reductions_used} reductions>"
                     );
                     histogram_lengths.add_timeout();
                     histogram_time.add_timeout();
