@@ -105,7 +105,7 @@ impl Term {
     fn print(&self, f: &mut fmt::Formatter<'_>, ctx: PrintContext) -> fmt::Result {
         match self {
             Term::Literal(literal) => write!(f, "{literal}"),
-            Term::Abstraction(arg, body) => {
+            Term::Abstraction { arg, body } => {
                 if ctx.left_app_needs_parens {
                     write!(f, "(λ{arg}.")?;
                     body.print(f, ctx.abs_parens())?;
@@ -115,7 +115,7 @@ impl Term {
                     body.print(f, ctx.abs_not_parens())
                 }
             }
-            Term::Application(func, arg) => {
+            Term::Application { func, arg } => {
                 if ctx.right_app_immediate {
                     write!(f, "(")?;
                 }

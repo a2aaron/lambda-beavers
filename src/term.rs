@@ -30,8 +30,8 @@ impl From<String> for Literal {
 #[derive(Debug, PartialEq, Eq)]
 pub enum Term {
     Literal(Literal),
-    Abstraction(Literal, Box<Term>),
-    Application(Box<Term>, Box<Term>),
+    Abstraction { arg: Literal, body: Box<Term> },
+    Application { func: Box<Term>, arg: Box<Term> },
 }
 
 impl FromStr for Term {
@@ -121,10 +121,16 @@ pub fn lit(l: impl Into<Literal>) -> Term {
 
 // Helper method to create a lambda abstraction
 pub fn def(i: impl Into<Literal>, b: impl Into<Term>) -> Term {
-    Term::Abstraction(i.into(), Box::new(b.into()))
+    Term::Abstraction {
+        arg: i.into(),
+        body: Box::new(b.into()),
+    }
 }
 
 // Helper method to create a function application
 pub fn call(a: impl Into<Term>, b: impl Into<Term>) -> Term {
-    Term::Application(Box::new(a.into()), Box::new(b.into()))
+    Term::Application {
+        func: Box::new(a.into()),
+        arg: Box::new(b.into()),
+    }
 }

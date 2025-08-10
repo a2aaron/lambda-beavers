@@ -102,15 +102,15 @@ pub fn compile(term: Term, ctx: &mut Context) -> Result<Debruijn, String> {
             Some(index) => idx(index),
             None => return Err(format!("unbound variable {}", literal)),
         },
-        Term::Abstraction(literal, term) => {
-            ctx.push_literal(literal.clone());
-            let term = compile(*term, ctx)?;
-            ctx.pop_literal(literal);
+        Term::Abstraction { arg, body } => {
+            ctx.push_literal(arg.clone());
+            let term = compile(*body, ctx)?;
+            ctx.pop_literal(arg);
             def(term)
         }
-        Term::Application(term1, term2) => {
-            let term1 = compile(*term1, ctx)?;
-            let term2 = compile(*term2, ctx)?;
+        Term::Application { func, arg } => {
+            let term1 = compile(*func, ctx)?;
+            let term2 = compile(*arg, ctx)?;
             call(term1, term2)
         }
     };
