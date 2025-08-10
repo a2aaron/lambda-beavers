@@ -10,6 +10,7 @@ pub mod graph;
 pub mod parse_binary;
 pub mod parse_debruijn;
 pub mod parse_term;
+pub mod print;
 pub mod reduce;
 pub mod replace;
 pub mod term;

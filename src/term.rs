@@ -1,7 +1,4 @@
-use std::{
-    fmt::{self, Display},
-    str::FromStr,
-};
+use std::{fmt::Display, str::FromStr};
 
 use crate::{debruijn::Debruijn, parse_term};
 
@@ -43,74 +40,6 @@ impl FromStr for Term {
     fn from_str(term: &str) -> Result<Self, Self::Err> {
         let tokens = parse_term::tokenize(term);
         parse_term::parse_program(&tokens)
-    }
-}
-
-impl fmt::Display for Term {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.print(
-            f,
-            PrintContext {
-                left_app_needs_parens: false,
-                right_app_immediate: false,
-            },
-        )
-    }
-}
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PrintContext {
-    left_app_needs_parens: bool,
-    right_app_immediate: bool,
-}
-
-impl Term {
-    fn print(&self, f: &mut fmt::Formatter<'_>, ctx: PrintContext) -> fmt::Result {
-        match self {
-            Term::Literal(literal) => write!(f, "{literal}"),
-            Term::Abstraction(arg, body) => {
-                if ctx.left_app_needs_parens {
-                    // Clear the left app flag, since we no longer have any chance of being ambigious
-                    let ctx = PrintContext {
-                        left_app_needs_parens: false,
-                        right_app_immediate: false,
-                    };
-                    write!(f, "(λ{arg}.")?;
-                    body.print(f, ctx)?;
-                    write!(f, ")")
-                } else {
-                    let ctx = PrintContext {
-                        left_app_needs_parens: ctx.left_app_needs_parens,
-                        right_app_immediate: false,
-                    };
-                    write!(f, "λ{arg}.")?;
-                    body.print(f, ctx)
-                }
-            }
-            Term::Application(func, arg) => {
-                // Set the left app flag, since terms inside of it may need parenethsization to
-                // avoid being ambigious.
-                let func_ctx = PrintContext {
-                    left_app_needs_parens: true,
-                    right_app_immediate: false,
-                };
-                let arg_ctx = PrintContext {
-                    left_app_needs_parens: ctx.left_app_needs_parens,
-                    right_app_immediate: true,
-                };
-
-                if ctx.right_app_immediate {
-                    write!(f, "(")?;
-                    func.print(f, func_ctx)?;
-                    write!(f, " ")?;
-                    arg.print(f, arg_ctx)?;
-                    write!(f, ")")
-                } else {
-                    func.print(f, func_ctx)?;
-                    write!(f, " ")?;
-                    arg.print(f, arg_ctx)
-                }
-            }
-        }
     }
 }
 
