@@ -1,10 +1,11 @@
+use clap::Parser;
 use std::collections::HashMap;
 
 use lambda_beaver::{
     debruijn::Debruijn,
     graph::ReductionGraph,
     parse,
-    reduce::ReductionStrategy,
+    reduce::{ReductionStrategy, ReductionStrategyKind},
     term::Term,
     utils::{self},
 };
@@ -64,21 +65,43 @@ impl Histogram {
     }
 }
 
+#[derive(Parser, Debug)]
+#[command(about, long_about = None)]
+struct Args {
+    /// Minimum bitlength
+    #[arg(long, default_value_t = 0)]
+    min_bitlength: usize,
+    /// Maximum bitlength
+    #[arg(long, default_value_t = 25)]
+    max_bitlength: usize,
+    /// Maximum number of reductions
+    #[arg(long, default_value_t = 1_000)]
+    max_reductions: usize,
+    /// Reduction strategy
+    #[arg(long, default_value = "bfs")]
+    reduction_strategy: ReductionStrategyKind,
+}
+
 #[allow(unused_variables)]
 fn main() {
-    let mut reduction_strategy = ReductionStrategy::random();
-    let max = 1_000;
+    let args = Args::parse();
+    let mut reduction_strategy = ReductionStrategy::from(args.reduction_strategy);
+    let min_bitlength = args.min_bitlength;
+    let max_bitlength = args.max_bitlength;
+    let max_reductions = args.max_reductions;
+
     let mut histogram_lengths = Histogram::new();
     let mut histogram_time = Histogram::new();
 
-    for length in 0..=25 {
+    for length in min_bitlength..=max_bitlength {
         let terms = utils::bitstring_permutations(length)
-            .filter_map(|bitstring| parse::binary::from_vec(bitstring.to_vec()).ok());
+            .filter_map(|bitstring| parse::binary::from_vec(bitstring).ok());
 
         for term in terms {
             let term_classic = Term::from(&term);
             let mut graph = ReductionGraph::with_root(term.clone());
-            let (result, reductions_used) = reduce(&mut graph, &mut reduction_strategy, max);
+            let (result, reductions_used) =
+                reduce(&mut graph, &mut reduction_strategy, max_reductions);
             match result {
                 ReductionResult::NormalForm(brnf) => {
                     let brnf_classic = Term::from(&brnf);
