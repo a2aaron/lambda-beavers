@@ -25,7 +25,7 @@ impl NodeLabelType {
 
 pub fn to_graphviz(graph: &ReductionGraph, node_label: NodeLabelType) -> String {
     let mut output = vec![];
-    output.push(format!("digraph G {{"));
+    output.push(format!("strict digraph G {{"));
 
     if let Some(root) = graph.root {
         let root = format!("{} [color = red];", root.0);

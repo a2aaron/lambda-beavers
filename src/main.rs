@@ -77,7 +77,7 @@ fn main() {
     let mut histogram_lengths = Histogram::new();
     let mut histogram_time = Histogram::new();
 
-    for length in 0..=22 {
+    for length in 0..=25 {
         let terms = utils::bitstring_permutations(length)
             .filter_map(|bitstring| parse_binary::from_vec(bitstring.to_vec()).ok());
 
