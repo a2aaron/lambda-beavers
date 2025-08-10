@@ -9,7 +9,7 @@ use std::collections::HashMap;
 use lambda_beaver::{
     debruijn::Debruijn,
     graph::ReductionGraph,
-    parse_binary,
+    parse,
     reduce::ReductionStrategy,
     term::Term,
     utils::{self},
@@ -79,7 +79,7 @@ fn main() {
 
     for length in 0..=25 {
         let terms = utils::bitstring_permutations(length)
-            .filter_map(|bitstring| parse_binary::from_vec(bitstring.to_vec()).ok());
+            .filter_map(|bitstring| parse::binary::from_vec(bitstring.to_vec()).ok());
 
         for term in terms {
             let mut graph = ReductionGraph::with_root(term.clone());

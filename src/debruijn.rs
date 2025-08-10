@@ -1,7 +1,8 @@
 use std::{collections::HashMap, error::Error, fmt::Binary, str::FromStr};
 
 use crate::{
-    parse_debruijn, parse_term,
+    parse::debruijn,
+    parse::term,
     term::{Literal, Term},
 };
 use std::fmt;
@@ -74,11 +75,11 @@ impl FromStr for Debruijn {
 
     fn from_str(term: &str) -> Result<Self, Self::Err> {
         if term.chars().any(|c| c.is_numeric()) {
-            let tokens = parse_debruijn::tokenize(term)?;
-            Ok(parse_debruijn::parse_program(&tokens)?)
+            let tokens = debruijn::tokenize(term)?;
+            Ok(debruijn::parse_program(&tokens)?)
         } else {
-            let classic_tokenized = parse_term::tokenize(term);
-            let classic_parsed = parse_term::parse_program(&classic_tokenized)?;
+            let classic_tokenized = term::tokenize(term);
+            let classic_parsed = term::parse_program(&classic_tokenized)?;
             let debruijn = Debruijn::try_from(classic_parsed)?;
             Ok(debruijn)
         }

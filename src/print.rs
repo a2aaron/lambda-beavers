@@ -133,7 +133,7 @@ impl Term {
 
 #[cfg(test)]
 mod test {
-    use crate::{debruijn::Debruijn, parse_binary, term::Term, utils};
+    use crate::{debruijn::Debruijn, parse::binary, term::Term, utils};
 
     #[test]
     fn display_and_parse() {
@@ -151,7 +151,7 @@ mod test {
                     .iter()
                     .map(|b| if *b { "1" } else { "0" })
                     .collect();
-                if let Ok(binary_term) = parse_binary::from_vec(bitstring) {
+                if let Ok(binary_term) = binary::from_vec(bitstring) {
                     let string = format!("{}", binary_term);
                     let normal_term: Debruijn = string.parse().unwrap();
                     assert_eq!(
@@ -171,7 +171,7 @@ mod test {
                     .iter()
                     .map(|b| if *b { "1" } else { "0" })
                     .collect();
-                if let Ok(binary_term) = parse_binary::from_vec(bitstring) {
+                if let Ok(binary_term) = binary::from_vec(bitstring) {
                     if binary_term.is_closed_term() {
                         let classic_term: Term = Term::from(&binary_term);
                         let string = format!("{}", classic_term);

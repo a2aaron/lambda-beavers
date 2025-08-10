@@ -7,9 +7,11 @@
 pub mod common_terms;
 pub mod debruijn;
 pub mod graph;
-pub mod parse_binary;
-pub mod parse_debruijn;
-pub mod parse_term;
+pub mod parse {
+    pub mod binary;
+    pub mod debruijn;
+    pub mod term;
+}
 pub mod print;
 pub mod reduce;
 pub mod replace;
