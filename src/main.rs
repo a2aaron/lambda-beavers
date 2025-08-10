@@ -1,9 +1,3 @@
-#![feature(iter_intersperse)]
-#![feature(hash_set_entry)]
-#![feature(macro_metavar_expr_concat)]
-#![feature(type_alias_impl_trait)]
-#![feature(never_type)]
-
 use std::collections::HashMap;
 
 use lambda_beaver::{
