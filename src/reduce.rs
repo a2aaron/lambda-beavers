@@ -134,11 +134,11 @@ impl ReductionStrategy {
             return None;
         }
         let node = match self {
-            ReductionStrategy::DFS => graph.unreduced_nodes[graph.unreduced_nodes.len() - 1],
-            ReductionStrategy::BFS => graph.unreduced_nodes[0],
+            ReductionStrategy::DFS => graph.incomplete_nodes[graph.incomplete_nodes.len() - 1],
+            ReductionStrategy::BFS => graph.incomplete_nodes[0],
             ReductionStrategy::Random(rng) => {
-                let index = rng.rand_usize() % graph.unreduced_nodes.len();
-                graph.unreduced_nodes[index]
+                let index = rng.rand_usize() % graph.incomplete_nodes.len();
+                graph.incomplete_nodes[index]
             }
         };
         Some(node)
@@ -194,7 +194,7 @@ fn beta_reduce_if_possible(term: &Debruijn) -> Option<Fragment> {
     }
 }
 
-fn _beta_reduce(func: &Debruijn, arg: &Debruijn) -> Debruijn {
+pub fn _beta_reduce(func: &Debruijn, arg: &Debruijn) -> Debruijn {
     match func {
         Debruijn::Abstraction { body } => __beta_reduce(&body, arg),
         _ => panic!("Expected an abstraction"),

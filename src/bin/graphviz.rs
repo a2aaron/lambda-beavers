@@ -41,7 +41,7 @@ pub fn to_graphviz(graph: &ReductionGraph, node_label: NodeLabelType) -> String 
         output.push(brnf);
     }
     for (i, node) in graph.nodes().iter().enumerate() {
-        let label = node_label.to_string(node);
+        let label = node_label.to_string(&node.term);
         let node = format!("{} [label = \"{}\"];", i, label);
         output.push(node);
     }
@@ -63,7 +63,9 @@ pub fn reduce_with_stats(
         let node_to_reduce = reduction_strategy.get_node(graph);
         match node_to_reduce {
             Some(node_to_reduce) => {
-                let graph_update = graph.reduce_node(node_to_reduce);
+                // TODO: select this via strategy
+                let redex_index = graph.get(node_to_reduce).unwrap().unevaluated_redexes[0];
+                let graph_update = graph.reduce_node(node_to_reduce, redex_index);
                 if graph_update.is_brnf {
                     brnf_found_at = Some(i);
                 }
@@ -74,14 +76,18 @@ pub fn reduce_with_stats(
                     format!("not found")
                 };
                 println!(
-                    "{i}/{max} - {} unreduced nodes remain (+{} this reduction) | BRNF: {}",
-                    graph.unreduced_nodes().len(),
-                    graph_update.new_nodes.len(),
+                    "{i}/{max} - {} unevaluated redexes remain (+{} this reduction) | BRNF: {}",
+                    graph.incomplete_nodes().len(),
+                    graph_update
+                        .new_node
+                        .map(|idx| graph.get(idx).unwrap())
+                        .map(|node| node.unevaluated_redexes.len())
+                        .unwrap_or(0),
                     brnf_message
                 );
             }
             None => {
-                assert!(graph.unreduced_nodes().is_empty());
+                assert!(graph.incomplete_nodes().is_empty());
                 println!("SUCCESS, no unreduced nodes remain");
                 println!(
                     "{} total nodes, {} total edges",
@@ -94,7 +100,7 @@ pub fn reduce_with_stats(
     }
     println!(
         "TIMEOUT REACHED - {} unreduced nodes remain",
-        graph.unreduced_nodes().len()
+        graph.incomplete_nodes().len()
     );
 }
 
