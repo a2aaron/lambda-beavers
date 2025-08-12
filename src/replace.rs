@@ -41,7 +41,7 @@ impl Display for TreePath {
     }
 }
 
-pub fn treepath_filter2<T>(
+pub fn treepath_filter<T>(
     term: &Debruijn,
     filter_map: fn(&Debruijn, TreePath) -> Option<T>,
 ) -> Vec<T> {
@@ -53,43 +53,6 @@ pub fn treepath_filter2<T>(
     ) {
         if let Some(value) = filter_map(term, current_path.clone()) {
             emits.push(value);
-        }
-
-        match term {
-            Debruijn::Index(_) => (),
-            Debruijn::Application { func, arg } => {
-                current_path.0.push(Direction::Left);
-                _treepath_filter(&func, filter_map, current_path, emits);
-                current_path.0.pop();
-
-                current_path.0.push(Direction::Right);
-                _treepath_filter(&arg, filter_map, current_path, emits);
-                current_path.0.pop();
-            }
-            Debruijn::Abstraction { body } => {
-                _treepath_filter(body, filter_map, current_path, emits)
-            }
-        }
-    }
-
-    let mut current_path = TreePath(vec![]);
-    let mut emits = vec![];
-    _treepath_filter(term, filter_map, &mut current_path, &mut emits);
-    emits
-}
-
-pub fn treepath_filter<T>(
-    term: &Debruijn,
-    filter_map: fn(&Debruijn) -> Option<T>,
-) -> Vec<(TreePath, T)> {
-    fn _treepath_filter<T>(
-        term: &Debruijn,
-        filter_map: fn(&Debruijn) -> Option<T>,
-        current_path: &mut TreePath,
-        emits: &mut Vec<(TreePath, T)>,
-    ) {
-        if let Some(value) = filter_map(term) {
-            emits.push((current_path.clone(), value));
         }
 
         match term {

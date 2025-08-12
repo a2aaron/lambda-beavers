@@ -25,15 +25,11 @@ impl Redex {
         }
     }
 
-    fn beta_reduce(&self, root: Debruijn) -> RedexResult {
+    fn beta_reduce(&self, root: Debruijn) -> Debruijn {
         let fragment = Fragment(reduce::_beta_reduce(&self.func, &self.arg));
         let term = replace::replace(root, fragment.clone(), &self.treepath);
-        RedexResult { term }
+        term
     }
-}
-
-struct RedexResult {
-    term: Debruijn,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -66,7 +62,7 @@ impl ReductionNode {
         self.redexes.get(redex.0)
     }
 
-    fn evaluate_redex(&mut self, redex_index: RedexIndex) -> RedexResult {
+    fn evaluate_redex(&mut self, redex_index: RedexIndex) -> Debruijn {
         assert!(self.is_unevaled(redex_index));
         let index = self
             .unevaluated_redexes
@@ -93,19 +89,18 @@ impl ReductionNode {
 }
 
 fn get_redexes(term: &Debruijn) -> Vec<Redex> {
-    fn try_into_redex(term: &Debruijn) -> Option<(Debruijn, Debruijn)> {
+    fn try_into_redex(term: &Debruijn, treepath: TreePath) -> Option<Redex> {
         match term {
             Debruijn::Application { func, arg } => match **func {
-                Debruijn::Abstraction { .. } => Some((*func.clone(), *arg.clone())),
+                Debruijn::Abstraction { .. } => {
+                    Some(Redex::new(*func.clone(), *arg.clone(), treepath))
+                }
                 _ => None,
             },
             _ => None,
         }
     }
     replace::treepath_filter(term, try_into_redex)
-        .into_iter()
-        .map(|(treepath, (func, arg))| Redex::new(func, arg, treepath))
-        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -163,10 +158,6 @@ impl ReductionGraph {
         }
     }
 
-    fn add_node_from_redex_result(&mut self, redex_result: RedexResult) -> (NodeIndex, bool) {
-        self.add_node_from_term(redex_result.term)
-    }
-
     fn add_edge(&mut self, start: NodeIndex, end: NodeIndex) {
         self.edges.push((start, end));
     }
@@ -178,12 +169,12 @@ impl ReductionGraph {
             "node at {node_index} must have unevaluated redex"
         );
 
-        let redex_result = node.evaluate_redex(redex_index);
+        let reduced_term = node.evaluate_redex(redex_index);
         if !node.has_unevaled_redexes() {
             self.set_fully_evaled(node_index);
         }
 
-        let (new_node_index, already_exists) = self.add_node_from_redex_result(redex_result);
+        let (new_node_index, already_exists) = self.add_node_from_term(reduced_term);
         let new_node = self.get(new_node_index).unwrap();
 
         let is_brnf = new_node.is_brnf();

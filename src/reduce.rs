@@ -5,7 +5,6 @@ use clap::ValueEnum;
 use crate::{
     debruijn::{Debruijn, call, def, idx},
     graph::{NodeIndex, ReductionGraph},
-    replace,
     utils::Rng,
 };
 
@@ -166,31 +165,12 @@ impl From<ReductionStrategyKind> for ReductionStrategy {
     }
 }
 
-pub fn get_reductions(term: &Debruijn) -> Vec<Debruijn> {
-    replace::treepath_filter(term, beta_reduce_if_possible)
-        .into_iter()
-        .map(|(treepath, reduced_fragment)| {
-            replace::replace(term.clone(), reduced_fragment.clone(), &treepath)
-        })
-        .collect()
-}
-
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Fragment(pub Debruijn);
 
 impl Display for Fragment {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
-    }
-}
-
-fn beta_reduce_if_possible(term: &Debruijn) -> Option<Fragment> {
-    match term {
-        Debruijn::Application { func, arg } => match &**func {
-            Debruijn::Abstraction { body } => Some(Fragment(__beta_reduce(body, arg))),
-            _ => None,
-        },
-        _ => None,
     }
 }
 
