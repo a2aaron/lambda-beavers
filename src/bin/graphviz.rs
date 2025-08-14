@@ -3,6 +3,7 @@ use std::str::FromStr;
 use clap::{Parser, ValueEnum, command};
 use lambda_beaver::common_terms::{self};
 
+use lambda_beaver::parse;
 use lambda_beaver::reduce::{ReductionStrategy, ReductionStrategyKind};
 use lambda_beaver::replace::VisitOrder;
 use lambda_beaver::term::Term;
@@ -58,6 +59,7 @@ pub fn reduce_with_stats(
     graph: &mut ReductionGraph,
     mut reduction_strategy: ReductionStrategy,
     max: usize,
+    stop_on_bnf: bool,
 ) {
     let mut brnf_found_at = None;
     for i in 0..max {
@@ -98,6 +100,11 @@ pub fn reduce_with_stats(
                 return;
             }
         }
+
+        if stop_on_bnf && brnf_found_at.is_some() {
+            println!("STOPING EARLY - BNF was found");
+            return;
+        }
     }
     println!(
         "TIMEOUT REACHED - {} unreduced nodes remain",
@@ -122,6 +129,8 @@ struct Args {
     /// Output file for the graphviz representation
     #[arg(short, long("out"), default_value = "out.dot")]
     output: String,
+    #[arg(short, long, action)]
+    stop_on_bnf: bool,
 }
 
 fn main() {
@@ -130,18 +139,22 @@ fn main() {
     let term = args.term;
     let term = match Debruijn::from_str(&term) {
         Ok(term) => term,
-        Err(err) => {
-            println!("Couldn't parse {term}. Reason: {err}");
-            std::process::exit(1);
-        }
+        Err(err) => match parse::binary::from_str(&term) {
+            Ok(term) => term,
+            Err(binary_err) => {
+                println!("Couldn't parse {term}. Reason: {err}, {:?}", binary_err);
+                std::process::exit(1);
+            }
+        },
     };
     let max_reductions = args.max_reductions;
     let strategy = ReductionStrategy::from(args.strategy);
     let node_label = args.node_label;
     let visit_order = VisitOrder::LEFT_OUTERMOST;
+    let stop_on_bnf = args.stop_on_bnf;
     let mut graph = ReductionGraph::with_root(term, visit_order);
 
-    reduce_with_stats(&mut graph, strategy, max_reductions);
+    reduce_with_stats(&mut graph, strategy, max_reductions, stop_on_bnf);
     let graphviz = to_graphviz(&graph, node_label);
     std::fs::write(&args.output, graphviz).expect("Failed to write Graphviz output");
 }

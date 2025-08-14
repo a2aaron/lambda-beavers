@@ -144,7 +144,8 @@ pub fn reduce(
         let node_to_reduce = reduction_strategy.get_node(&mut graph);
         match node_to_reduce {
             Some(node_to_reduce) => {
-                let redex_index = graph.get(node_to_reduce).unwrap().unevaluated_redexes[0];
+                let reduction_node = graph.get(node_to_reduce).unwrap();
+                let redex_index = reduction_node.unevaluated_redexes[0];
                 graph.reduce_node(node_to_reduce, redex_index);
             }
             _ => return (ReductionResult::Irreducible, i),

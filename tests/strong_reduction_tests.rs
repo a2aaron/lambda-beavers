@@ -12,7 +12,7 @@ const TESTS: &str = include_str!("tests.txt");
 
 fn parse_line(line: &str) -> (Debruijn, Debruijn) {
     let mut split = line.split(": ");
-    let throwaway = split.next().unwrap();
+    let _throwaway = split.next().unwrap();
     let useful_part = split.next().unwrap();
 
     let mut split = useful_part.split(" - ");
