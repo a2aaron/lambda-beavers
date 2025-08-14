@@ -76,15 +76,15 @@ fn main() {
             let (result, reductions_used) =
                 reduce::reduce(&term, &mut reduction_strategy, visit_order, max_reductions);
             match result {
-                ReductionResult::NormalForm(brnf) => {
-                    let brnf_classic = Term::from(&brnf);
-                    let brnf_binary = format!("{:b}", brnf);
+                ReductionResult::NormalForm(bnf) => {
+                    let bnf_classic = Term::from(&bnf);
+                    let bnf_binary = format!("{:b}", bnf);
                     println!(
-                        "{term_binary} -> {brnf_binary} | {term} -> {brnf} | {term_classic} -> {brnf_classic} | lengths: {} -> {} | found in {reductions_used}",
+                        "{term_binary} -> {bnf_binary} | {term} -> {bnf} | {term_classic} -> {bnf_classic} | lengths: {} -> {} | found in {reductions_used}",
                         term_binary.len(),
-                        brnf_binary.len(),
+                        bnf_binary.len(),
                     );
-                    histogram_lengths.add(brnf_binary.len());
+                    histogram_lengths.add(bnf_binary.len());
                     histogram_time.add(reductions_used);
                 }
                 ReductionResult::Irreducible => {

@@ -75,7 +75,7 @@ impl ReductionNode {
         redex.beta_reduce(self.term.clone())
     }
 
-    fn is_brnf(&self) -> bool {
+    fn is_bnf(&self) -> bool {
         self.redexes.is_empty()
     }
 
@@ -127,7 +127,7 @@ pub struct ReductionGraph {
 pub struct GraphUpdate {
     pub new_node: Option<NodeIndex>,
     pub new_edge: (NodeIndex, NodeIndex),
-    pub is_brnf: bool,
+    pub is_bnf: bool,
 }
 
 impl ReductionGraph {
@@ -162,10 +162,10 @@ impl ReductionGraph {
                     self.incomplete_nodes.push(index);
                 }
 
-                if reduction_node.is_brnf() {
+                if reduction_node.is_bnf() {
                     assert!(
                         self.beta_reduced_normal_form.is_none(),
-                        "BRNF was already found at {} but trying to set it again at {}.",
+                        "BNF was already found at {} but trying to set it again at {}.",
                         self.get(self.beta_reduced_normal_form.unwrap())
                             .unwrap()
                             .term,
@@ -198,7 +198,7 @@ impl ReductionGraph {
 
         let (new_node_index, already_exists) = self.add_node_from_term(reduced_term);
         let new_node = self.get(new_node_index).unwrap();
-        let is_brnf = new_node.is_brnf();
+        let is_bnf = new_node.is_bnf();
 
         let new_edge = (node_index, new_node_index);
         self.add_edge(node_index, new_node_index);
@@ -210,7 +210,7 @@ impl ReductionGraph {
                 Some(new_node_index)
             },
             new_edge,
-            is_brnf,
+            is_bnf,
         }
     }
 
@@ -290,13 +290,13 @@ mod test {
     }
 
     #[test]
-    fn brnf_check() {
+    fn bnf_check() {
         let term = "(λ 1) λ λ 1";
         let term = Debruijn::from_str(term).unwrap();
         let node = ReductionNode::from_term(term, VisitOrder::LEFT_INNERMOST);
         assert!(
-            !node.is_brnf(),
-            "Expected {} to be BRNF. Redex: {:?}",
+            !node.is_bnf(),
+            "Expected {} to be BNF. Redex: {:?}",
             node.term,
             node.redexes
         );

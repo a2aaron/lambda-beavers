@@ -38,9 +38,9 @@ pub fn to_graphviz(graph: &ReductionGraph, node_label: NodeLabelType) -> String 
         let root = format!("{} [color = red];", root.0);
         output.push(root);
     }
-    if let Some(brnf) = graph.beta_reduced_normal_form {
-        let brnf = format!("{} [color = blue];", brnf.0);
-        output.push(brnf);
+    if let Some(bnf) = graph.beta_reduced_normal_form {
+        let bnf = format!("{} [color = blue];", bnf.0);
+        output.push(bnf);
     }
     for (i, node) in graph.nodes().iter().enumerate() {
         let label = node_label.to_string(&node.term);
@@ -61,7 +61,7 @@ pub fn reduce_with_stats(
     max: usize,
     stop_on_bnf: bool,
 ) {
-    let mut brnf_found_at = None;
+    let mut bnf_found_at = None;
     for i in 0..max {
         let node_to_reduce = reduction_strategy.get_node(graph);
         match node_to_reduce {
@@ -69,24 +69,24 @@ pub fn reduce_with_stats(
                 // TODO: select this via strategy
                 let redex_index = graph.get(node_to_reduce).unwrap().unevaluated_redexes[0];
                 let graph_update = graph.reduce_node(node_to_reduce, redex_index);
-                if graph_update.is_brnf {
-                    brnf_found_at = Some(i);
+                if graph_update.is_bnf {
+                    bnf_found_at = Some(i);
                 }
 
-                let brnf_message = if let Some(brnf_found_at) = brnf_found_at {
-                    format!("found @ {}", brnf_found_at)
+                let bnf_message = if let Some(bnf_found_at) = bnf_found_at {
+                    format!("found @ {}", bnf_found_at)
                 } else {
                     format!("not found")
                 };
                 println!(
-                    "{i}/{max} - {} unevaluated redexes remain (+{} this reduction) | BRNF: {}",
+                    "{i}/{max} - {} unevaluated redexes remain (+{} this reduction) | BNF: {}",
                     graph.incomplete_nodes().len(),
                     graph_update
                         .new_node
                         .map(|idx| graph.get(idx).unwrap())
                         .map(|node| node.unevaluated_redexes.len())
                         .unwrap_or(0),
-                    brnf_message
+                    bnf_message
                 );
             }
             None => {
@@ -101,7 +101,7 @@ pub fn reduce_with_stats(
             }
         }
 
-        if stop_on_bnf && brnf_found_at.is_some() {
+        if stop_on_bnf && bnf_found_at.is_some() {
             println!("STOPING EARLY - BNF was found");
             return;
         }

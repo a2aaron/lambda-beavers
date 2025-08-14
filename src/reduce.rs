@@ -136,8 +136,8 @@ pub fn reduce(
 ) -> (ReductionResult, usize) {
     let mut graph = ReductionGraph::with_root(term.clone(), visit_order);
     for i in 0..max_reductions {
-        if let Some(brnf_index) = graph.beta_reduced_normal_form {
-            let reduced_term = graph.get(brnf_index).unwrap();
+        if let Some(bnf_index) = graph.beta_reduced_normal_form {
+            let reduced_term = graph.get(bnf_index).unwrap();
             return (ReductionResult::NormalForm(reduced_term.term.clone()), i);
         }
 
