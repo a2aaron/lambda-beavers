@@ -4,6 +4,7 @@ use clap::{Parser, ValueEnum, command};
 use lambda_beaver::common_terms::{self};
 
 use lambda_beaver::reduce::{ReductionStrategy, ReductionStrategyKind};
+use lambda_beaver::replace::VisitOrder;
 use lambda_beaver::term::Term;
 use lambda_beaver::{debruijn::Debruijn, graph::ReductionGraph};
 
@@ -137,8 +138,8 @@ fn main() {
     let max_reductions = args.max_reductions;
     let strategy = ReductionStrategy::from(args.strategy);
     let node_label = args.node_label;
-
-    let mut graph = ReductionGraph::with_root(term);
+    let visit_order = VisitOrder::LEFT_OUTERMOST;
+    let mut graph = ReductionGraph::with_root(term, visit_order);
 
     reduce_with_stats(&mut graph, strategy, max_reductions);
     let graphviz = to_graphviz(&graph, node_label);

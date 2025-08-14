@@ -2,41 +2,12 @@ use clap::Parser;
 use std::collections::HashMap;
 
 use lambda_beaver::{
-    debruijn::Debruijn,
-    graph::ReductionGraph,
     parse,
-    reduce::{ReductionStrategy, ReductionStrategyKind},
+    reduce::{self, ReductionResult, ReductionStrategy, ReductionStrategyKind},
+    replace::VisitOrder,
     term::Term,
     utils::{self},
 };
-
-enum ReductionResult {
-    NormalForm(Debruijn),
-    Irreducible,
-    MaxReductionsReached,
-}
-
-fn reduce(
-    graph: &mut ReductionGraph,
-    reduction_strategy: &mut ReductionStrategy,
-    max: usize,
-) -> (ReductionResult, usize) {
-    for i in 0..max {
-        let node_to_reduce = reduction_strategy.get_node(graph);
-        match node_to_reduce {
-            Some(node_to_reduce) => {
-                let redex_index = graph.get(node_to_reduce).unwrap().unevaluated_redexes[0];
-                let graph_update = graph.reduce_node(node_to_reduce, redex_index);
-                if graph_update.is_brnf {
-                    let reduced_term = graph.get(node_to_reduce).unwrap();
-                    return (ReductionResult::NormalForm(reduced_term.term.clone()), i);
-                }
-            }
-            _ => return (ReductionResult::Irreducible, i),
-        }
-    }
-    (ReductionResult::MaxReductionsReached, max)
-}
 
 struct Histogram(HashMap<String, usize>);
 impl Histogram {
@@ -90,6 +61,7 @@ fn main() {
     let min_bitlength = args.min_bitlength;
     let max_bitlength = args.max_bitlength;
     let max_reductions = args.max_reductions;
+    let visit_order = VisitOrder::LEFT_OUTERMOST;
 
     let mut histogram_lengths = Histogram::new();
     let mut histogram_time = Histogram::new();
@@ -101,9 +73,8 @@ fn main() {
         for term in terms {
             let term_binary = format!("{term:b}");
             let term_classic = Term::from(&term);
-            let mut graph = ReductionGraph::with_root(term.clone());
             let (result, reductions_used) =
-                reduce(&mut graph, &mut reduction_strategy, max_reductions);
+                reduce::reduce(&term, &mut reduction_strategy, visit_order, max_reductions);
             match result {
                 ReductionResult::NormalForm(brnf) => {
                     let brnf_classic = Term::from(&brnf);

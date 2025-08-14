@@ -41,41 +41,103 @@ impl Display for TreePath {
     }
 }
 
-pub fn treepath_filter<T>(
-    term: &Debruijn,
-    filter_map: fn(&Debruijn, TreePath) -> Option<T>,
-) -> Vec<T> {
-    fn _treepath_filter<T>(
-        term: &Debruijn,
-        filter_map: fn(&Debruijn, TreePath) -> Option<T>,
-        current_path: &mut TreePath,
-        emits: &mut Vec<T>,
-    ) {
-        if let Some(value) = filter_map(term, current_path.clone()) {
-            emits.push(value);
-        }
+#[derive(Debug, Clone, Copy)]
+pub struct VisitOrder {
+    emit_outermost_first: bool,
+    emit_left_first: bool,
+}
 
+impl VisitOrder {
+    pub const LEFT_INNERMOST: VisitOrder = VisitOrder {
+        emit_outermost_first: false,
+        emit_left_first: true,
+    };
+    pub const RIGHT_INNERMOST: VisitOrder = VisitOrder {
+        emit_outermost_first: false,
+        emit_left_first: false,
+    };
+    pub const LEFT_OUTERMOST: VisitOrder = VisitOrder {
+        emit_outermost_first: true,
+        emit_left_first: true,
+    };
+    pub const RIGHT_OUTERMOST: VisitOrder = VisitOrder {
+        emit_outermost_first: true,
+        emit_left_first: false,
+    };
+}
+
+struct FilterContext<T> {
+    filter_mapper: fn(&Debruijn, TreePath) -> Option<T>,
+    current_path: TreePath,
+    emits: Vec<T>,
+    visit_order: VisitOrder,
+}
+
+impl<T> FilterContext<T> {
+    fn new(filter_map: fn(&Debruijn, TreePath) -> Option<T>, visit_order: VisitOrder) -> Self {
+        Self {
+            filter_mapper: filter_map,
+            current_path: TreePath(vec![]),
+            emits: vec![],
+            visit_order,
+        }
+    }
+
+    fn emit_term(&mut self, term: &Debruijn) {
+        if let Some(value) = (self.filter_mapper)(term, self.current_path.clone()) {
+            self.emits.push(value);
+        }
+    }
+
+    fn visit_term(&mut self, term: &Debruijn) {
+        if self.visit_order.emit_outermost_first {
+            self.emit_term(term);
+            self.visit_inner_terms(term);
+        } else {
+            self.visit_inner_terms(term);
+            self.emit_term(term);
+        }
+    }
+
+    fn visit_inner_terms(&mut self, term: &Debruijn) {
         match term {
             Debruijn::Index(_) => (),
             Debruijn::Application { func, arg } => {
-                current_path.0.push(Direction::Left);
-                _treepath_filter(&func, filter_map, current_path, emits);
-                current_path.0.pop();
-
-                current_path.0.push(Direction::Right);
-                _treepath_filter(&arg, filter_map, current_path, emits);
-                current_path.0.pop();
+                if self.visit_order.emit_left_first {
+                    self.visit_left(func);
+                    self.visit_right(arg);
+                } else {
+                    self.visit_right(arg);
+                    self.visit_left(func);
+                }
             }
             Debruijn::Abstraction { body } => {
-                _treepath_filter(body, filter_map, current_path, emits)
+                self.visit_term(body);
             }
         }
     }
 
-    let mut current_path = TreePath(vec![]);
-    let mut emits = vec![];
-    _treepath_filter(term, filter_map, &mut current_path, &mut emits);
-    emits
+    fn visit_left(&mut self, func: &Box<Debruijn>) {
+        self.current_path.0.push(Direction::Left);
+        self.visit_term(&func);
+        self.current_path.0.pop();
+    }
+
+    fn visit_right(&mut self, arg: &Debruijn) {
+        self.current_path.0.push(Direction::Right);
+        self.visit_term(&arg);
+        self.current_path.0.pop();
+    }
+}
+
+pub fn treepath_filter<T>(
+    term: &Debruijn,
+    filter_map: fn(&Debruijn, TreePath) -> Option<T>,
+    visit_order: VisitOrder,
+) -> Vec<T> {
+    let mut ctx = FilterContext::new(filter_map, visit_order);
+    ctx.visit_term(term);
+    ctx.emits
 }
 
 pub fn replace(root: Debruijn, replacement: Fragment, treepath: &TreePath) -> Debruijn {

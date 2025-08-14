@@ -5,6 +5,7 @@ use clap::ValueEnum;
 use crate::{
     debruijn::{Debruijn, call, def, idx},
     graph::{NodeIndex, ReductionGraph},
+    replace::VisitOrder,
     utils::Rng,
 };
 
@@ -120,6 +121,37 @@ use crate::{
 ///
 /// Hence, the final rule for beta reduction will look like:
 /// (λ t1) t2 = down_one(t1 {up_one(t) / 1})
+
+pub enum ReductionResult {
+    NormalForm(Debruijn),
+    Irreducible,
+    MaxReductionsReached,
+}
+
+pub fn reduce(
+    term: &Debruijn,
+    reduction_strategy: &mut ReductionStrategy,
+    visit_order: VisitOrder,
+    max_reductions: usize,
+) -> (ReductionResult, usize) {
+    let mut graph = ReductionGraph::with_root(term.clone(), visit_order);
+    for i in 0..max_reductions {
+        if let Some(brnf_index) = graph.beta_reduced_normal_form {
+            let reduced_term = graph.get(brnf_index).unwrap();
+            return (ReductionResult::NormalForm(reduced_term.term.clone()), i);
+        }
+
+        let node_to_reduce = reduction_strategy.get_node(&mut graph);
+        match node_to_reduce {
+            Some(node_to_reduce) => {
+                let redex_index = graph.get(node_to_reduce).unwrap().unevaluated_redexes[0];
+                graph.reduce_node(node_to_reduce, redex_index);
+            }
+            _ => return (ReductionResult::Irreducible, i),
+        }
+    }
+    (ReductionResult::MaxReductionsReached, max_reductions)
+}
 
 pub enum ReductionStrategy {
     DFS,

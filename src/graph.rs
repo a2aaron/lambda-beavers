@@ -3,7 +3,7 @@ use std::{collections::HashMap, fmt::Display};
 use crate::{
     debruijn::Debruijn,
     reduce::{self, Fragment},
-    replace::{self, TreePath},
+    replace::{self, TreePath, VisitOrder},
 };
 
 #[derive(Debug)]
@@ -48,8 +48,8 @@ pub struct ReductionNode {
 }
 
 impl ReductionNode {
-    fn from_term(term: Debruijn) -> ReductionNode {
-        let redexes = get_redexes(&term);
+    fn from_term(term: Debruijn, visit_order: VisitOrder) -> ReductionNode {
+        let redexes = get_redexes(&term, visit_order);
         let unevaluated_redexes = (0..redexes.len()).map(|i| RedexIndex(i)).collect();
         ReductionNode {
             term,
@@ -88,7 +88,7 @@ impl ReductionNode {
     }
 }
 
-fn get_redexes(term: &Debruijn) -> Vec<Redex> {
+fn get_redexes(term: &Debruijn, visit_order: VisitOrder) -> Vec<Redex> {
     fn try_into_redex(term: &Debruijn, treepath: TreePath) -> Option<Redex> {
         match term {
             Debruijn::Application { func, arg } => match **func {
@@ -100,7 +100,7 @@ fn get_redexes(term: &Debruijn) -> Vec<Redex> {
             _ => None,
         }
     }
-    replace::treepath_filter(term, try_into_redex)
+    replace::treepath_filter(term, try_into_redex, visit_order)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,7 +112,7 @@ impl Display for NodeIndex {
     }
 }
 
-#[derive(Default, Debug)]
+#[derive(Debug)]
 pub struct ReductionGraph {
     nodes: Vec<ReductionNode>,
     term_to_node: HashMap<Debruijn, NodeIndex>,
@@ -121,6 +121,7 @@ pub struct ReductionGraph {
     edges: Vec<(NodeIndex, NodeIndex)>,
     pub beta_reduced_normal_form: Option<NodeIndex>,
     pub root: Option<NodeIndex>,
+    visit_order: VisitOrder,
 }
 
 pub struct GraphUpdate {
@@ -130,12 +131,20 @@ pub struct GraphUpdate {
 }
 
 impl ReductionGraph {
-    pub fn new() -> ReductionGraph {
-        ReductionGraph::default()
+    pub fn new(visit_order: VisitOrder) -> ReductionGraph {
+        ReductionGraph {
+            nodes: vec![],
+            term_to_node: HashMap::new(),
+            incomplete_nodes: vec![],
+            edges: vec![],
+            beta_reduced_normal_form: None,
+            root: None,
+            visit_order,
+        }
     }
 
-    pub fn with_root(root: Debruijn) -> ReductionGraph {
-        let mut graph = ReductionGraph::default();
+    pub fn with_root(root: Debruijn, visit_order: VisitOrder) -> ReductionGraph {
+        let mut graph = ReductionGraph::new(visit_order);
         let root = graph.add_node_from_term(root).0;
         graph.root = Some(root);
         graph
@@ -146,12 +155,25 @@ impl ReductionGraph {
         match index {
             Some(index) => (index, false),
             None => {
-                let reduction_node = ReductionNode::from_term(term.clone());
+                let reduction_node = ReductionNode::from_term(term.clone(), self.visit_order);
                 let index = NodeIndex(self.nodes.len());
                 self.term_to_node.insert(term, index);
                 if reduction_node.has_unevaled_redexes() {
                     self.incomplete_nodes.push(index);
                 }
+
+                if reduction_node.is_brnf() {
+                    assert!(
+                        self.beta_reduced_normal_form.is_none(),
+                        "BRNF was already found at {} but trying to set it again at {}.",
+                        self.get(self.beta_reduced_normal_form.unwrap())
+                            .unwrap()
+                            .term,
+                        reduction_node.term
+                    );
+                    self.beta_reduced_normal_form = Some(index);
+                }
+
                 self.nodes.push(reduction_node);
                 (index, true)
             }
@@ -176,20 +198,7 @@ impl ReductionGraph {
 
         let (new_node_index, already_exists) = self.add_node_from_term(reduced_term);
         let new_node = self.get(new_node_index).unwrap();
-
         let is_brnf = new_node.is_brnf();
-        if is_brnf {
-            assert!(
-                self.beta_reduced_normal_form.is_none()
-                    || self.beta_reduced_normal_form == Some(new_node_index),
-                "BRNF was already found at {} but trying to set it again at {}.",
-                self.get(self.beta_reduced_normal_form.unwrap())
-                    .unwrap()
-                    .term,
-                self.get(node_index).unwrap().term,
-            );
-            self.beta_reduced_normal_form = Some(new_node_index);
-        }
 
         let new_edge = (node_index, new_node_index);
         self.add_edge(node_index, new_node_index);
@@ -254,6 +263,7 @@ mod test {
     use crate::{
         debruijn::Debruijn,
         graph::{NodeIndex, ReductionGraph, ReductionNode},
+        replace::VisitOrder,
     };
 
     impl ReductionGraph {
@@ -283,7 +293,7 @@ mod test {
     fn brnf_check() {
         let term = "(λ 1) λ λ 1";
         let term = Debruijn::from_str(term).unwrap();
-        let node = ReductionNode::from_term(term);
+        let node = ReductionNode::from_term(term, VisitOrder::LEFT_INNERMOST);
         assert!(
             !node.is_brnf(),
             "Expected {} to be BRNF. Redex: {:?}",
@@ -296,7 +306,7 @@ mod test {
     fn graph_and_true_false() {
         let root = "(((λ (λ ((2 1) 2))) (λ (λ 2))) (λ (λ 1)))";
         let root = Debruijn::from_str(root).unwrap();
-        let mut graph = ReductionGraph::with_root(root);
+        let mut graph = ReductionGraph::with_root(root, VisitOrder::LEFT_INNERMOST);
 
         while graph.any_reducible() {
             let node_idx = graph.incomplete_nodes[0];
