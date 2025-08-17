@@ -36,7 +36,7 @@ impl Redex {
 pub struct RedexIndex(usize);
 impl Display for RedexIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "redex@{}", self.0)
     }
 }
 
@@ -104,11 +104,11 @@ fn get_redexes(term: &Debruijn, visit_order: VisitOrder) -> Vec<Redex> {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct NodeIndex(pub usize);
+pub struct NodeIndex(usize);
 
 impl Display for NodeIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        write!(f, "node@{}", self.0)
     }
 }
 
@@ -119,8 +119,8 @@ pub struct ReductionGraph {
     // TODO: consider moving the reduction strategy stuff to be in graph.rs
     pub incomplete_nodes: Vec<NodeIndex>,
     edges: Vec<(NodeIndex, NodeIndex)>,
-    pub beta_reduced_normal_form: Option<NodeIndex>,
-    pub root: Option<NodeIndex>,
+    beta_normal_form: Option<NodeIndex>,
+    root: Option<NodeIndex>,
     visit_order: VisitOrder,
 }
 
@@ -131,13 +131,13 @@ pub struct GraphUpdate {
 }
 
 impl ReductionGraph {
-    pub fn new(visit_order: VisitOrder) -> ReductionGraph {
+    fn new(visit_order: VisitOrder) -> ReductionGraph {
         ReductionGraph {
             nodes: vec![],
             term_to_node: HashMap::new(),
             incomplete_nodes: vec![],
             edges: vec![],
-            beta_reduced_normal_form: None,
+            beta_normal_form: None,
             root: None,
             visit_order,
         }
@@ -164,14 +164,12 @@ impl ReductionGraph {
 
                 if reduction_node.is_bnf() {
                     assert!(
-                        self.beta_reduced_normal_form.is_none(),
+                        self.beta_normal_form.is_none(),
                         "BNF was already found at {} but trying to set it again at {}.",
-                        self.get(self.beta_reduced_normal_form.unwrap())
-                            .unwrap()
-                            .term,
+                        self.get(self.beta_normal_form.unwrap()).unwrap().term,
                         reduction_node.term
                     );
-                    self.beta_reduced_normal_form = Some(index);
+                    self.beta_normal_form = Some(index);
                 }
 
                 self.nodes.push(reduction_node);
@@ -236,8 +234,11 @@ impl ReductionGraph {
         self.nodes.get_mut(index.0)
     }
 
-    pub fn nodes(&self) -> &[ReductionNode] {
-        &self.nodes
+    pub fn nodes(&self) -> impl Iterator<Item = (&ReductionNode, NodeIndex)> {
+        self.nodes
+            .iter()
+            .enumerate()
+            .map(|(i, node)| (node, NodeIndex(i)))
     }
 
     pub fn edges(&self) -> &[(NodeIndex, NodeIndex)] {
@@ -253,6 +254,20 @@ impl ReductionGraph {
             .iter()
             .map(|node| node.unevaluated_redexes.len())
             .sum()
+    }
+
+    pub fn root(&self) -> Option<(&ReductionNode, NodeIndex)> {
+        match self.root {
+            Some(root) => Some((self.get(root).unwrap(), root)),
+            None => None,
+        }
+    }
+
+    pub fn bnf(&self) -> Option<(&ReductionNode, NodeIndex)> {
+        match self.beta_normal_form {
+            Some(bnf) => Some((self.get(bnf).unwrap(), bnf)),
+            None => None,
+        }
     }
 }
 

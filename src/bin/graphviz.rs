@@ -34,21 +34,21 @@ pub fn to_graphviz(graph: &ReductionGraph, node_label: NodeLabelType) -> String 
     let mut output = vec![];
     output.push(format!("strict digraph G {{"));
 
-    if let Some(root) = graph.root {
-        let root = format!("{} [color = red];", root.0);
+    if let Some((_, root)) = graph.root() {
+        let root = format!("{} [color = red];", root);
         output.push(root);
     }
-    if let Some(bnf) = graph.beta_reduced_normal_form {
-        let bnf = format!("{} [color = blue];", bnf.0);
+    if let Some((_, bnf)) = graph.bnf() {
+        let bnf = format!("{} [color = blue];", bnf);
         output.push(bnf);
     }
-    for (i, node) in graph.nodes().iter().enumerate() {
+    for (node, i) in graph.nodes() {
         let label = node_label.to_string(&node.term);
         let node = format!("{} [label = \"{}\"];", i, label);
         output.push(node);
     }
     for (a, b) in graph.edges() {
-        let edge = format!("{} -> {}", a.0, b.0);
+        let edge = format!("{} -> {}", a, b);
         output.push(edge);
     }
     output.push(format!("}}"));
@@ -94,7 +94,7 @@ pub fn reduce_with_stats(
                 println!("SUCCESS, no unreduced nodes remain");
                 println!(
                     "{} total nodes, {} total edges",
-                    graph.nodes().len(),
+                    graph.nodes().count(),
                     graph.edges().len()
                 );
                 return;

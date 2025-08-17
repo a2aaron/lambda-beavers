@@ -136,22 +136,32 @@ pub fn reduce(
 ) -> (ReductionResult, usize) {
     let mut graph = ReductionGraph::with_root(term.clone(), visit_order);
     for i in 0..max_reductions {
-        if let Some(bnf_index) = graph.beta_reduced_normal_form {
-            let reduced_term = graph.get(bnf_index).unwrap();
-            return (ReductionResult::NormalForm(reduced_term.term.clone()), i);
-        }
-
-        let node_to_reduce = reduction_strategy.get_node(&mut graph);
-        match node_to_reduce {
-            Some(node_to_reduce) => {
-                let reduction_node = graph.get(node_to_reduce).unwrap();
-                let redex_index = reduction_node.unevaluated_redexes[0];
-                graph.reduce_node(node_to_reduce, redex_index);
-            }
-            _ => return (ReductionResult::Irreducible, i),
+        if let Some(value) = reduce_one(reduction_strategy, &mut graph) {
+            return (value, i);
         }
     }
     (ReductionResult::MaxReductionsReached, max_reductions)
+}
+
+pub fn reduce_one(
+    reduction_strategy: &mut ReductionStrategy,
+    graph: &mut ReductionGraph,
+) -> Option<ReductionResult> {
+    if let Some((reduced_term, _)) = graph.bnf() {
+        return Some(ReductionResult::NormalForm(reduced_term.term.clone()));
+    }
+
+    let node_to_reduce = reduction_strategy.get_node(graph);
+    match node_to_reduce {
+        Some(node_to_reduce) => {
+            let reduction_node = graph.get(node_to_reduce).unwrap();
+            let redex_index = reduction_node.unevaluated_redexes[0];
+            graph.reduce_node(node_to_reduce, redex_index);
+        }
+        _ => return Some(ReductionResult::Irreducible),
+    }
+
+    None
 }
 
 pub enum ReductionStrategy {
