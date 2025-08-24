@@ -1,9 +1,32 @@
 use std::fmt::{self, Display};
 
-use crate::{debruijn::Debruijn, term::Term};
+use clap::ValueEnum;
+
+use crate::{common_terms, debruijn::Debruijn, term::Term};
+
+#[derive(Debug, Clone, Copy, ValueEnum)]
+pub enum NodeLabelType {
+    Debruijn,
+    DebruijnCommonTerm,
+    Binary,
+    BinaryLen,
+    Classic,
+}
+
+impl NodeLabelType {
+    pub fn to_string(&self, term: &Debruijn) -> String {
+        match self {
+            NodeLabelType::Debruijn => format!("{}", term),
+            NodeLabelType::DebruijnCommonTerm => common_terms::to_string(term),
+            NodeLabelType::Binary => format!("{:b}", term),
+            NodeLabelType::BinaryLen => format!("{:b}", term).len().to_string(),
+            NodeLabelType::Classic => format!("{}", Term::from(term)),
+        }
+    }
+}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct PrintContext {
+pub struct PrintContext {
     // If true, then the current node is in a left application, but we have not yet emitted a
     // parenethesis for this for ambiguity purposes. This is needed because lambda-bodies are greedy
     // end extend as far to the right as possible. Therefore, if we are in the left half of an
@@ -59,75 +82,107 @@ impl PrintContext {
     }
 }
 
-impl Display for Debruijn {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.print(f, PrintContext::new())
+pub enum PrintableTerm {
+    Leaf(String),
+    Abstraction {
+        body_head: String,
+        body: Box<PrintableTerm>,
+    },
+    Application {
+        highlight: bool,
+        func: Box<PrintableTerm>,
+        arg: Box<PrintableTerm>,
+    },
+}
+
+impl PrintableTerm {
+    pub fn print(&self) -> String {
+        self._print(PrintContext::new())
+    }
+
+    fn _print(&self, ctx: PrintContext) -> String {
+        match self {
+            PrintableTerm::Leaf(term) => format!("{term}"),
+            PrintableTerm::Abstraction { body_head, body } => {
+                if ctx.left_app_needs_parens {
+                    let body = body._print(ctx.abs_parens());
+                    format!("({body_head}{body})")
+                } else {
+                    let body = body._print(ctx.abs_not_parens());
+                    format!("{body_head}{body}")
+                }
+            }
+            PrintableTerm::Application {
+                func,
+                arg,
+                highlight,
+            } => {
+                let func = func._print(ctx.left_app());
+                let arg = arg._print(ctx.right_app());
+                let term = if *highlight {
+                    let white_bg = "\x1b[46m";
+                    let arg_color = "\x1b[42;4m";
+                    let normal_bg = "\x1b[0m";
+                    format!("{white_bg}{func}{normal_bg} {arg_color}{arg}{normal_bg}")
+                } else {
+                    format!("{func} {arg}")
+                };
+
+                if ctx.right_app_immediate {
+                    format!("({term})")
+                } else {
+                    term
+                }
+            }
+        }
     }
 }
 
-impl Debruijn {
-    fn print(&self, f: &mut fmt::Formatter<'_>, ctx: PrintContext) -> fmt::Result {
-        match self {
-            Debruijn::Index(i) => write!(f, "{}", i),
-            Debruijn::Abstraction { body } => {
-                if ctx.left_app_needs_parens {
-                    write!(f, "(λ ")?;
-                    body.print(f, ctx.abs_parens())?;
-                    write!(f, ")")
-                } else {
-                    write!(f, "λ ")?;
-                    body.print(f, ctx.abs_not_parens())
-                }
-            }
-            Debruijn::Application { func, arg } => {
-                if ctx.right_app_immediate {
-                    write!(f, "(")?;
-                }
-                func.print(f, ctx.left_app())?;
-                write!(f, " ")?;
-                arg.print(f, ctx.right_app())?;
-                if ctx.right_app_immediate {
-                    write!(f, ")")?;
-                }
-                Ok(())
-            }
+impl From<&Debruijn> for PrintableTerm {
+    fn from(value: &Debruijn) -> Self {
+        match value {
+            Debruijn::Index(i) => PrintableTerm::Leaf(format!("{i}")),
+            Debruijn::Abstraction { body } => PrintableTerm::Abstraction {
+                body_head: "λ ".to_string(),
+                body: Box::new(PrintableTerm::from(&**body)),
+            },
+            Debruijn::Application { func, arg } => PrintableTerm::Application {
+                func: Box::new(PrintableTerm::from(&**func)),
+                arg: Box::new(PrintableTerm::from(&**arg)),
+                highlight: false,
+            },
         }
+    }
+}
+
+impl From<&Term> for PrintableTerm {
+    fn from(value: &Term) -> Self {
+        match value {
+            Term::Literal(literal) => PrintableTerm::Leaf(format!("{literal}")),
+            Term::Abstraction { arg, body } => PrintableTerm::Abstraction {
+                body_head: format!("λ{arg}. "),
+                body: Box::new(PrintableTerm::from(&**body)),
+            },
+            Term::Application { func, arg } => PrintableTerm::Application {
+                func: Box::new(PrintableTerm::from(&**func)),
+                arg: Box::new(PrintableTerm::from(&**arg)),
+                highlight: false,
+            },
+        }
+    }
+}
+
+impl Display for Debruijn {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        let printable_term = PrintableTerm::from(self);
+        write!(f, "{}", printable_term.print())
     }
 }
 
 impl Display for Term {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        self.print(f, PrintContext::new())
-    }
-}
-
-impl Term {
-    fn print(&self, f: &mut fmt::Formatter<'_>, ctx: PrintContext) -> fmt::Result {
-        match self {
-            Term::Literal(literal) => write!(f, "{literal}"),
-            Term::Abstraction { arg, body } => {
-                if ctx.left_app_needs_parens {
-                    write!(f, "(λ{arg}.")?;
-                    body.print(f, ctx.abs_parens())?;
-                    write!(f, ")")
-                } else {
-                    write!(f, "λ{arg}.")?;
-                    body.print(f, ctx.abs_not_parens())
-                }
-            }
-            Term::Application { func, arg } => {
-                if ctx.right_app_immediate {
-                    write!(f, "(")?;
-                }
-                func.print(f, ctx.left_app())?;
-                write!(f, " ")?;
-                arg.print(f, ctx.right_app())?;
-                if ctx.right_app_immediate {
-                    write!(f, ")")?;
-                }
-                Ok(())
-            }
-        }
+        let printable_term = PrintableTerm::from(self);
+        write!(f, "{}", printable_term.print())
     }
 }
 

@@ -6,11 +6,11 @@ use crate::{
     replace::{self, TreePath, VisitOrder},
 };
 
-#[derive(Debug)]
-struct Redex {
-    func: Debruijn,
-    arg: Debruijn,
-    treepath: TreePath,
+#[derive(Debug, Clone)]
+pub struct Redex {
+    pub func: Debruijn,
+    pub arg: Debruijn,
+    pub treepath: TreePath,
 }
 
 impl Redex {
@@ -25,7 +25,7 @@ impl Redex {
         }
     }
 
-    fn beta_reduce(&self, root: Debruijn) -> Debruijn {
+    pub fn beta_reduce(&self, root: Debruijn) -> Debruijn {
         let fragment = Fragment(reduce::_beta_reduce(&self.func, &self.arg));
         let term = replace::replace(root, fragment.clone(), &self.treepath);
         term
@@ -36,7 +36,7 @@ impl Redex {
 pub struct RedexIndex(usize);
 impl Display for RedexIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "redex@{}", self.0)
+        write!(f, "redex_{}", self.0)
     }
 }
 
@@ -88,7 +88,7 @@ impl ReductionNode {
     }
 }
 
-fn get_redexes(term: &Debruijn, visit_order: VisitOrder) -> Vec<Redex> {
+pub fn get_redexes(term: &Debruijn, visit_order: VisitOrder) -> Vec<Redex> {
     fn try_into_redex(term: &Debruijn, treepath: TreePath) -> Option<Redex> {
         match term {
             Debruijn::Application { func, arg } => match **func {
@@ -108,7 +108,7 @@ pub struct NodeIndex(usize);
 
 impl Display for NodeIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "node@{}", self.0)
+        write!(f, "node_{}", self.0)
     }
 }
 

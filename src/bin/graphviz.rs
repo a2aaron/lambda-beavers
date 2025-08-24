@@ -1,34 +1,12 @@
 use std::str::FromStr;
 
-use clap::{Parser, ValueEnum, command};
-use lambda_beaver::common_terms::{self};
+use clap::Parser;
+use lambda_beaver::print::NodeLabelType;
 
 use lambda_beaver::parse;
 use lambda_beaver::reduce::{ReductionStrategy, ReductionStrategyKind};
 use lambda_beaver::replace::VisitOrder;
-use lambda_beaver::term::Term;
 use lambda_beaver::{debruijn::Debruijn, graph::ReductionGraph};
-
-#[derive(Debug, Clone, Copy, ValueEnum)]
-pub enum NodeLabelType {
-    Debruijn,
-    DebruijnCommonTerm,
-    Binary,
-    BinaryLen,
-    Classic,
-}
-
-impl NodeLabelType {
-    pub fn to_string(&self, term: &Debruijn) -> String {
-        match self {
-            NodeLabelType::Debruijn => format!("{}", term),
-            NodeLabelType::DebruijnCommonTerm => common_terms::to_string(term),
-            NodeLabelType::Binary => format!("{:b}", term),
-            NodeLabelType::BinaryLen => format!("{:b}", term).len().to_string(),
-            NodeLabelType::Classic => format!("{}", Term::from(term)),
-        }
-    }
-}
 
 pub fn to_graphviz(graph: &ReductionGraph, node_label: NodeLabelType) -> String {
     let mut output = vec![];

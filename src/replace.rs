@@ -6,7 +6,7 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Copy, Eq, PartialEq)]
-enum Direction {
+pub enum Direction {
     Left,
     Right,
 }
@@ -21,7 +21,7 @@ impl Display for Direction {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
-pub struct TreePath(Vec<Direction>);
+pub struct TreePath(pub Vec<Direction>);
 
 impl Display for TreePath {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

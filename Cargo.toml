@@ -6,4 +6,5 @@ edition = "2024"
 [dependencies]
 # TODO: this should probably turn into a binary-only dependency
 clap = { version = "4.5.43", features = ["derive"] }
+inquire = "0.7.5"
 
