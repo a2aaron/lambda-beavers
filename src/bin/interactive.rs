@@ -1,4 +1,4 @@
-use std::{fmt::Display, str::FromStr};
+use std::{fmt::Display, rc::Rc, str::FromStr};
 
 use clap::Parser;
 use inquire::Select;
@@ -27,8 +27,8 @@ struct RedexOption {
 }
 
 impl RedexOption {
-    fn reduced(self) -> Debruijn {
-        self.redex.beta_reduce(self.root)
+    fn reduced(&self) -> Debruijn {
+        self.redex.beta_reduce(&self.root)
     }
 }
 
@@ -99,7 +99,7 @@ impl Display for Choice {
             Choice::Reduce(redex_option) => {
                 let formatted = format!("{redex_option}");
                 let out = if formatted.len() > 80 {
-                    let reduced = redex_option.clone().reduced();
+                    let reduced = redex_option.reduced();
                     let binary = format!("{reduced:b}");
                     format!("len = {}", binary.len())
                 } else {
@@ -115,7 +115,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
     let term = args.term;
-    let mut current_term = match Debruijn::from_str(&term) {
+    let current_term = match Debruijn::from_str(&term) {
         Ok(term) => term,
         Err(err) => match parse::binary::from_str(&term) {
             Ok(term) => term,
@@ -125,6 +125,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
     };
+    let mut current_term = Rc::new(current_term);
 
     let mut history = vec![];
 
@@ -136,7 +137,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 // let reduction = redex.beta_reduce(current_term.clone());
                 // args.node_label.to_string(&reduction)
                 Choice::Reduce(RedexOption {
-                    root: current_term.clone(),
+                    root: current_term.as_ref().clone(),
                     redex,
                 })
             })
@@ -164,7 +165,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Choice::Quit => break,
             Choice::Reduce(redex_option) => {
                 history.push(current_term);
-                current_term = redex_option.reduced();
+                current_term = Rc::new(redex_option.reduced());
             }
         }
     }

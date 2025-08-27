@@ -1,4 +1,4 @@
-use std::{collections::HashMap, error::Error, fmt::Binary, str::FromStr};
+use std::{collections::HashMap, error::Error, fmt::Binary, rc::Rc, str::FromStr};
 
 use crate::{
     parse::debruijn,
@@ -21,11 +21,11 @@ use std::fmt;
 pub enum Debruijn {
     Index(usize),
     Application {
-        func: Box<Debruijn>,
-        arg: Box<Debruijn>,
+        func: Rc<Debruijn>,
+        arg: Rc<Debruijn>,
     },
     Abstraction {
-        body: Box<Debruijn>,
+        body: Rc<Debruijn>,
     },
 }
 
@@ -41,7 +41,7 @@ impl Binary for Debruijn {
 
 impl From<usize> for Debruijn {
     fn from(value: usize) -> Self {
-        Debruijn::Index(value)
+        idx(value)
     }
 }
 
@@ -51,10 +51,7 @@ where
     B: Into<Debruijn>,
 {
     fn from((a, b): (A, B)) -> Self {
-        Debruijn::Application {
-            func: Box::new(a.into()),
-            arg: Box::new(b.into()),
-        }
+        call(a.into(), b.into())
     }
 }
 
@@ -165,14 +162,14 @@ pub fn idx(a: usize) -> Debruijn {
 
 pub fn def(b: impl Into<Debruijn>) -> Debruijn {
     Debruijn::Abstraction {
-        body: Box::new(b.into()),
+        body: Rc::new(b.into()),
     }
 }
 
 pub fn call(a: impl Into<Debruijn>, b: impl Into<Debruijn>) -> Debruijn {
     Debruijn::Application {
-        func: Box::new(a.into()),
-        arg: Box::new(b.into()),
+        func: Rc::new(a.into()),
+        arg: Rc::new(b.into()),
     }
 }
 

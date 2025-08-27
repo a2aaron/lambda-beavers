@@ -1,4 +1,4 @@
-use std::{collections::HashMap, fmt::Display};
+use std::{collections::HashMap, fmt::Display, rc::Rc};
 
 use crate::{
     debruijn::Debruijn,
@@ -8,26 +8,21 @@ use crate::{
 
 #[derive(Debug, Clone)]
 pub struct Redex {
-    pub func: Debruijn,
-    pub arg: Debruijn,
+    pub redex: Rc<Debruijn>,
     pub treepath: TreePath,
 }
 
 impl Redex {
-    fn new(func: Debruijn, arg: Debruijn, treepath: TreePath) -> Redex {
-        match func {
-            Debruijn::Abstraction { .. } => Redex {
-                func,
-                arg,
-                treepath,
-            },
-            _ => panic!("{func} is not an abstraction!"),
+    fn new(redex: Rc<Debruijn>, treepath: TreePath) -> Redex {
+        if !is_redex(&redex) {
+            panic!("{redex} is not a redex!");
         }
+        Redex { redex, treepath }
     }
 
-    pub fn beta_reduce(&self, root: Debruijn) -> Debruijn {
-        let fragment = Fragment(reduce::_beta_reduce(&self.func, &self.arg));
-        let term = replace::replace(root, fragment.clone(), &self.treepath);
+    pub fn beta_reduce(&self, root: &Debruijn) -> Debruijn {
+        let fragment = Fragment(&reduce::beta_reduce(&self.redex));
+        let term = replace::replace(root, fragment, &self.treepath);
         term
     }
 }
@@ -42,13 +37,13 @@ impl Display for RedexIndex {
 
 #[derive(Debug)]
 pub struct ReductionNode {
-    pub term: Debruijn,
+    pub term: Rc<Debruijn>,
     redexes: Vec<Redex>,
     pub unevaluated_redexes: Vec<RedexIndex>,
 }
 
 impl ReductionNode {
-    fn from_term(term: Debruijn, visit_order: VisitOrder) -> ReductionNode {
+    fn from_term(term: Rc<Debruijn>, visit_order: VisitOrder) -> ReductionNode {
         let redexes = get_redexes(&term, visit_order);
         let unevaluated_redexes = (0..redexes.len()).map(|i| RedexIndex(i)).collect();
         ReductionNode {
@@ -72,7 +67,7 @@ impl ReductionNode {
         self.unevaluated_redexes.remove(index);
 
         let redex = self.get_redex(redex_index).unwrap();
-        redex.beta_reduce(self.term.clone())
+        redex.beta_reduce(&self.term)
     }
 
     fn is_bnf(&self) -> bool {
@@ -88,19 +83,24 @@ impl ReductionNode {
     }
 }
 
-pub fn get_redexes(term: &Debruijn, visit_order: VisitOrder) -> Vec<Redex> {
-    fn try_into_redex(term: &Debruijn, treepath: TreePath) -> Option<Redex> {
-        match term {
-            Debruijn::Application { func, arg } => match **func {
-                Debruijn::Abstraction { .. } => {
-                    Some(Redex::new(*func.clone(), *arg.clone(), treepath))
-                }
-                _ => None,
-            },
-            _ => None,
+fn is_redex(term: &Debruijn) -> bool {
+    if let Debruijn::Application { func, .. } = term
+        && let Debruijn::Abstraction { .. } = &**func
+    {
+        return true;
+    }
+    false
+}
+
+pub fn get_redexes(term: &Rc<Debruijn>, visit_order: VisitOrder) -> Vec<Redex> {
+    fn try_into_redex(term: &Rc<Debruijn>, treepath: TreePath) -> Option<Redex> {
+        if is_redex(&term) {
+            Some(Redex::new(term.clone(), treepath))
+        } else {
+            None
         }
     }
-    replace::treepath_filter(term, try_into_redex, visit_order)
+    replace::treepath_filter::<Redex>(&term, try_into_redex, visit_order)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -115,7 +115,7 @@ impl Display for NodeIndex {
 #[derive(Debug)]
 pub struct ReductionGraph {
     nodes: Vec<ReductionNode>,
-    term_to_node: HashMap<Debruijn, NodeIndex>,
+    term_to_node: HashMap<Rc<Debruijn>, NodeIndex>,
     // TODO: consider moving the reduction strategy stuff to be in graph.rs
     pub incomplete_nodes: Vec<NodeIndex>,
     edges: Vec<(NodeIndex, NodeIndex)>,
@@ -144,17 +144,19 @@ impl ReductionGraph {
     }
 
     pub fn with_root(root: Debruijn, visit_order: VisitOrder) -> ReductionGraph {
+        let root = Rc::new(root);
         let mut graph = ReductionGraph::new(visit_order);
         let root = graph.add_node_from_term(root).0;
         graph.root = Some(root);
         graph
     }
 
-    fn add_node_from_term(&mut self, term: Debruijn) -> (NodeIndex, bool) {
+    fn add_node_from_term(&mut self, term: Rc<Debruijn>) -> (NodeIndex, bool) {
         let index = self.term_to_node.get(&term).copied();
         match index {
             Some(index) => (index, false),
             None => {
+                // Rc clone is cheap
                 let reduction_node = ReductionNode::from_term(term.clone(), self.visit_order);
                 let index = NodeIndex(self.nodes.len());
                 self.term_to_node.insert(term, index);
@@ -189,7 +191,7 @@ impl ReductionGraph {
             "node at {node_index} must have unevaluated redex"
         );
 
-        let reduced_term = node.evaluate_redex(redex_index);
+        let reduced_term = Rc::new(node.evaluate_redex(redex_index));
         if !node.has_unevaled_redexes() {
             self.set_fully_evaled(node_index);
         }
@@ -273,7 +275,7 @@ impl ReductionGraph {
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
+    use std::{rc::Rc, str::FromStr};
 
     use crate::{
         debruijn::Debruijn,
@@ -299,7 +301,7 @@ mod test {
         fn get_by_term(&self, node: &Debruijn) -> Option<NodeIndex> {
             self.nodes
                 .iter()
-                .position(|the_node| the_node.term == *node)
+                .position(|the_node| the_node.term.as_ref() == node)
                 .map(NodeIndex)
         }
     }
@@ -307,7 +309,7 @@ mod test {
     #[test]
     fn bnf_check() {
         let term = "(λ 1) λ λ 1";
-        let term = Debruijn::from_str(term).unwrap();
+        let term = Rc::new(Debruijn::from_str(term).unwrap());
         let node = ReductionNode::from_term(term, VisitOrder::LEFT_INNERMOST);
         assert!(
             !node.is_bnf(),

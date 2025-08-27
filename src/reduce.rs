@@ -148,7 +148,9 @@ pub fn reduce_one(
     graph: &mut ReductionGraph,
 ) -> Option<ReductionResult> {
     if let Some((reduced_term, _)) = graph.bnf() {
-        return Some(ReductionResult::NormalForm(reduced_term.term.clone()));
+        return Some(ReductionResult::NormalForm(
+            reduced_term.term.as_ref().clone(),
+        ));
     }
 
     let node_to_reduce = reduction_strategy.get_node(graph);
@@ -208,19 +210,26 @@ impl From<ReductionStrategyKind> for ReductionStrategy {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct Fragment(pub Debruijn);
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Fragment<'a>(pub &'a Debruijn);
 
-impl Display for Fragment {
+impl<'a> Display for Fragment<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         write!(f, "{}", self.0)
     }
 }
 
-pub fn _beta_reduce(func: &Debruijn, arg: &Debruijn) -> Debruijn {
+pub fn beta_reduce(redex: &Debruijn) -> Debruijn {
+    match redex {
+        Debruijn::Application { func, arg } => _beta_reduce(&func, &arg),
+        _ => panic!("Expected an application, got {redex}"),
+    }
+}
+
+fn _beta_reduce(func: &Debruijn, arg: &Debruijn) -> Debruijn {
     match func {
         Debruijn::Abstraction { body } => __beta_reduce(&body, arg),
-        _ => panic!("Expected an abstraction"),
+        _ => panic!("Expected an abstraction, got {func}"),
     }
 }
 

@@ -1,7 +1,7 @@
-use std::fmt::Display;
+use std::{fmt::Display, rc::Rc};
 
 use crate::{
-    debruijn::{Debruijn, call, def, idx},
+    debruijn::{Debruijn, idx},
     reduce::Fragment,
 };
 
@@ -67,14 +67,14 @@ impl VisitOrder {
 }
 
 struct FilterContext<T> {
-    filter_mapper: fn(&Debruijn, TreePath) -> Option<T>,
+    filter_mapper: FilterMap<T>,
     current_path: TreePath,
     emits: Vec<T>,
     visit_order: VisitOrder,
 }
 
 impl<T> FilterContext<T> {
-    fn new(filter_map: fn(&Debruijn, TreePath) -> Option<T>, visit_order: VisitOrder) -> Self {
+    fn new(filter_map: FilterMap<T>, visit_order: VisitOrder) -> Self {
         Self {
             filter_mapper: filter_map,
             current_path: TreePath(vec![]),
@@ -83,13 +83,13 @@ impl<T> FilterContext<T> {
         }
     }
 
-    fn emit_term(&mut self, term: &Debruijn) {
+    fn emit_term(&mut self, term: &Rc<Debruijn>) {
         if let Some(value) = (self.filter_mapper)(term, self.current_path.clone()) {
             self.emits.push(value);
         }
     }
 
-    fn visit_term(&mut self, term: &Debruijn) {
+    fn visit_term(&mut self, term: &Rc<Debruijn>) {
         if self.visit_order.emit_outermost_first {
             self.emit_term(term);
             self.visit_inner_terms(term);
@@ -99,8 +99,8 @@ impl<T> FilterContext<T> {
         }
     }
 
-    fn visit_inner_terms(&mut self, term: &Debruijn) {
-        match term {
+    fn visit_inner_terms(&mut self, term: &Rc<Debruijn>) {
+        match term.as_ref() {
             Debruijn::Index(_) => (),
             Debruijn::Application { func, arg } => {
                 if self.visit_order.emit_left_first {
@@ -117,22 +117,24 @@ impl<T> FilterContext<T> {
         }
     }
 
-    fn visit_left(&mut self, func: &Box<Debruijn>) {
+    fn visit_left(&mut self, func: &Rc<Debruijn>) {
         self.current_path.0.push(Direction::Left);
         self.visit_term(&func);
         self.current_path.0.pop();
     }
 
-    fn visit_right(&mut self, arg: &Debruijn) {
+    fn visit_right(&mut self, arg: &Rc<Debruijn>) {
         self.current_path.0.push(Direction::Right);
         self.visit_term(&arg);
         self.current_path.0.pop();
     }
 }
 
+type FilterMap<T> = fn(&Rc<Debruijn>, TreePath) -> Option<T>;
+
 pub fn treepath_filter<T>(
-    term: &Debruijn,
-    filter_map: fn(&Debruijn, TreePath) -> Option<T>,
+    term: &Rc<Debruijn>,
+    filter_map: FilterMap<T>,
     visit_order: VisitOrder,
 ) -> Vec<T> {
     let mut ctx = FilterContext::new(filter_map, visit_order);
@@ -140,31 +142,40 @@ pub fn treepath_filter<T>(
     ctx.emits
 }
 
-pub fn replace(root: Debruijn, replacement: Fragment, treepath: &TreePath) -> Debruijn {
-    fn _replace(
-        root: Debruijn,
-        replacement: Fragment,
+pub fn replace<'a>(root: &'a Debruijn, replacement: Fragment<'a>, treepath: &TreePath) -> Debruijn {
+    fn _replace<'a>(
+        root: &'a Debruijn,
+        replacement: Fragment<'a>,
         treepath: &TreePath,
         treepath_i: usize,
     ) -> Debruijn {
         match root {
-            Debruijn::Index(index) => idx(index),
+            Debruijn::Index(index) => idx(*index),
             Debruijn::Application {
                 func: left,
                 arg: right,
             } => match treepath.0.get(treepath_i) {
-                Some(Direction::Left) => call(
-                    _replace(*left, replacement, treepath, treepath_i + 1),
-                    *right,
-                ),
-                Some(Direction::Right) => call(
-                    *left,
-                    _replace(*right, replacement, treepath, treepath_i + 1),
-                ),
-                None => replacement.0,
+                Some(Direction::Left) => {
+                    let func = _replace(left, replacement, treepath, treepath_i + 1);
+                    Debruijn::Application {
+                        func: Rc::new(func),
+                        arg: right.clone(),
+                    }
+                }
+                Some(Direction::Right) => {
+                    let arg = _replace(right, replacement, treepath, treepath_i + 1);
+                    Debruijn::Application {
+                        func: left.clone(),
+                        arg: Rc::new(arg),
+                    }
+                }
+                None => replacement.0.clone(),
             },
             Debruijn::Abstraction { body } => {
-                def(_replace(*body, replacement, treepath, treepath_i))
+                let body = _replace(body, replacement, treepath, treepath_i);
+                Debruijn::Abstraction {
+                    body: Rc::new(body),
+                }
             }
         }
     }

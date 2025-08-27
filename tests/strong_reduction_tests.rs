@@ -20,7 +20,7 @@ macro_rules! make_test {
         fn ${concat(strong_reduction_test_, $nth)}() {
             let n: usize = $nth.parse().unwrap();
             let test = TESTS.split('\n').nth(n).unwrap();
-            assert_test(test);
+            assert_test(test, n);
         }
     };
 
@@ -29,9 +29,10 @@ macro_rules! make_test {
         fn ${concat(strong_reduction_test_, $from, _to_, $to)}() {
             let from: usize = $from.parse().unwrap();
             let to: usize = $to.parse().unwrap();
-            let tests = TESTS.split('\n').skip(from).take(1 + to - from);
-            for test in tests {
-                assert_test(test);
+            let mut tests = TESTS.split('\n').skip(from).take(1 + to - from);
+            for i in from..=to {
+                let test = tests.next().unwrap();
+                assert_test(test, i);
             }
         }
     }
@@ -68,7 +69,7 @@ pub fn reduce_with_timeout(
     }
 }
 
-fn assert_test(test: &str) {
+fn assert_test(test: &str, test_i: usize) {
     let mut reduction_strategy = ReductionStrategy::DFS;
     let visit_order = VisitOrder::LEFT_OUTERMOST;
     let timeout = Duration::from_secs(5);
@@ -81,11 +82,14 @@ fn assert_test(test: &str) {
     let expected_classic = Term::from(&expected);
     match reduction_result {
         Some(ReductionResult::NormalForm(actual)) => {
-            assert_eq!(expected, actual, "expected {expected}, got {actual}")
+            assert_eq!(
+                expected, actual,
+                "Failed #{test_i} - expected {expected}, got {actual}"
+            )
         }
         Some(ReductionResult::Irreducible) => {
             panic!(
-                "Should be reducable to normal form for {test}\n(starting: {starting_classic}, expected: {expected_classic})"
+                "Should be reducable to normal form for #{test_i} - {test}\n(starting: {starting_classic}, expected: {expected_classic})"
             )
         }
         Some(ReductionResult::MaxReductionsReached) => {
@@ -93,7 +97,7 @@ fn assert_test(test: &str) {
         }
         None => {
             panic!(
-                "Timed out for {test}\n(starting: {starting}, expected: {expected})\n(starting: {starting_classic}, expected: {expected_classic})"
+                "Timed out for #{test_i} - {test}\n(starting: {starting}, expected: {expected})\n(starting: {starting_classic}, expected: {expected_classic})"
             )
         }
     }
@@ -103,33 +107,10 @@ make_test!("0", "387");
 make_test!("388"); // Slow!
 make_test!("389");
 make_test!("390"); // Slow!
-make_test!("391", "400");
+make_test!("391", "423");
 
 // TODO
-// make_test!("401");
-// make_test!("402");
-// make_test!("403");
-// make_test!("404");
-// make_test!("405");
-// make_test!("406");
-// make_test!("407");
-// make_test!("408");
-// make_test!("409");
-// make_test!("410");
-// make_test!("411");
-// make_test!("412");
-// make_test!("413");
-// make_test!("414");
-// make_test!("415");
-// make_test!("416");
-// make_test!("417");
-// make_test!("418");
-// make_test!("419");
-// make_test!("420");
-// make_test!("421");
-// make_test!("422");
-// make_test!("423");
-// make_test!("424");
+// make_test!("424"); // too slow
 // make_test!("425");
 // make_test!("426");
 // make_test!("427");
