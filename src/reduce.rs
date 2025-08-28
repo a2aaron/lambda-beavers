@@ -259,32 +259,28 @@ fn substitute(function_body: &Debruijn, replacer: &Debruijn) -> Debruijn {
     // For example: In λ 0 λ 1 λ 2 (so `function_body` = 0 λ 1 λ 2), we'd substitute `replacer`
     // into 0, 1, and 2.
     // Also note that when we recurse into a nested abstraction, we also must bump up the indicies for
-    // any free variables in `replacer` by one to accomodate for the fact that those need to point over
-    // additional lambdas. Hence the replacer_up_by goes up by one as well.
+    // any free variables in `replacer` by the current depth to accomodate for the fact that those need to point over
+    // additional lambdas.
     fn _substitute(
         function_body: &mut Debruijn,
         match_index: usize,
         replacer: &Debruijn,
-        replacer_up_by: usize,
+        depth: usize,
     ) {
         match function_body {
             Debruijn::Index(term_index) => {
                 if *term_index == match_index {
-                    let replacer = up_by(replacer, replacer_up_by);
-                    *function_body = replacer.clone()
+                    // Bump up free variables by `depth`
+                    let replacer = up_by(replacer, depth);
+                    *function_body = replacer;
                 }
             }
             Debruijn::Application { func, arg } => {
-                _substitute(Rc::make_mut(func), match_index, replacer, replacer_up_by);
-                _substitute(Rc::make_mut(arg), match_index, replacer, replacer_up_by);
+                _substitute(Rc::make_mut(func), match_index, replacer, depth);
+                _substitute(Rc::make_mut(arg), match_index, replacer, depth);
             }
             Debruijn::Abstraction { body } => {
-                _substitute(
-                    Rc::make_mut(body),
-                    match_index + 1,
-                    &replacer,
-                    replacer_up_by + 1,
-                );
+                _substitute(Rc::make_mut(body), match_index + 1, &replacer, depth + 1);
             }
         }
     }
