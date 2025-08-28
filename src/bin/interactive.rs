@@ -152,7 +152,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let message = format!("{current_term}");
         let message = if message.len() > 80 {
-            // todo: this should be binary length
+            let message = format!("{:b}", *current_term);
             format!("len: {}", message.len())
         } else {
             message
