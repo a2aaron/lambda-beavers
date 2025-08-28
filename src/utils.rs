@@ -52,3 +52,48 @@ pub fn bitstring_permutations(n: usize) -> impl Iterator<Item = Vec<bool>> {
             .collect()
     })
 }
+
+pub mod strong_reduction_test {
+    use std::time::{Duration, Instant};
+
+    use crate::{
+        debruijn::Debruijn,
+        graph::ReductionGraph,
+        parse,
+        reduce::{self, ReductionResult, ReductionStrategy},
+        replace::VisitOrder,
+    };
+
+    pub fn parse_line(line: &str) -> (Debruijn, Debruijn) {
+        let mut split = line.split(": ");
+        let _throwaway = split.next().unwrap();
+        let useful_part = split.next().unwrap();
+
+        let mut split = useful_part.split(" - ");
+        let starting = split.next().unwrap();
+        let expected = split.next().unwrap();
+        let starting = parse::binary::from_str(starting).unwrap();
+        let expected = parse::binary::from_str(expected).unwrap();
+        (starting, expected)
+    }
+
+    pub fn reduce_with_timeout(
+        term: &Debruijn,
+        reduction_strategy: &mut ReductionStrategy,
+        visit_order: VisitOrder,
+        timeout: Option<Duration>,
+    ) -> (Option<ReductionResult>, Duration) {
+        let mut graph = ReductionGraph::with_root(term.clone(), visit_order);
+        let now = Instant::now();
+        loop {
+            if let Some(value) = reduce::reduce_one(reduction_strategy, &mut graph) {
+                return (Some(value), now.elapsed());
+            }
+            if let Some(timeout) = timeout
+                && now.elapsed() > timeout
+            {
+                return (None, now.elapsed());
+            }
+        }
+    }
+}

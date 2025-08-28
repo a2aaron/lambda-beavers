@@ -1,33 +1,62 @@
+use std::time::Duration;
+
 use clap::Parser;
-use lambda_beaver::{debruijn::Debruijn, parse, term::Term};
+use lambda_beaver::{
+    reduce::ReductionStrategy,
+    replace::VisitOrder,
+    term::Term,
+    utils::strong_reduction_test::{parse_line, reduce_with_timeout},
+};
 
 const TESTS: &str = include_str!("../../tests/tests.txt");
 
 #[derive(Debug, Parser)]
 struct Args {
-    num: usize,
-}
-
-fn parse_line(line: &str) -> (Debruijn, Debruijn) {
-    let mut split = line.split(": ");
-    let _throwaway = split.next().unwrap();
-    let useful_part = split.next().unwrap();
-
-    let mut split = useful_part.split(" - ");
-    let starting = split.next().unwrap();
-    let expected = split.next().unwrap();
-    let starting = parse::binary::from_str(starting).unwrap();
-    let expected = parse::binary::from_str(expected).unwrap();
-    (starting, expected)
+    start: usize,
+    end: Option<usize>,
+    #[arg(short, long, action)]
+    run: bool,
+    #[arg(short, long, action)]
+    print: bool,
+    #[arg(short, long)]
+    timeout: Option<u64>,
 }
 
 fn main() {
     let args = Args::parse();
-    let test = TESTS.split('\n').nth(args.num).unwrap();
+
+    let n = args.start;
+
+    if let Some(end) = args.end {
+        for i in n..=end {
+            run(i, &args);
+        }
+    } else {
+        run(n, &args);
+    }
+}
+
+fn run(n: usize, args: &Args) {
+    let test = TESTS.split('\n').nth(n).unwrap();
     let (starting, reduced) = parse_line(test);
-    println!("{}", test);
-    println!("Starting (Classic): {}", Term::from(&starting));
-    println!("Starting (Debruijn): {}", starting);
-    println!("Reduced  (Classic): {}", Term::from(&reduced));
-    println!("Reduced (Debruijn): {}", reduced);
+    if args.print {
+        println!("{}", test);
+        println!("Starting (Classic): {}", Term::from(&starting));
+        println!("Starting (Debruijn): {}", starting);
+        println!("Reduced  (Classic): {}", Term::from(&reduced));
+        println!("Reduced (Debruijn): {}", reduced);
+    }
+
+    if args.run {
+        let reduction_strategy = &mut ReductionStrategy::DFS;
+        let visit_order = VisitOrder::LEFT_OUTERMOST;
+        let timeout = args.timeout.map(Duration::from_secs);
+        let (result, duration) =
+            reduce_with_timeout(&starting, reduction_strategy, visit_order, timeout);
+        let duration = duration.as_millis();
+        match result {
+            Some(result) => println!("{n},{duration},{result}"),
+            None => println!("{n},{duration},Timed out"),
+        }
+    }
 }

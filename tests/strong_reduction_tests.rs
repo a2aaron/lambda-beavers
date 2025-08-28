@@ -1,15 +1,13 @@
 #![feature(macro_metavar_expr_concat)]
 #![cfg(test)]
 
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 use lambda_beaver::{
-    debruijn::Debruijn,
-    graph::ReductionGraph,
-    parse,
-    reduce::{self, ReductionResult, ReductionStrategy},
+    reduce::{ReductionResult, ReductionStrategy},
     replace::VisitOrder,
     term::Term,
+    utils::strong_reduction_test::{parse_line, reduce_with_timeout},
 };
 
 const TESTS: &str = include_str!("tests.txt");
@@ -38,44 +36,13 @@ macro_rules! make_test {
     }
 }
 
-fn parse_line(line: &str) -> (Debruijn, Debruijn) {
-    let mut split = line.split(": ");
-    let _throwaway = split.next().unwrap();
-    let useful_part = split.next().unwrap();
-
-    let mut split = useful_part.split(" - ");
-    let starting = split.next().unwrap();
-    let expected = split.next().unwrap();
-    let starting = parse::binary::from_str(starting).unwrap();
-    let expected = parse::binary::from_str(expected).unwrap();
-    (starting, expected)
-}
-
-pub fn reduce_with_timeout(
-    term: &Debruijn,
-    reduction_strategy: &mut ReductionStrategy,
-    visit_order: VisitOrder,
-    timeout: Duration,
-) -> Option<ReductionResult> {
-    let mut graph = ReductionGraph::with_root(term.clone(), visit_order);
-    let now = Instant::now();
-    loop {
-        if let Some(value) = reduce::reduce_one(reduction_strategy, &mut graph) {
-            return Some(value);
-        }
-        if now.elapsed() > timeout {
-            return None;
-        }
-    }
-}
-
 fn assert_test(test: &str, test_i: usize) {
     let mut reduction_strategy = ReductionStrategy::DFS;
     let visit_order = VisitOrder::LEFT_OUTERMOST;
-    let timeout = Duration::from_secs(5);
+    let timeout = Some(Duration::from_secs(5));
 
     let (starting, expected) = parse_line(test);
-    let reduction_result =
+    let (reduction_result, _) =
         reduce_with_timeout(&starting, &mut reduction_strategy, visit_order, timeout);
 
     let starting_classic = Term::from(&starting);
@@ -104,23 +71,14 @@ fn assert_test(test: &str, test_i: usize) {
 }
 
 make_test!("0", "387");
-make_test!("388"); // Slow!
+make_test!("388"); // Slow! (0.5s)
 make_test!("389");
-make_test!("390"); // Slow!
+make_test!("390"); // Slow! (0.5s)
 make_test!("391", "423");
-
-// TODO
-// make_test!("424"); // too slow
-// make_test!("425");
-// make_test!("426");
-// make_test!("427");
-// make_test!("428");
-// make_test!("429");
-// make_test!("430");
-// make_test!("431");
-// make_test!("432");
-// make_test!("433");
-// make_test!("434");
+make_test!("424"); // Very Slow! (3.0s)
+make_test!("425", "433");
+make_test!("434"); // Very Slow! (2.5s)
+make_test!("435", "444");
 // make_test!("435");
 // make_test!("436");
 // make_test!("437");
@@ -3144,7 +3102,7 @@ make_test!("391", "423");
 // make_test!("3455");
 // make_test!("3456");
 // make_test!("3457");
-// make_test!("3458");
+// make_test!("3458")
 // make_test!("3459");
 // make_test!("3460");
 // make_test!("3461");

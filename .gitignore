@@ -4,3 +4,4 @@
 *.dot
 out.txt
 *.trace
+*.csv

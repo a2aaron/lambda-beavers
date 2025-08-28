@@ -128,6 +128,16 @@ pub enum ReductionResult {
     MaxReductionsReached,
 }
 
+impl Display for ReductionResult {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            ReductionResult::NormalForm(term) => write!(f, "Normal Form: {}", term),
+            ReductionResult::Irreducible => write!(f, "Irreducible"),
+            ReductionResult::MaxReductionsReached => write!(f, "Max Reductions Reached"),
+        }
+    }
+}
+
 pub fn reduce(
     term: &Debruijn,
     reduction_strategy: &mut ReductionStrategy,
