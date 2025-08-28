@@ -1,4 +1,4 @@
-use std::fmt::Display;
+use std::{fmt::Display, rc::Rc};
 
 use clap::ValueEnum;
 
@@ -250,37 +250,57 @@ fn __beta_reduce(body: &Debruijn, arg: &Debruijn) -> Debruijn {
     unshift
 }
 
-fn substitute(term: &Debruijn, term2: &Debruijn) -> Debruijn {
-    fn _substitute(term: &Debruijn, index: usize, term2: &Debruijn) -> Debruijn {
-        match term {
+fn substitute(function_body: &Debruijn, replacer: &Debruijn) -> Debruijn {
+    // This tries to substitute indicies that point to the implicit lambda that `function_body` is
+    // part of.
+    // Consider, for example, where we want to subsitute into λ 0 1 2, sow e have function body = 0 1 2.
+    // in this case, 0 would be replaced by `replacer`. Note that we need to track depth, so the index
+    // we match on (the `match_index`) will go up by one every time we go into a nested abstraction.
+    // For example: In λ 0 λ 1 λ 2 (so `function_body` = 0 λ 1 λ 2), we'd substitute `replacer`
+    // into 0, 1, and 2.
+    // Also note that when we recurse into a nested abstraction, we also must bump up the indicies for
+    // any free variables in `replacer` by one to accomodate for the fact that those need to point over
+    // additional lambdas. Hence the replacer_up_by goes up by one as well.
+    fn _substitute(
+        function_body: &mut Debruijn,
+        match_index: usize,
+        replacer: &Debruijn,
+        replacer_up_by: usize,
+    ) {
+        match function_body {
             Debruijn::Index(term_index) => {
-                if *term_index == index {
-                    term2.clone()
-                } else {
-                    idx(*term_index)
+                if *term_index == match_index {
+                    let replacer = up_by(replacer, replacer_up_by);
+                    *function_body = replacer.clone()
                 }
             }
             Debruijn::Application { func, arg } => {
-                let call_func = _substitute(func, index, term2);
-                let call_arg = _substitute(arg, index, term2);
-                call(call_func, call_arg)
+                _substitute(Rc::make_mut(func), match_index, replacer, replacer_up_by);
+                _substitute(Rc::make_mut(arg), match_index, replacer, replacer_up_by);
             }
             Debruijn::Abstraction { body } => {
-                let term2 = up_one(&term2);
-                let body = _substitute(body, index + 1, &term2);
-                def(body)
+                _substitute(
+                    Rc::make_mut(body),
+                    match_index + 1,
+                    &replacer,
+                    replacer_up_by + 1,
+                );
             }
         }
     }
+    let mut term = function_body.clone();
+    _substitute(&mut term, 1, &replacer, 0);
+    term
+}
 
-    _substitute(&term, 1, &term2)
+fn up_by(term: &Debruijn, up_by: usize) -> Debruijn {
+    shift_cutoff(term, up_by as isize, 1)
 }
 
 // ↑ n = n         if n < cutoff
 //       n + up_by otherwise
 // ↑ λ t = λ (↑ t) where up_by -> up_by and cutoff -> cutoff + 1
 // ↑ (t1 t2) = (↑ t1) (↑ t2)
-
 fn up_one(term: &Debruijn) -> Debruijn {
     shift_cutoff(term, 1, 1)
 }
