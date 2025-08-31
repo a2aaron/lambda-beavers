@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use clap::Parser;
-use lambda_beaver::print::NodeLabelType;
+use lambda_beaver::{debruijn::Root, print::NodeLabelType};
 
 use lambda_beaver::parse;
 use lambda_beaver::reduce::{ReductionStrategy, ReductionStrategyKind};
@@ -21,7 +21,7 @@ pub fn to_graphviz(graph: &ReductionGraph, node_label: NodeLabelType) -> String 
         output.push(bnf);
     }
     for (node, i) in graph.nodes() {
-        let label = node_label.to_string(&node.term);
+        let label = node_label.to_string(&node.root.0);
         let node = format!("{} [label = \"{}\"];", i, label);
         output.push(node);
     }
@@ -125,6 +125,7 @@ fn main() {
             }
         },
     };
+    let term = Root(term);
     let max_reductions = args.max_reductions;
     let strategy = ReductionStrategy::from(args.strategy);
     let node_label = args.node_label;

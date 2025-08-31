@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Display, rc::Rc};
 
 use crate::{
-    debruijn::Debruijn,
+    debruijn::Root,
     reduce::{self, Redex},
     replace::VisitOrder,
 };
@@ -16,27 +16,32 @@ impl Display for RedexIndex {
 
 #[derive(Debug)]
 pub struct ReductionNode {
-    pub term: Rc<Debruijn>,
-    redexes: Vec<Redex>,
+    pub root: Rc<Root>,
+    // redexes: Vec<Redex<'a>>,
+    visit_order: VisitOrder,
     pub unevaluated_redexes: Vec<RedexIndex>,
 }
 
 impl ReductionNode {
-    fn from_term(term: Rc<Debruijn>, visit_order: VisitOrder) -> ReductionNode {
-        let redexes: Vec<Redex> = reduce::get_redexes(term.clone(), visit_order).collect();
-        let unevaluated_redexes = (0..redexes.len()).map(|i| RedexIndex(i)).collect();
+    fn from_root(root: Rc<Root>, visit_order: VisitOrder) -> ReductionNode
+where {
+        let redexes = reduce::get_redexes(&root, visit_order);
+        let unevaluated_redexes = (0..redexes.count()).map(|i| RedexIndex(i)).collect();
         ReductionNode {
-            term,
-            redexes,
+            root: root.clone(),
+            // redexes,
+            visit_order,
             unevaluated_redexes,
         }
     }
 
-    fn get_redex(&self, redex: RedexIndex) -> Option<&Redex> {
-        self.redexes.get(redex.0)
+    fn get_redex(&self, redex: RedexIndex) -> Option<Redex<'_>> {
+        // self.redexes.get(redex.0)
+        let mut redexes = self.redexes();
+        redexes.nth(redex.0)
     }
 
-    fn evaluate_redex(&mut self, redex_index: RedexIndex) -> Rc<Debruijn> {
+    fn evaluate_redex(&mut self, redex_index: RedexIndex) -> Root {
         assert!(self.is_unevaled(redex_index));
         let index = self
             .unevaluated_redexes
@@ -46,11 +51,15 @@ impl ReductionNode {
         self.unevaluated_redexes.remove(index);
 
         let redex = self.get_redex(redex_index).unwrap();
-        redex.beta_reduce(&self.term)
+        redex.beta_reduce(&self.root)
+    }
+
+    fn redexes(&self) -> impl Iterator<Item = Redex<'_>> {
+        reduce::get_redexes(&self.root, self.visit_order)
     }
 
     fn is_bnf(&self) -> bool {
-        self.redexes.is_empty()
+        self.redexes().count() == 0
     }
 
     fn is_unevaled(&self, redex: RedexIndex) -> bool {
@@ -74,7 +83,7 @@ impl Display for NodeIndex {
 #[derive(Debug)]
 pub struct ReductionGraph {
     nodes: Vec<ReductionNode>,
-    term_to_node: HashMap<Rc<Debruijn>, NodeIndex>,
+    term_to_node: HashMap<Rc<Root>, NodeIndex>,
     // TODO: consider moving the reduction strategy stuff to be in graph.rs
     pub incomplete_nodes: Vec<NodeIndex>,
     edges: Vec<(NodeIndex, NodeIndex)>,
@@ -102,23 +111,23 @@ impl ReductionGraph {
         }
     }
 
-    pub fn with_root(root: Debruijn, visit_order: VisitOrder) -> ReductionGraph {
-        let root = Rc::new(root);
+    pub fn with_root(root: Root, visit_order: VisitOrder) -> ReductionGraph {
         let mut graph = ReductionGraph::new(visit_order);
-        let root = graph.add_node_from_term(root).0;
-        graph.root = Some(root);
+        let root_index = graph.add_node_from_root(root).0;
+        graph.root = Some(root_index);
         graph
     }
 
-    fn add_node_from_term(&mut self, term: Rc<Debruijn>) -> (NodeIndex, bool) {
-        let index = self.term_to_node.get(&term).copied();
+    fn add_node_from_root(&mut self, root: Root) -> (NodeIndex, bool) {
+        let index = self.term_to_node.get(&root).copied();
         match index {
             Some(index) => (index, false),
             None => {
+                let root = Rc::new(root);
                 // Rc clone is cheap
-                let reduction_node = ReductionNode::from_term(term.clone(), self.visit_order);
+                let reduction_node = ReductionNode::from_root(root.clone(), self.visit_order);
                 let index = NodeIndex(self.nodes.len());
-                self.term_to_node.insert(term, index);
+                self.term_to_node.insert(root, index);
                 if reduction_node.has_unevaled_redexes() {
                     self.incomplete_nodes.push(index);
                 }
@@ -127,8 +136,8 @@ impl ReductionGraph {
                     assert!(
                         self.beta_normal_form.is_none(),
                         "BNF was already found at {} but trying to set it again at {}.",
-                        self.get(self.beta_normal_form.unwrap()).unwrap().term,
-                        reduction_node.term
+                        self.get(self.beta_normal_form.unwrap()).unwrap().root,
+                        reduction_node.root
                     );
                     self.beta_normal_form = Some(index);
                 }
@@ -144,7 +153,7 @@ impl ReductionGraph {
     }
 
     pub fn reduce_node(&mut self, node_index: NodeIndex, redex_index: RedexIndex) -> GraphUpdate {
-        let node = self.get_mut(node_index).unwrap();
+        let node = self.nodes.get_mut(node_index.0).unwrap();
         assert!(
             node.has_unevaled_redexes(),
             "node at {node_index} must have unevaluated redex"
@@ -155,7 +164,7 @@ impl ReductionGraph {
             self.set_fully_evaled(node_index);
         }
 
-        let (new_node_index, already_exists) = self.add_node_from_term(reduced_term);
+        let (new_node_index, already_exists) = self.add_node_from_root(reduced_term);
         let new_node = self.get(new_node_index).unwrap();
         let is_bnf = new_node.is_bnf();
 
@@ -189,10 +198,6 @@ impl ReductionGraph {
 
     pub fn get(&self, index: NodeIndex) -> Option<&ReductionNode> {
         self.nodes.get(index.0)
-    }
-
-    fn get_mut(&mut self, index: NodeIndex) -> Option<&mut ReductionNode> {
-        self.nodes.get_mut(index.0)
     }
 
     pub fn nodes(&self) -> impl Iterator<Item = (&ReductionNode, NodeIndex)> {
@@ -237,17 +242,17 @@ mod test {
     use std::{rc::Rc, str::FromStr};
 
     use crate::{
-        debruijn::Debruijn,
+        debruijn::{Debruijn, Root},
         graph::{NodeIndex, ReductionGraph, ReductionNode},
         replace::VisitOrder,
     };
 
     impl ReductionGraph {
-        fn contains_term(&self, term: &Debruijn) -> bool {
+        fn contains_term(&self, term: &Root) -> bool {
             self.get_by_term(term).is_some()
         }
 
-        fn contains_edge(&self, a: &Debruijn, b: &Debruijn) -> bool {
+        fn contains_edge(&self, a: &Root, b: &Root) -> bool {
             if let Some(a) = self.get_by_term(a)
                 && let Some(b) = self.get_by_term(b)
             {
@@ -257,10 +262,10 @@ mod test {
             }
         }
 
-        fn get_by_term(&self, node: &Debruijn) -> Option<NodeIndex> {
+        fn get_by_term(&self, root: &Root) -> Option<NodeIndex> {
             self.nodes
                 .iter()
-                .position(|the_node| the_node.term.as_ref() == node)
+                .position(|the_node| *the_node.root == *root)
                 .map(NodeIndex)
         }
     }
@@ -268,20 +273,20 @@ mod test {
     #[test]
     fn bnf_check() {
         let term = "(λ 1) λ λ 1";
-        let term = Rc::new(Debruijn::from_str(term).unwrap());
-        let node = ReductionNode::from_term(term, VisitOrder::LEFT_OUTERMOST);
+        let root = Rc::new(Debruijn::from_str(term).unwrap().into());
+        let node = ReductionNode::from_root(root, VisitOrder::LEFT_OUTERMOST);
         assert!(
             !node.is_bnf(),
             "Expected {} to be BNF. Redex: {:?}",
-            node.term,
-            node.redexes
+            node.root,
+            node.redexes().collect::<Vec<_>>()
         );
     }
 
     #[test]
     fn graph_and_true_false() {
         let root = "(((λ (λ ((2 1) 2))) (λ (λ 2))) (λ (λ 1)))";
-        let root = Debruijn::from_str(root).unwrap();
+        let root = Root(Debruijn::from_str(root).unwrap().into());
         let mut graph = ReductionGraph::with_root(root, VisitOrder::LEFT_OUTERMOST);
 
         while graph.any_reducible() {
@@ -301,7 +306,7 @@ mod test {
             "(λ (λ 1))",                                 // 6
         ];
 
-        let nodes = nodes.map(|node| Debruijn::from_str(node).unwrap());
+        let nodes = nodes.map(|node| Root::from_str(node).unwrap());
 
         let edges = [
             (0, 1),

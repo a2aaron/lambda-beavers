@@ -57,13 +57,13 @@ pub mod strong_reduction_test {
     use std::time::{Duration, Instant};
 
     use crate::{
-        debruijn::Debruijn,
+        debruijn::Root,
         parse,
         reduce::{Reducer, ReductionResult},
         replace::VisitOrder,
     };
 
-    pub fn parse_line(line: &str) -> (Debruijn, Debruijn) {
+    pub fn parse_line(line: &str) -> (Root, Root) {
         let mut split = line.split(": ");
         let _throwaway = split.next().unwrap();
         let useful_part = split.next().unwrap();
@@ -73,11 +73,11 @@ pub mod strong_reduction_test {
         let expected = split.next().unwrap();
         let starting = parse::binary::from_str(starting).unwrap();
         let expected = parse::binary::from_str(expected).unwrap();
-        (starting, expected)
+        (starting.into(), expected.into())
     }
 
     pub fn reduce_with_timeout(
-        term: &Debruijn,
+        term: &Root,
         visit_order: VisitOrder,
         timeout: Option<Duration>,
     ) -> (Option<ReductionResult>, Duration) {

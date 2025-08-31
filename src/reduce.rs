@@ -1,53 +1,55 @@
-use std::{fmt::Display, rc::Rc};
+use std::fmt::Display;
 
 use clap::ValueEnum;
 
 use crate::{
-    debruijn::{Debruijn, call, def, idx},
+    debruijn::{Debruijn, Root, call, def, idx},
     graph::{NodeIndex, ReductionGraph},
     replace::{self, VisitOrder},
     utils::Rng,
 };
 
 pub struct Reducer {
-    pub root: Rc<Debruijn>,
+    pub root: Root,
     visit_order: VisitOrder,
 }
 
 impl Reducer {
-    pub fn new(root: Debruijn, visit_order: VisitOrder) -> Self {
+    pub fn new(root: Root, visit_order: VisitOrder) -> Self {
         Self {
-            root: Rc::new(root),
+            root: root,
             visit_order,
         }
     }
 
     pub fn reduce_one(&mut self) -> Option<ReductionResult> {
-        if let Some(redex) = get_redexes(self.root.clone(), self.visit_order).next() {
-            self.root = redex.beta_reduce(&self.root);
+        let maybe_redex = get_redexes(&self.root, self.visit_order).next();
+        if let Some(redex) = maybe_redex {
+            let new_root = redex.beta_reduce(&self.root);
+            self.root = new_root;
             None
         } else {
-            let bnf = (*self.root).clone();
+            let bnf = self.root.clone();
             Some(ReductionResult::NormalForm(bnf))
         }
     }
 }
 
 #[derive(Debug, Clone)]
-pub struct Redex {
-    pub redex: Rc<Debruijn>,
+pub struct Redex<'a> {
+    pub redex: &'a Debruijn,
 }
 
-impl Redex {
-    fn new(redex: Rc<Debruijn>) -> Redex {
+impl<'a> Redex<'a> {
+    fn new(redex: &'a Debruijn) -> Redex<'a> {
         if !is_redex(&redex) {
             panic!("{redex} is not a redex!");
         }
         Redex { redex }
     }
 
-    pub fn beta_reduce(&self, root: &Rc<Debruijn>) -> Rc<Debruijn> {
-        let fragment = Rc::new(beta_reduce(&self.redex));
+    pub fn beta_reduce(&self, root: &'a Root) -> Root {
+        let fragment = beta_reduce(&self.redex);
         let term = replace::replace(root, &self.redex, &fragment);
         term
     }
@@ -62,15 +64,15 @@ fn is_redex(term: &Debruijn) -> bool {
     false
 }
 
-pub fn get_redexes(term: Rc<Debruijn>, visit_order: VisitOrder) -> impl Iterator<Item = Redex> {
-    fn try_into_redex(term: Rc<Debruijn>) -> Option<Redex> {
+pub fn get_redexes(root: &Root, visit_order: VisitOrder) -> impl Iterator<Item = Redex<'_>> {
+    fn try_into_redex(term: &Debruijn) -> Option<Redex<'_>> {
         if is_redex(&term) {
             Some(Redex::new(term))
         } else {
             None
         }
     }
-    visit_order.get_iter(term).filter_map(try_into_redex)
+    visit_order.get_iter(root).filter_map(try_into_redex)
 }
 
 // see https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture15.pdf
@@ -187,7 +189,7 @@ pub fn get_redexes(term: Rc<Debruijn>, visit_order: VisitOrder) -> impl Iterator
 /// (λ t1) t2 = down_one(t1 {up_one(t) / 1})
 
 pub enum ReductionResult {
-    NormalForm(Debruijn),
+    NormalForm(Root),
     Irreducible,
     MaxReductionsReached,
 }
@@ -203,11 +205,11 @@ impl Display for ReductionResult {
 }
 
 pub fn reduce(
-    term: &Debruijn,
+    root: &Root,
     visit_order: VisitOrder,
     max_reductions: usize,
 ) -> (ReductionResult, usize) {
-    let mut reducer = Reducer::new(term.clone(), visit_order);
+    let mut reducer = Reducer::new(root.clone(), visit_order);
     for i in 0..max_reductions {
         if let Some(value) = reducer.reduce_one() {
             return (value, i);
@@ -222,7 +224,7 @@ pub fn reduce_one(
 ) -> Option<ReductionResult> {
     if let Some((reduced_term, _)) = graph.bnf() {
         return Some(ReductionResult::NormalForm(
-            reduced_term.term.as_ref().clone(),
+            reduced_term.root.as_ref().clone(),
         ));
     }
 
@@ -341,11 +343,11 @@ fn substitute(function_body: &Debruijn, replacer: &Debruijn) -> Debruijn {
             Debruijn::Application { func, arg } => {
                 // TODO: these make_muts are almost certainly never going to allocate
                 // may make sense to use get_mut instead.
-                _substitute(Rc::make_mut(func), match_index, replacer, depth);
-                _substitute(Rc::make_mut(arg), match_index, replacer, depth);
+                _substitute(func, match_index, replacer, depth);
+                _substitute(arg, match_index, replacer, depth);
             }
             Debruijn::Abstraction { body } => {
-                _substitute(Rc::make_mut(body), match_index + 1, &replacer, depth + 1);
+                _substitute(body, match_index + 1, &replacer, depth + 1);
             }
         }
     }

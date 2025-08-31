@@ -1,9 +1,9 @@
-use std::{fmt::Display, rc::Rc, str::FromStr};
+use std::{fmt::Display, str::FromStr};
 
 use clap::Parser;
 use inquire::Select;
 use lambda_beaver::{
-    debruijn::Debruijn,
+    debruijn::{Debruijn, Root},
     parse,
     print::{NodeLabelType, PrintableTerm},
     reduce::{self, Redex},
@@ -21,25 +21,25 @@ struct Args {
 }
 
 #[derive(Debug, Clone)]
-struct RedexOption {
-    root: Rc<Debruijn>,
-    redex: Redex,
+struct RedexOption<'a> {
+    root: &'a Root,
+    redex: Redex<'a>,
 }
 
-impl RedexOption {
-    fn reduced(&self) -> Rc<Debruijn> {
+impl<'a> RedexOption<'a> {
+    fn reduced(&self) -> Root {
         self.redex.beta_reduce(&self.root)
     }
 }
 
-impl Display for RedexOption {
+impl<'a> Display for RedexOption<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let highlighted = print_highlighted(&self.root, self.redex.redex.as_ref());
+        let highlighted = print_highlighted(&self.root, self.redex.redex);
         write!(f, "{}", highlighted)
     }
 }
 
-fn print_highlighted<'a>(root: &'a Debruijn, highlighted: &'a Debruijn) -> String {
+fn print_highlighted<'a>(root: &'a Root, highlighted: &'a Debruijn) -> String {
     fn get_printable_terms<'a>(node: &'a Debruijn, highlighted: &'a Debruijn) -> PrintableTerm {
         match node {
             Debruijn::Index(i) => PrintableTerm::Leaf(format!("{i}")),
@@ -61,17 +61,17 @@ fn print_highlighted<'a>(root: &'a Debruijn, highlighted: &'a Debruijn) -> Strin
         }
     }
 
-    let printable_terms = get_printable_terms(root, highlighted);
+    let printable_terms = get_printable_terms(&root.0, highlighted);
     printable_terms.print()
 }
 
-enum Choice {
+enum Choice<'a> {
     Back,
     Quit,
-    Reduce(RedexOption),
+    Reduce(RedexOption<'a>),
 }
 
-impl Display for Choice {
+impl<'a> Display for Choice<'a> {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Choice::Back => write!(f, "Back"),
@@ -80,7 +80,7 @@ impl Display for Choice {
                 let formatted = format!("{redex_option}");
                 let out = if formatted.len() > 80 {
                     let reduced = redex_option.reduced();
-                    let binary = format!("{:b}", *reduced);
+                    let binary = format!("{:b}", reduced);
                     format!("len = {}", binary.len())
                 } else {
                     formatted
@@ -105,19 +105,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
     };
-    let mut current_term = Rc::new(current_term);
+    let mut current_term = Root(current_term);
 
     let mut history = vec![];
 
     loop {
-        let redexes = reduce::get_redexes(current_term.clone(), VisitOrder::LEFT_OUTERMOST);
+        let redexes = reduce::get_redexes(&current_term, VisitOrder::LEFT_OUTERMOST);
         let reductions: Vec<_> = redexes
             .into_iter()
             .map(|redex| {
                 // let reduction = redex.beta_reduce(current_term.clone());
                 // args.node_label.to_string(&reduction)
                 Choice::Reduce(RedexOption {
-                    root: current_term.clone(),
+                    root: &current_term,
                     redex,
                 })
             })
@@ -132,7 +132,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
         let message = format!("{current_term}");
         let message = if message.len() > 80 {
-            let message = format!("{:b}", *current_term);
+            let message = format!("{:b}", current_term);
             format!("len: {}", message.len())
         } else {
             message
@@ -144,7 +144,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Choice::Back => current_term = history.pop().unwrap(),
             Choice::Quit => break,
             Choice::Reduce(redex_option) => {
-                history.push(current_term);
+                history.push(current_term.clone());
                 current_term = redex_option.reduced();
             }
         }

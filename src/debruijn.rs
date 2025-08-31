@@ -1,4 +1,9 @@
-use std::{collections::HashMap, error::Error, fmt::Binary, rc::Rc, str::FromStr};
+use std::{
+    collections::HashMap,
+    error::Error,
+    fmt::{Binary, Display},
+    str::FromStr,
+};
 
 use crate::{
     parse::debruijn,
@@ -6,6 +11,36 @@ use crate::{
     term::{Literal, Term},
 };
 use std::fmt;
+
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+pub struct Root(pub Debruijn);
+impl Display for Root {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+impl Binary for Root {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Binary::fmt(&self.0, f)
+    }
+}
+impl From<Debruijn> for Root {
+    fn from(value: Debruijn) -> Self {
+        Root(value)
+    }
+}
+impl From<Root> for Debruijn {
+    fn from(value: Root) -> Self {
+        value.0
+    }
+}
+impl FromStr for Root {
+    type Err = Box<dyn Error>;
+
+    fn from_str(term: &str) -> Result<Self, Self::Err> {
+        Ok(Root(Debruijn::from_str(term)?))
+    }
+}
 
 /// A Debruijn term.
 /// Note that this notation is 1-indexed.
@@ -21,11 +56,11 @@ use std::fmt;
 pub enum Debruijn {
     Index(usize),
     Application {
-        func: Rc<Debruijn>,
-        arg: Rc<Debruijn>,
+        func: Box<Debruijn>,
+        arg: Box<Debruijn>,
     },
     Abstraction {
-        body: Rc<Debruijn>,
+        body: Box<Debruijn>,
     },
 }
 
@@ -162,14 +197,14 @@ pub fn idx(a: usize) -> Debruijn {
 
 pub fn def(b: impl Into<Debruijn>) -> Debruijn {
     Debruijn::Abstraction {
-        body: Rc::new(b.into()),
+        body: Box::new(b.into()),
     }
 }
 
 pub fn call(a: impl Into<Debruijn>, b: impl Into<Debruijn>) -> Debruijn {
     Debruijn::Application {
-        func: Rc::new(a.into()),
-        arg: Rc::new(b.into()),
+        func: Box::new(a.into()),
+        arg: Box::new(b.into()),
     }
 }
 

@@ -2,6 +2,7 @@ use clap::Parser;
 use std::collections::HashMap;
 
 use lambda_beaver::{
+    debruijn::Root,
     parse,
     reduce::{self, ReductionResult},
     replace::VisitOrder,
@@ -64,7 +65,8 @@ fn main() {
 
     for length in min_bitlength..=max_bitlength {
         let terms = utils::bitstring_permutations(length)
-            .filter_map(|bitstring| parse::binary::from_vec(bitstring).ok());
+            .filter_map(|bitstring| parse::binary::from_vec(bitstring).ok())
+            .map(Root);
 
         for term in terms {
             let term_binary = format!("{term:b}");
