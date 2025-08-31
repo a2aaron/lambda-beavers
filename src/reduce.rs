@@ -53,33 +53,6 @@ impl Redex {
             None
         }
     }
-
-    // TODO: consider renaming to "apply"?
-    // Consider moving to Root and having Root take a Redex
-    // TODO: It would be nice if somehow Redexes could be borrows of the Root? but then it becomes
-    // impossible to store them
-    /// # Panics
-    /// The Redex needs to come from the Root passed into here.
-    /// Otherwise, the ptr::eq in the closure will never find your Redex. If this occurs, the method
-    /// will panic.
-    ///
-    /// This means that you should not clone a Root and then pass in the old redex into the new Root
-    pub fn beta_reduce<'b>(&self, root: &'b mut Root) -> &'b mut Root {
-        let result = VisitOrder::LEFT_OUTERMOST.preorder_walk_mut(root, |term| {
-            if std::ptr::eq(self.redex, term)
-                && let Some(parts) = extract_redex_parts(term)
-            {
-                let reduced = substitute_arg_into_body(&parts);
-                *term = reduced;
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        });
-        // Require that we did actually find the redex and reduce it.
-        assert!(result.is_some());
-        root
-    }
 }
 
 #[derive(Debug, Clone)]
@@ -89,7 +62,7 @@ pub struct RedexParts<'a> {
     arg: &'a Debruijn,
 }
 
-fn extract_redex_parts(term: &Debruijn) -> Option<RedexParts<'_>> {
+pub fn extract_redex_parts(term: &Debruijn) -> Option<RedexParts<'_>> {
     if let Debruijn::Application { func, arg } = term
         && let Debruijn::Abstraction { body } = &**func
     {
@@ -333,7 +306,7 @@ fn apply_arg_to_func(func: &Debruijn, arg: &Debruijn) -> Debruijn {
     }
 }
 
-fn substitute_arg_into_body(parts: &RedexParts) -> Debruijn {
+pub fn substitute_arg_into_body(parts: &RedexParts) -> Debruijn {
     let term = up_one(parts.arg);
     let subsituted = substitute(parts.body, &term);
     let unshift = down_one(&subsituted);
@@ -366,8 +339,6 @@ fn substitute(function_body: &Debruijn, replacer: &Debruijn) -> Debruijn {
                 }
             }
             Debruijn::Application { func, arg } => {
-                // TODO: these make_muts are almost certainly never going to allocate
-                // may make sense to use get_mut instead.
                 _substitute(func, match_index, replacer, depth);
                 _substitute(arg, match_index, replacer, depth);
             }

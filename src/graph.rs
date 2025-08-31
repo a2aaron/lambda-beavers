@@ -51,7 +51,7 @@ impl ReductionNode {
             })
             .unwrap()
         };
-        redex.beta_reduce(&mut root);
+        root.apply(redex);
         root
     }
 
@@ -77,7 +77,6 @@ impl Display for NodeIndex {
 pub struct ReductionGraph {
     nodes: Vec<ReductionNode>,
     term_to_node: HashMap<Rc<Root>, NodeIndex>,
-    // TODO: consider moving the reduction strategy stuff to be in graph.rs
     pub incomplete_nodes: Vec<NodeIndex>,
     edges: Vec<(NodeIndex, NodeIndex)>,
     beta_normal_form: Option<NodeIndex>,
