@@ -17,7 +17,6 @@ impl Display for RedexIndex {
 #[derive(Debug)]
 pub struct ReductionNode {
     pub root: Rc<Root>,
-    // redexes: Vec<Redex<'a>>,
     visit_order: VisitOrder,
     pub unevaluated_redexes: Vec<RedexIndex>,
 }
@@ -29,16 +28,13 @@ where {
         let unevaluated_redexes = (0..redexes.count()).map(|i| RedexIndex(i)).collect();
         ReductionNode {
             root: root.clone(),
-            // redexes,
             visit_order,
             unevaluated_redexes,
         }
     }
 
     fn get_redex(&self, redex: RedexIndex) -> Option<Redex<'_>> {
-        // self.redexes.get(redex.0)
-        let mut redexes = self.redexes();
-        redexes.nth(redex.0)
+        self.redexes().nth(redex.0)
     }
 
     fn evaluate_redex(&mut self, redex_index: RedexIndex) -> Root {
