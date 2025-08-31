@@ -5,10 +5,73 @@ use clap::ValueEnum;
 use crate::{
     debruijn::{Debruijn, call, def, idx},
     graph::{NodeIndex, ReductionGraph},
-    reduce_single::Reducer,
-    replace::VisitOrder,
+    replace::{self, VisitOrder},
     utils::Rng,
 };
+
+pub struct Reducer {
+    pub root: Rc<Debruijn>,
+    visit_order: VisitOrder,
+}
+
+impl Reducer {
+    pub fn new(root: Debruijn, visit_order: VisitOrder) -> Self {
+        Self {
+            root: Rc::new(root),
+            visit_order,
+        }
+    }
+
+    pub fn reduce_one(&mut self) -> Option<ReductionResult> {
+        if let Some(redex) = get_redexes(self.root.clone(), self.visit_order).next() {
+            self.root = redex.beta_reduce(&self.root);
+            None
+        } else {
+            let bnf = (*self.root).clone();
+            Some(ReductionResult::NormalForm(bnf))
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Redex {
+    pub redex: Rc<Debruijn>,
+}
+
+impl Redex {
+    fn new(redex: Rc<Debruijn>) -> Redex {
+        if !is_redex(&redex) {
+            panic!("{redex} is not a redex!");
+        }
+        Redex { redex }
+    }
+
+    pub fn beta_reduce(&self, root: &Rc<Debruijn>) -> Rc<Debruijn> {
+        let fragment = Rc::new(beta_reduce(&self.redex));
+        let term = replace::replace2(root, &self.redex, &fragment);
+        term
+    }
+}
+
+fn is_redex(term: &Debruijn) -> bool {
+    if let Debruijn::Application { func, .. } = term
+        && let Debruijn::Abstraction { .. } = &**func
+    {
+        return true;
+    }
+    false
+}
+
+pub fn get_redexes(term: Rc<Debruijn>, visit_order: VisitOrder) -> impl Iterator<Item = Redex> {
+    fn try_into_redex(term: Rc<Debruijn>) -> Option<Redex> {
+        if is_redex(&term) {
+            Some(Redex::new(term.clone()))
+        } else {
+            None
+        }
+    }
+    visit_order.get_iter(term).filter_map(try_into_redex)
+}
 
 // see https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture15.pdf
 // and also https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture13.pdf

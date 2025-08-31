@@ -57,7 +57,9 @@ pub mod strong_reduction_test {
     use std::time::{Duration, Instant};
 
     use crate::{
-        debruijn::Debruijn, parse, reduce::ReductionResult, reduce_single::Reducer,
+        debruijn::Debruijn,
+        parse,
+        reduce::{Reducer, ReductionResult},
         replace::VisitOrder,
     };
 

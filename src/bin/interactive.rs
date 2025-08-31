@@ -4,9 +4,9 @@ use clap::Parser;
 use inquire::Select;
 use lambda_beaver::{
     debruijn::Debruijn,
-    graph::{Redex, get_redexes},
     parse,
     print::{NodeLabelType, PrintableTerm},
+    reduce::{self, Redex},
     replace::VisitOrder,
 };
 
@@ -110,7 +110,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut history = vec![];
 
     loop {
-        let redexes = get_redexes(current_term.clone(), VisitOrder::LEFT_OUTERMOST);
+        let redexes = reduce::get_redexes(current_term.clone(), VisitOrder::LEFT_OUTERMOST);
         let reductions: Vec<_> = redexes
             .into_iter()
             .map(|redex| {

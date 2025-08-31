@@ -2,29 +2,9 @@ use std::{collections::HashMap, fmt::Display, rc::Rc};
 
 use crate::{
     debruijn::Debruijn,
-    reduce::{self},
-    replace::{self, VisitOrder},
+    reduce::{self, Redex},
+    replace::VisitOrder,
 };
-
-#[derive(Debug, Clone)]
-pub struct Redex {
-    pub redex: Rc<Debruijn>,
-}
-
-impl Redex {
-    fn new(redex: Rc<Debruijn>) -> Redex {
-        if !is_redex(&redex) {
-            panic!("{redex} is not a redex!");
-        }
-        Redex { redex }
-    }
-
-    pub fn beta_reduce(&self, root: &Rc<Debruijn>) -> Rc<Debruijn> {
-        let fragment = Rc::new(reduce::beta_reduce(&self.redex));
-        let term = replace::replace2(root, &self.redex, &fragment);
-        term
-    }
-}
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RedexIndex(usize);
@@ -43,7 +23,7 @@ pub struct ReductionNode {
 
 impl ReductionNode {
     fn from_term(term: Rc<Debruijn>, visit_order: VisitOrder) -> ReductionNode {
-        let redexes: Vec<Redex> = get_redexes(term.clone(), visit_order).collect();
+        let redexes: Vec<Redex> = reduce::get_redexes(term.clone(), visit_order).collect();
         let unevaluated_redexes = (0..redexes.len()).map(|i| RedexIndex(i)).collect();
         ReductionNode {
             term,
@@ -80,26 +60,6 @@ impl ReductionNode {
     fn has_unevaled_redexes(&self) -> bool {
         !self.unevaluated_redexes.is_empty()
     }
-}
-
-fn is_redex(term: &Debruijn) -> bool {
-    if let Debruijn::Application { func, .. } = term
-        && let Debruijn::Abstraction { .. } = &**func
-    {
-        return true;
-    }
-    false
-}
-
-pub fn get_redexes(term: Rc<Debruijn>, visit_order: VisitOrder) -> impl Iterator<Item = Redex> {
-    fn try_into_redex(term: Rc<Debruijn>) -> Option<Redex> {
-        if is_redex(&term) {
-            Some(Redex::new(term.clone()))
-        } else {
-            None
-        }
-    }
-    visit_order.get_iter(term).filter_map(try_into_redex)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
