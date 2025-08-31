@@ -48,7 +48,7 @@ impl Redex {
 
     pub fn beta_reduce(&self, root: &Rc<Debruijn>) -> Rc<Debruijn> {
         let fragment = Rc::new(beta_reduce(&self.redex));
-        let term = replace::replace2(root, &self.redex, &fragment);
+        let term = replace::replace(root, &self.redex, &fragment);
         term
     }
 }

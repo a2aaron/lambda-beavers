@@ -88,7 +88,7 @@ impl Iterator for PreOrder {
     }
 }
 
-pub fn replace2(
+pub fn replace(
     root: &Rc<Debruijn>,
     replacee: &Rc<Debruijn>,
     replacement: &Rc<Debruijn>,
@@ -99,12 +99,12 @@ pub fn replace2(
         match root.as_ref() {
             Debruijn::Index(_) => root.clone(),
             Debruijn::Application { func, arg } => {
-                let func = replace2(func, replacee, replacement);
-                let arg = replace2(arg, replacee, replacement);
+                let func = replace(func, replacee, replacement);
+                let arg = replace(arg, replacee, replacement);
                 Rc::new(Debruijn::Application { func, arg })
             }
             Debruijn::Abstraction { body } => {
-                let body = replace2(body, replacee, replacement);
+                let body = replace(body, replacee, replacement);
                 Rc::new(Debruijn::Abstraction { body })
             }
         }
@@ -118,7 +118,7 @@ mod test {
 
     use crate::{
         debruijn::Debruijn,
-        replace::{PreOrder, TreeWalker, replace2},
+        replace::{PreOrder, TreeWalker, replace},
     };
 
     fn idx(a: usize) -> Rc<Debruijn> {
@@ -263,7 +263,7 @@ mod test {
         // = 1 (λ λ λ λ 5 2 3) 2
         let starting = call(&(call(&idx(1), &def(&replacee))), &idx(2));
 
-        let actual = replace2(&starting, &replacee, &Rc::new(new_fragment));
+        let actual = replace(&starting, &replacee, &Rc::new(new_fragment));
         let expected: Debruijn = "1 (λ λ λ 6 7 8) 2".parse().unwrap();
         assert_eq!(*actual, expected, "Expected {expected}, got {actual}");
     }
