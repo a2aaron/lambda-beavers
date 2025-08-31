@@ -8,3 +8,5 @@ edition = "2024"
 clap = { version = "4.5.43", features = ["derive"] }
 inquire = "0.7.5"
 
+[profile.release]
+debug = true

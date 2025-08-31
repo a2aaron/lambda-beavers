@@ -3,6 +3,7 @@
 #![feature(macro_metavar_expr_concat)]
 #![feature(type_alias_impl_trait)]
 #![feature(never_type)]
+#![feature(trait_alias)]
 
 pub mod common_terms;
 pub mod debruijn;

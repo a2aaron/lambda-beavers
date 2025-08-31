@@ -17,7 +17,7 @@ struct Args {
     run: bool,
     #[arg(short, long, action)]
     print: bool,
-    #[arg(short, long)]
+    #[arg(short, long, default_value("5"))]
     timeout: Option<u64>,
 }
 

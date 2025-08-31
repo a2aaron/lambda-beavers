@@ -65,7 +65,7 @@ fn is_redex(term: &Debruijn) -> bool {
 pub fn get_redexes(term: Rc<Debruijn>, visit_order: VisitOrder) -> impl Iterator<Item = Redex> {
     fn try_into_redex(term: Rc<Debruijn>) -> Option<Redex> {
         if is_redex(&term) {
-            Some(Redex::new(term.clone()))
+            Some(Redex::new(term))
         } else {
             None
         }

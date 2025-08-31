@@ -8,7 +8,8 @@ pub struct VisitOrder {
     emit_left_first: bool,
 }
 
-type TreeWalker = dyn Iterator<Item = Rc<Debruijn>>;
+// i'm the original
+pub trait TreeWalker = Iterator<Item = Rc<Debruijn>>;
 
 impl VisitOrder {
     pub const LEFT_INNERMOST: VisitOrder = VisitOrder {
@@ -28,10 +29,10 @@ impl VisitOrder {
         emit_left_first: false,
     };
 
-    pub fn get_iter(&self, root: Rc<Debruijn>) -> Box<TreeWalker> {
+    pub fn get_iter(&self, root: Rc<Debruijn>) -> impl TreeWalker + use<> {
         match (self.emit_left_first, self.emit_outermost_first) {
-            (true, true) => Box::new(PreOrder::normal(root)),
-            (false, true) => Box::new(PreOrder::reverse(root)),
+            (true, true) => PreOrder::normal(root),
+            (false, true) => PreOrder::reverse(root),
             (true, false) => todo!(),
             (false, false) => todo!(),
         }
@@ -202,7 +203,7 @@ mod test {
         }
     }
 
-    fn assert_ordering(test_data: TestData, expected_pretty: &str, ordering: &mut TreeWalker) {
+    fn assert_ordering(test_data: TestData, expected_pretty: &str, ordering: impl TreeWalker) {
         let expected = test_data.from_string(&expected_pretty);
 
         let actual: Vec<_> = ordering.collect();
