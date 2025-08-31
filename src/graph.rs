@@ -43,7 +43,7 @@ pub struct ReductionNode {
 
 impl ReductionNode {
     fn from_term(term: Rc<Debruijn>, visit_order: VisitOrder) -> ReductionNode {
-        let redexes = get_redexes(term.clone(), visit_order);
+        let redexes: Vec<Redex> = get_redexes(term.clone(), visit_order).collect();
         let unevaluated_redexes = (0..redexes.len()).map(|i| RedexIndex(i)).collect();
         ReductionNode {
             term,
@@ -91,7 +91,7 @@ fn is_redex(term: &Debruijn) -> bool {
     false
 }
 
-pub fn get_redexes(term: Rc<Debruijn>, visit_order: VisitOrder) -> Vec<Redex> {
+pub fn get_redexes(term: Rc<Debruijn>, visit_order: VisitOrder) -> impl Iterator<Item = Redex> {
     fn try_into_redex(term: Rc<Debruijn>) -> Option<Redex> {
         if is_redex(&term) {
             Some(Redex::new(term.clone()))
@@ -99,10 +99,7 @@ pub fn get_redexes(term: Rc<Debruijn>, visit_order: VisitOrder) -> Vec<Redex> {
             None
         }
     }
-    visit_order
-        .get_iter(term)
-        .filter_map(try_into_redex)
-        .collect()
+    visit_order.get_iter(term).filter_map(try_into_redex)
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]

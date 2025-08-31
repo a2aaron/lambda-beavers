@@ -2,7 +2,6 @@ use std::time::Duration;
 
 use clap::Parser;
 use lambda_beaver::{
-    reduce::ReductionStrategy,
     replace::VisitOrder,
     term::Term,
     utils::strong_reduction_test::{parse_line, reduce_with_timeout},
@@ -48,11 +47,9 @@ fn run(n: usize, args: &Args) {
     }
 
     if args.run {
-        let reduction_strategy = &mut ReductionStrategy::DFS;
         let visit_order = VisitOrder::LEFT_OUTERMOST;
         let timeout = args.timeout.map(Duration::from_secs);
-        let (result, duration) =
-            reduce_with_timeout(&starting, reduction_strategy, visit_order, timeout);
+        let (result, duration) = reduce_with_timeout(&starting, visit_order, timeout);
         let duration = duration.as_millis();
         match result {
             Some(result) => println!("{n},{duration},{result}"),

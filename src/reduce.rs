@@ -5,6 +5,7 @@ use clap::ValueEnum;
 use crate::{
     debruijn::{Debruijn, call, def, idx},
     graph::{NodeIndex, ReductionGraph},
+    reduce_single::Reducer,
     replace::VisitOrder,
     utils::Rng,
 };
@@ -140,13 +141,12 @@ impl Display for ReductionResult {
 
 pub fn reduce(
     term: &Debruijn,
-    reduction_strategy: &mut ReductionStrategy,
     visit_order: VisitOrder,
     max_reductions: usize,
 ) -> (ReductionResult, usize) {
-    let mut graph = ReductionGraph::with_root(term.clone(), visit_order);
+    let mut reducer = Reducer::new(term.clone(), visit_order);
     for i in 0..max_reductions {
-        if let Some(value) = reduce_one(reduction_strategy, &mut graph) {
+        if let Some(value) = reducer.reduce_one() {
             return (value, i);
         }
     }

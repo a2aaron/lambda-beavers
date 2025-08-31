@@ -57,10 +57,7 @@ pub mod strong_reduction_test {
     use std::time::{Duration, Instant};
 
     use crate::{
-        debruijn::Debruijn,
-        graph::ReductionGraph,
-        parse,
-        reduce::{self, ReductionResult, ReductionStrategy},
+        debruijn::Debruijn, parse, reduce::ReductionResult, reduce_single::Reducer,
         replace::VisitOrder,
     };
 
@@ -79,14 +76,13 @@ pub mod strong_reduction_test {
 
     pub fn reduce_with_timeout(
         term: &Debruijn,
-        reduction_strategy: &mut ReductionStrategy,
         visit_order: VisitOrder,
         timeout: Option<Duration>,
     ) -> (Option<ReductionResult>, Duration) {
-        let mut graph = ReductionGraph::with_root(term.clone(), visit_order);
+        let mut reducer = Reducer::new(term.clone(), visit_order);
         let now = Instant::now();
         loop {
-            if let Some(value) = reduce::reduce_one(reduction_strategy, &mut graph) {
+            if let Some(value) = reducer.reduce_one() {
                 return (Some(value), now.elapsed());
             }
             if let Some(timeout) = timeout

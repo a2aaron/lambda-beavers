@@ -3,7 +3,7 @@ use std::collections::HashMap;
 
 use lambda_beaver::{
     parse,
-    reduce::{self, ReductionResult, ReductionStrategy, ReductionStrategyKind},
+    reduce::{self, ReductionResult},
     replace::VisitOrder,
     term::Term,
     utils::{self},
@@ -49,15 +49,11 @@ struct Args {
     /// Maximum number of reductions
     #[arg(long, default_value_t = 1_000)]
     max_reductions: usize,
-    /// Reduction strategy
-    #[arg(long, default_value = "bfs")]
-    reduction_strategy: ReductionStrategyKind,
 }
 
 #[allow(unused_variables)]
 fn main() {
     let args = Args::parse();
-    let mut reduction_strategy = ReductionStrategy::from(args.reduction_strategy);
     let min_bitlength = args.min_bitlength;
     let max_bitlength = args.max_bitlength;
     let max_reductions = args.max_reductions;
@@ -73,8 +69,7 @@ fn main() {
         for term in terms {
             let term_binary = format!("{term:b}");
             let term_classic = Term::from(&term);
-            let (result, reductions_used) =
-                reduce::reduce(&term, &mut reduction_strategy, visit_order, max_reductions);
+            let (result, reductions_used) = reduce::reduce(&term, visit_order, max_reductions);
             match result {
                 ReductionResult::NormalForm(bnf) => {
                     let bnf_classic = Term::from(&bnf);

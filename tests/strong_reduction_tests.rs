@@ -4,7 +4,7 @@
 use std::time::Duration;
 
 use lambda_beaver::{
-    reduce::{ReductionResult, ReductionStrategy},
+    reduce::ReductionResult,
     replace::VisitOrder,
     term::Term,
     utils::strong_reduction_test::{parse_line, reduce_with_timeout},
@@ -37,13 +37,11 @@ macro_rules! make_test {
 }
 
 fn assert_test(test: &str, test_i: usize) {
-    let mut reduction_strategy = ReductionStrategy::DFS;
     let visit_order = VisitOrder::LEFT_OUTERMOST;
     let timeout = Some(Duration::from_secs(5));
 
     let (starting, expected) = parse_line(test);
-    let (reduction_result, _) =
-        reduce_with_timeout(&starting, &mut reduction_strategy, visit_order, timeout);
+    let (reduction_result, _) = reduce_with_timeout(&starting, visit_order, timeout);
 
     let starting_classic = Term::from(&starting);
     let expected_classic = Term::from(&expected);
