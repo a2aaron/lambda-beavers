@@ -2,27 +2,26 @@ use std::{collections::HashMap, fmt::Display, rc::Rc};
 
 use crate::{
     debruijn::Debruijn,
-    reduce::{self, Fragment},
-    replace::{self, TreePath, VisitOrder},
+    reduce::{self},
+    replace::{self, VisitOrder},
 };
 
 #[derive(Debug, Clone)]
 pub struct Redex {
     pub redex: Rc<Debruijn>,
-    pub treepath: TreePath,
 }
 
 impl Redex {
-    fn new(redex: Rc<Debruijn>, treepath: TreePath) -> Redex {
+    fn new(redex: Rc<Debruijn>) -> Redex {
         if !is_redex(&redex) {
             panic!("{redex} is not a redex!");
         }
-        Redex { redex, treepath }
+        Redex { redex }
     }
 
-    pub fn beta_reduce(&self, root: &Debruijn) -> Debruijn {
-        let fragment = Fragment(&reduce::beta_reduce(&self.redex));
-        let term = replace::replace(root, fragment, &self.treepath);
+    pub fn beta_reduce(&self, root: &Rc<Debruijn>) -> Rc<Debruijn> {
+        let fragment = Rc::new(reduce::beta_reduce(&self.redex));
+        let term = replace::replace2(root, &self.redex, &fragment);
         term
     }
 }
@@ -44,7 +43,7 @@ pub struct ReductionNode {
 
 impl ReductionNode {
     fn from_term(term: Rc<Debruijn>, visit_order: VisitOrder) -> ReductionNode {
-        let redexes = get_redexes(&term, visit_order);
+        let redexes = get_redexes(term.clone(), visit_order);
         let unevaluated_redexes = (0..redexes.len()).map(|i| RedexIndex(i)).collect();
         ReductionNode {
             term,
@@ -57,7 +56,7 @@ impl ReductionNode {
         self.redexes.get(redex.0)
     }
 
-    fn evaluate_redex(&mut self, redex_index: RedexIndex) -> Debruijn {
+    fn evaluate_redex(&mut self, redex_index: RedexIndex) -> Rc<Debruijn> {
         assert!(self.is_unevaled(redex_index));
         let index = self
             .unevaluated_redexes
@@ -92,15 +91,18 @@ fn is_redex(term: &Debruijn) -> bool {
     false
 }
 
-pub fn get_redexes(term: &Rc<Debruijn>, visit_order: VisitOrder) -> Vec<Redex> {
-    fn try_into_redex(term: &Rc<Debruijn>, treepath: TreePath) -> Option<Redex> {
+pub fn get_redexes(term: Rc<Debruijn>, visit_order: VisitOrder) -> Vec<Redex> {
+    fn try_into_redex(term: Rc<Debruijn>) -> Option<Redex> {
         if is_redex(&term) {
-            Some(Redex::new(term.clone(), treepath))
+            Some(Redex::new(term.clone()))
         } else {
             None
         }
     }
-    replace::treepath_filter::<Redex>(&term, try_into_redex, visit_order)
+    visit_order
+        .get_iter(term)
+        .filter_map(try_into_redex)
+        .collect()
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -191,7 +193,7 @@ impl ReductionGraph {
             "node at {node_index} must have unevaluated redex"
         );
 
-        let reduced_term = Rc::new(node.evaluate_redex(redex_index));
+        let reduced_term = node.evaluate_redex(redex_index);
         if !node.has_unevaled_redexes() {
             self.set_fully_evaled(node_index);
         }
@@ -310,7 +312,7 @@ mod test {
     fn bnf_check() {
         let term = "(λ 1) λ λ 1";
         let term = Rc::new(Debruijn::from_str(term).unwrap());
-        let node = ReductionNode::from_term(term, VisitOrder::LEFT_INNERMOST);
+        let node = ReductionNode::from_term(term, VisitOrder::LEFT_OUTERMOST);
         assert!(
             !node.is_bnf(),
             "Expected {} to be BNF. Redex: {:?}",
@@ -323,7 +325,7 @@ mod test {
     fn graph_and_true_false() {
         let root = "(((λ (λ ((2 1) 2))) (λ (λ 2))) (λ (λ 1)))";
         let root = Debruijn::from_str(root).unwrap();
-        let mut graph = ReductionGraph::with_root(root, VisitOrder::LEFT_INNERMOST);
+        let mut graph = ReductionGraph::with_root(root, VisitOrder::LEFT_OUTERMOST);
 
         while graph.any_reducible() {
             let node_idx = graph.incomplete_nodes[0];

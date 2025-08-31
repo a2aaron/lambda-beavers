@@ -7,7 +7,7 @@ use lambda_beaver::{
     graph::{Redex, get_redexes},
     parse,
     print::{NodeLabelType, PrintableTerm},
-    replace::{Direction, TreePath, VisitOrder},
+    replace::VisitOrder,
 };
 
 #[derive(Parser, Debug)]
@@ -22,55 +22,35 @@ struct Args {
 
 #[derive(Debug, Clone)]
 struct RedexOption {
-    root: Debruijn,
+    root: Rc<Debruijn>,
     redex: Redex,
 }
 
 impl RedexOption {
-    fn reduced(&self) -> Debruijn {
+    fn reduced(&self) -> Rc<Debruijn> {
         self.redex.beta_reduce(&self.root)
     }
 }
 
 impl Display for RedexOption {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let highlighted = print_highlighted(&self.root, &self.redex.treepath);
+        let highlighted = print_highlighted(&self.root, self.redex.redex.as_ref());
         write!(f, "{}", highlighted)
     }
 }
 
-fn print_highlighted(root: &Debruijn, treepath: &TreePath) -> String {
-    fn get_printable_terms(
-        root: &Debruijn,
-        treepath: &TreePath,
-        treepath_i: Option<usize>,
-    ) -> PrintableTerm {
-        match root {
+fn print_highlighted<'a>(root: &'a Debruijn, highlighted: &'a Debruijn) -> String {
+    fn get_printable_terms<'a>(node: &'a Debruijn, highlighted: &'a Debruijn) -> PrintableTerm {
+        match node {
             Debruijn::Index(i) => PrintableTerm::Leaf(format!("{i}")),
             Debruijn::Abstraction { body } => PrintableTerm::Abstraction {
                 body_head: "λ ".to_string(),
-                body: Box::new(get_printable_terms(body, treepath, treepath_i)),
+                body: Box::new(get_printable_terms(body, highlighted)),
             },
             Debruijn::Application { func, arg } => {
-                let highlight = treepath_i == Some(treepath.0.len());
-                let next_treepath_i = treepath_i.map(|i| i + 1);
-                let (func, arg) = match treepath_i.and_then(|i| treepath.0.get(i)) {
-                    Some(Direction::Left) => {
-                        let func = get_printable_terms(&func, treepath, next_treepath_i);
-                        let arg = get_printable_terms(&arg, treepath, None);
-                        (func, arg)
-                    }
-                    Some(Direction::Right) => {
-                        let func = get_printable_terms(&func, treepath, None);
-                        let arg = get_printable_terms(&arg, treepath, next_treepath_i);
-                        (func, arg)
-                    }
-                    None => {
-                        let func = get_printable_terms(&func, treepath, None);
-                        let arg = get_printable_terms(&arg, treepath, None);
-                        (func, arg)
-                    }
-                };
+                let func = get_printable_terms(&func, highlighted);
+                let arg = get_printable_terms(&arg, highlighted);
+                let highlight = std::ptr::eq(node, highlighted);
 
                 PrintableTerm::Application {
                     highlight,
@@ -81,7 +61,7 @@ fn print_highlighted(root: &Debruijn, treepath: &TreePath) -> String {
         }
     }
 
-    let printable_terms = get_printable_terms(root, treepath, Some(0));
+    let printable_terms = get_printable_terms(root, highlighted);
     printable_terms.print()
 }
 
@@ -100,7 +80,7 @@ impl Display for Choice {
                 let formatted = format!("{redex_option}");
                 let out = if formatted.len() > 80 {
                     let reduced = redex_option.reduced();
-                    let binary = format!("{reduced:b}");
+                    let binary = format!("{:b}", *reduced);
                     format!("len = {}", binary.len())
                 } else {
                     formatted
@@ -130,14 +110,14 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut history = vec![];
 
     loop {
-        let redexes = get_redexes(&current_term, VisitOrder::LEFT_OUTERMOST);
+        let redexes = get_redexes(current_term.clone(), VisitOrder::LEFT_OUTERMOST);
         let reductions: Vec<_> = redexes
             .into_iter()
             .map(|redex| {
                 // let reduction = redex.beta_reduce(current_term.clone());
                 // args.node_label.to_string(&reduction)
                 Choice::Reduce(RedexOption {
-                    root: current_term.as_ref().clone(),
+                    root: current_term.clone(),
                     redex,
                 })
             })
@@ -165,7 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Choice::Quit => break,
             Choice::Reduce(redex_option) => {
                 history.push(current_term);
-                current_term = Rc::new(redex_option.reduced());
+                current_term = redex_option.reduced();
             }
         }
     }

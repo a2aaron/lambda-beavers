@@ -276,6 +276,8 @@ fn substitute(function_body: &Debruijn, replacer: &Debruijn) -> Debruijn {
                 }
             }
             Debruijn::Application { func, arg } => {
+                // TODO: these make_muts are almost certainly never going to allocate
+                // may make sense to use get_mut instead.
                 _substitute(Rc::make_mut(func), match_index, replacer, depth);
                 _substitute(Rc::make_mut(arg), match_index, replacer, depth);
             }
