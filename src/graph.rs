@@ -1,8 +1,8 @@
-use std::{collections::HashMap, fmt::Display, rc::Rc};
+use std::{collections::HashMap, fmt::Display, ops::ControlFlow, rc::Rc};
 
 use crate::{
     debruijn::Root,
-    reduce::{self, Redex},
+    reduce::{self, Redex, get_redexes},
     replace::VisitOrder,
 };
 
@@ -22,19 +22,15 @@ pub struct ReductionNode {
 }
 
 impl ReductionNode {
-    fn from_root(root: Rc<Root>, visit_order: VisitOrder) -> ReductionNode
-where {
-        let redexes = reduce::get_redexes(&root, visit_order);
-        let unevaluated_redexes = (0..redexes.count()).map(|i| RedexIndex(i)).collect();
+    fn from_root(root: Rc<Root>, visit_order: VisitOrder) -> ReductionNode {
+        let num_redexes = reduce::get_redexes(&root, visit_order).len();
+        let unevaluated_redexes = (0..num_redexes).map(RedexIndex).collect();
+
         ReductionNode {
             root: root.clone(),
             visit_order,
             unevaluated_redexes,
         }
-    }
-
-    fn get_redex(&self, redex: RedexIndex) -> Option<Redex<'_>> {
-        self.redexes().nth(redex.0)
     }
 
     fn evaluate_redex(&mut self, redex_index: RedexIndex) -> Root {
@@ -46,20 +42,27 @@ where {
             .unwrap();
         self.unevaluated_redexes.remove(index);
 
-        let redex = self.get_redex(redex_index).unwrap();
-        redex.beta_reduce(&self.root)
-    }
-
-    fn redexes(&self) -> impl Iterator<Item = Redex<'_>> {
-        reduce::get_redexes(&self.root, self.visit_order)
+        let mut root = self.root.as_ref().clone();
+        let redex = get_redexes(&root, self.visit_order)[redex_index.0];
+        redex.beta_reduce(&mut root);
+        root
     }
 
     fn is_bnf(&self) -> bool {
-        self.redexes().count() == 0
+        self.visit_order
+            .preorder_walk(&self.root, |term| {
+                if let Some(_) = Redex::try_new(term) {
+                    // If we find any redex, then it's not BNF, return false
+                    ControlFlow::Break(false)
+                } else {
+                    ControlFlow::Continue(())
+                }
+            })
+            .unwrap_or(true) // Otherwise, we found no redexes, so it's BNF
     }
 
-    fn is_unevaled(&self, redex: RedexIndex) -> bool {
-        self.unevaluated_redexes.contains(&redex)
+    fn is_unevaled(&self, redex_index: RedexIndex) -> bool {
+        self.unevaluated_redexes.contains(&redex_index)
     }
 
     fn has_unevaled_redexes(&self) -> bool {
@@ -240,6 +243,7 @@ mod test {
     use crate::{
         debruijn::{Debruijn, Root},
         graph::{NodeIndex, ReductionGraph, ReductionNode},
+        reduce::get_redexes,
         replace::VisitOrder,
     };
 
@@ -268,14 +272,15 @@ mod test {
 
     #[test]
     fn bnf_check() {
+        let visit_order = VisitOrder::LEFT_OUTERMOST;
         let term = "(λ 1) λ λ 1";
-        let root = Rc::new(Debruijn::from_str(term).unwrap().into());
-        let node = ReductionNode::from_root(root, VisitOrder::LEFT_OUTERMOST);
+        let root = Rc::new(Root(Debruijn::from_str(term).unwrap()));
+        let node = ReductionNode::from_root(root.clone(), visit_order);
         assert!(
             !node.is_bnf(),
             "Expected {} to be BNF. Redex: {:?}",
             node.root,
-            node.redexes().collect::<Vec<_>>()
+            get_redexes(root.as_ref(), visit_order)
         );
     }
 

@@ -5,7 +5,7 @@ use clap::ValueEnum;
 use crate::{
     debruijn::{Debruijn, Root, call, def, idx},
     graph::{NodeIndex, ReductionGraph},
-    replace::{self, VisitOrder, preorder_walk},
+    replace::VisitOrder,
     utils::Rng,
 };
 
@@ -23,19 +23,9 @@ impl Reducer {
     }
 
     pub fn reduce_one(&mut self) -> Option<ReductionResult> {
-        // let maybe_redex = get_redexes(&self.root, self.visit_order).next();
-        // if let Some(redex) = maybe_redex {
-        //     let new_root = redex.beta_reduce(&self.root);
-        //     self.root = new_root;
-        //     None
-        // } else {
-        //     let bnf = self.root.clone();
-        //     Some(ReductionResult::NormalForm(bnf))
-        // }
-
-        let result = preorder_walk(&mut self.root, |term| {
+        let result = self.visit_order.preorder_walk_mut(&mut self.root, |term| {
             if let Some(parts) = extract_redex_parts(term) {
-                let reduced = substitute_arg_into_body(parts);
+                let reduced = substitute_arg_into_body(&parts);
                 *term = reduced;
                 ControlFlow::Break(())
             } else {
@@ -44,37 +34,56 @@ impl Reducer {
         });
         match result {
             Some(()) => None,
+            // This clone is fine, it occurs at the end of all reductions
             None => Some(ReductionResult::NormalForm(self.root.clone())),
         }
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct Redex<'a> {
-    pub redex: &'a Debruijn,
+#[derive(Debug, Copy, Clone, PartialEq, Eq)]
+pub struct Redex {
+    pub redex: *const Debruijn,
 }
 
-impl<'a> Redex<'a> {
-    fn new(redex: &'a Debruijn) -> Redex<'a> {
-        if !is_redex(&redex) {
-            panic!("{redex} is not a redex!");
+impl Redex {
+    pub fn try_new(redex: &Debruijn) -> Option<Redex> {
+        if let Some(_parts) = extract_redex_parts(redex) {
+            Some(Redex { redex })
+        } else {
+            None
         }
-        Redex { redex }
     }
 
-    pub fn beta_reduce(&self, root: &'a Root) -> Root {
-        let fragment = apply_redex(&self.redex);
-        let term = replace::replace(root, &self.redex, &fragment);
-        term
+    // TODO: consider renaming to "apply"?
+    // Consider moving to Root and having Root take a Redex
+    // TODO: It would be nice if somehow Redexes could be borrows of the Root? but then it becomes
+    // impossible to store them
+    /// # Panics
+    /// The Redex needs to come from the Root passed into here.
+    /// Otherwise, the ptr::eq in the closure will never find your Redex. If this occurs, the method
+    /// will panic.
+    ///
+    /// This means that you should not clone a Root and then pass in the old redex into the new Root
+    pub fn beta_reduce<'b>(&self, root: &'b mut Root) -> &'b mut Root {
+        let result = VisitOrder::LEFT_OUTERMOST.preorder_walk_mut(root, |term| {
+            if std::ptr::eq(self.redex, term)
+                && let Some(parts) = extract_redex_parts(term)
+            {
+                let reduced = substitute_arg_into_body(&parts);
+                *term = reduced;
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        });
+        // Require that we did actually find the redex and reduce it.
+        assert!(result.is_some());
+        root
     }
 }
 
-#[deprecated = "use get_redex"]
-fn is_redex(term: &Debruijn) -> bool {
-    extract_redex_parts(term).is_some()
-}
-
-struct RedexParts<'a> {
+#[derive(Debug, Clone)]
+pub struct RedexParts<'a> {
     body: &'a Debruijn,
     // it's like a really shitty pirate
     arg: &'a Debruijn,
@@ -90,15 +99,16 @@ fn extract_redex_parts(term: &Debruijn) -> Option<RedexParts<'_>> {
     }
 }
 
-pub fn get_redexes(root: &Root, visit_order: VisitOrder) -> impl Iterator<Item = Redex<'_>> {
-    fn try_into_redex(term: &Debruijn) -> Option<Redex<'_>> {
-        if is_redex(&term) {
-            Some(Redex::new(term))
-        } else {
-            None
+// TODO: likely move to method on Root or possibly VisitOrder
+pub fn get_redexes(root: &Root, visit_order: VisitOrder) -> Vec<Redex> {
+    let mut redexes = vec![];
+    visit_order.preorder_walk(root, |term| {
+        if let Some(redex) = Redex::try_new(term) {
+            redexes.push(redex);
         }
-    }
-    visit_order.get_iter(root).filter_map(try_into_redex)
+        ControlFlow::Continue::<()>(())
+    });
+    redexes
 }
 
 // see https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture15.pdf
@@ -231,11 +241,11 @@ impl Display for ReductionResult {
 }
 
 pub fn reduce(
-    root: &Root,
+    root: Root,
     visit_order: VisitOrder,
     max_reductions: usize,
 ) -> (ReductionResult, usize) {
-    let mut reducer = Reducer::new(root.clone(), visit_order);
+    let mut reducer = Reducer::new(root, visit_order);
     for i in 0..max_reductions {
         if let Some(value) = reducer.reduce_one() {
             return (value, i);
@@ -244,6 +254,7 @@ pub fn reduce(
     (ReductionResult::MaxReductionsReached, max_reductions)
 }
 
+// TODO move to method on ReductionGraph
 pub fn reduce_one(
     reduction_strategy: &mut ReductionStrategy,
     graph: &mut ReductionGraph,
@@ -329,14 +340,14 @@ pub fn apply_redex(redex: &Debruijn) -> Debruijn {
 
 fn apply_arg_to_func(func: &Debruijn, arg: &Debruijn) -> Debruijn {
     match func {
-        Debruijn::Abstraction { body } => substitute_arg_into_body(RedexParts { body, arg }),
+        Debruijn::Abstraction { body } => substitute_arg_into_body(&RedexParts { body, arg }),
         _ => panic!("Expected an abstraction, got {func}"),
     }
 }
 
-fn substitute_arg_into_body(parts: RedexParts) -> Debruijn {
-    let term = up_one(&parts.arg);
-    let subsituted = substitute(&parts.body, &term);
+fn substitute_arg_into_body(parts: &RedexParts) -> Debruijn {
+    let term = up_one(parts.arg);
+    let subsituted = substitute(parts.body, &term);
     let unshift = down_one(&subsituted);
     unshift
 }

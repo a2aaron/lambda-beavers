@@ -20,27 +20,8 @@ struct Args {
     node_label: NodeLabelType,
 }
 
-#[derive(Debug, Clone)]
-struct RedexOption<'a> {
-    root: &'a Root,
-    redex: Redex<'a>,
-}
-
-impl<'a> RedexOption<'a> {
-    fn reduced(&self) -> Root {
-        self.redex.beta_reduce(&self.root)
-    }
-}
-
-impl<'a> Display for RedexOption<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let highlighted = print_highlighted(&self.root, self.redex.redex);
-        write!(f, "{}", highlighted)
-    }
-}
-
-fn print_highlighted<'a>(root: &'a Root, highlighted: &'a Debruijn) -> String {
-    fn get_printable_terms<'a>(node: &'a Debruijn, highlighted: &'a Debruijn) -> PrintableTerm {
+fn print_highlighted<'a>(root: &'a Root, highlighted: Redex) -> String {
+    fn get_printable_terms<'a>(node: &'a Debruijn, highlighted: Redex) -> PrintableTerm {
         match node {
             Debruijn::Index(i) => PrintableTerm::Leaf(format!("{i}")),
             Debruijn::Abstraction { body } => PrintableTerm::Abstraction {
@@ -50,7 +31,7 @@ fn print_highlighted<'a>(root: &'a Root, highlighted: &'a Debruijn) -> String {
             Debruijn::Application { func, arg } => {
                 let func = get_printable_terms(&func, highlighted);
                 let arg = get_printable_terms(&arg, highlighted);
-                let highlight = std::ptr::eq(node, highlighted);
+                let highlight = std::ptr::eq(node, highlighted.redex);
 
                 PrintableTerm::Application {
                     highlight,
@@ -65,28 +46,18 @@ fn print_highlighted<'a>(root: &'a Root, highlighted: &'a Debruijn) -> String {
     printable_terms.print()
 }
 
-enum Choice<'a> {
+enum Choice {
     Back,
     Quit,
-    Reduce(RedexOption<'a>),
+    Reduce(usize, String),
 }
 
-impl<'a> Display for Choice<'a> {
+impl Display for Choice {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Choice::Back => write!(f, "Back"),
             Choice::Quit => write!(f, "Quit"),
-            Choice::Reduce(redex_option) => {
-                let formatted = format!("{redex_option}");
-                let out = if formatted.len() > 80 {
-                    let reduced = redex_option.reduced();
-                    let binary = format!("{:b}", reduced);
-                    format!("len = {}", binary.len())
-                } else {
-                    formatted
-                };
-                write!(f, "{out}")
-            }
+            Choice::Reduce(_redex_index, highlighted) => write!(f, "{highlighted}"),
         }
     }
 }
@@ -112,14 +83,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     loop {
         let redexes = reduce::get_redexes(&current_term, VisitOrder::LEFT_OUTERMOST);
         let reductions: Vec<_> = redexes
-            .into_iter()
-            .map(|redex| {
-                // let reduction = redex.beta_reduce(current_term.clone());
-                // args.node_label.to_string(&reduction)
-                Choice::Reduce(RedexOption {
-                    root: &current_term,
-                    redex,
-                })
+            .iter()
+            .enumerate()
+            .map(|(redex_index, redex)| {
+                // TODO: would be nice to not print out the full term if it is over 80ish characters long
+                let highlighted = print_highlighted(&current_term, *redex);
+                Choice::Reduce(redex_index, highlighted)
             })
             .collect();
 
@@ -143,9 +112,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         match text {
             Choice::Back => current_term = history.pop().unwrap(),
             Choice::Quit => break,
-            Choice::Reduce(redex_option) => {
+            Choice::Reduce(redex_index, _highlighted_string) => {
                 history.push(current_term.clone());
-                current_term = redex_option.reduced();
+                redexes[redex_index].beta_reduce(&mut current_term);
             }
         }
     }

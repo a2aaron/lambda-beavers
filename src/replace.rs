@@ -4,142 +4,84 @@ use crate::debruijn::{Debruijn, Root};
 
 #[derive(Debug, Clone, Copy)]
 pub struct VisitOrder {
-    emit_outermost_first: bool,
-    emit_left_first: bool,
-}
-
-// i'm the original
-pub trait TreeWalker<'a> = Iterator<Item = &'a Debruijn>;
-
-impl VisitOrder {
-    pub const LEFT_INNERMOST: VisitOrder = VisitOrder {
-        emit_outermost_first: false,
-        emit_left_first: true,
-    };
-    pub const RIGHT_INNERMOST: VisitOrder = VisitOrder {
-        emit_outermost_first: false,
-        emit_left_first: false,
-    };
-    pub const LEFT_OUTERMOST: VisitOrder = VisitOrder {
-        emit_outermost_first: true,
-        emit_left_first: true,
-    };
-    pub const RIGHT_OUTERMOST: VisitOrder = VisitOrder {
-        emit_outermost_first: true,
-        emit_left_first: false,
-    };
-
-    pub fn get_iter<'a>(&self, root: &'a Root) -> impl TreeWalker<'a> + use<'a> {
-        match (self.emit_left_first, self.emit_outermost_first) {
-            (true, true) => PreOrder::normal(root),
-            (false, true) => PreOrder::reverse(root),
-            (true, false) => todo!(),
-            (false, false) => todo!(),
-        }
-    }
-}
-
-pub fn preorder_walk<T>(
-    root: &mut Root,
-    mut action: impl FnMut(&mut Debruijn) -> ControlFlow<T>,
-) -> Option<T> {
-    _preorder_walk(&mut root.0, &mut action).break_value()
-}
-
-fn _preorder_walk<T>(
-    term: &mut Debruijn,
-    action: &mut impl FnMut(&mut Debruijn) -> ControlFlow<T>,
-) -> ControlFlow<T> {
-    action(term)?;
-
-    match term {
-        Debruijn::Index(_) => (),
-        Debruijn::Application { func, arg } => {
-            _preorder_walk(func, action)?;
-            _preorder_walk(arg, action)?;
-        }
-        Debruijn::Abstraction { body } => _preorder_walk(body, action)?,
-    }
-    ControlFlow::Continue(())
-}
-
-struct PreOrder<'a> {
-    node_stack: Vec<&'a Debruijn>,
     reverse: bool,
 }
 
-impl<'a> PreOrder<'a> {
-    fn normal(root: &'a Root) -> PreOrder<'a> {
-        PreOrder {
-            node_stack: vec![&root.0],
-            reverse: false,
-        }
-    }
+impl VisitOrder {
+    pub const LEFT_OUTERMOST: VisitOrder = VisitOrder { reverse: false };
+    pub const RIGHT_OUTERMOST: VisitOrder = VisitOrder { reverse: true };
 
-    fn reverse(root: &'a Root) -> PreOrder<'a> {
-        PreOrder {
-            node_stack: vec![&root.0],
-            reverse: true,
-        }
-    }
-}
-impl<'a> Iterator for PreOrder<'a> {
-    type Item = &'a Debruijn;
-    fn next(&mut self) -> Option<Self::Item> {
-        if let Some(node) = self.node_stack.pop() {
-            match node {
-                Debruijn::Index(_) => Some(node),
-                Debruijn::Abstraction { body } => {
-                    self.node_stack.push(&body);
-                    Some(node)
-                }
+    pub fn preorder_walk_mut<T>(
+        &self,
+        root: &mut Root,
+        mut action: impl FnMut(&mut Debruijn) -> ControlFlow<T>,
+    ) -> Option<T> {
+        fn _preorder_walk_mut<T>(
+            term: &mut Debruijn,
+            action: &mut impl FnMut(&mut Debruijn) -> ControlFlow<T>,
+            reverse: bool,
+        ) -> ControlFlow<T> {
+            action(term)?;
+
+            match term {
+                Debruijn::Index(_) => (),
                 Debruijn::Application { func, arg } => {
-                    if self.reverse {
-                        self.node_stack.push(func);
-                        self.node_stack.push(arg);
+                    if reverse {
+                        _preorder_walk_mut(arg, action, reverse)?;
+                        _preorder_walk_mut(func, action, reverse)?;
                     } else {
-                        self.node_stack.push(arg);
-                        self.node_stack.push(func);
+                        _preorder_walk_mut(func, action, reverse)?;
+                        _preorder_walk_mut(arg, action, reverse)?;
                     }
-
-                    Some(node)
                 }
+                Debruijn::Abstraction { body } => _preorder_walk_mut(body, action, reverse)?,
             }
-        } else {
-            None
+            ControlFlow::Continue(())
         }
+
+        _preorder_walk_mut(&mut root.0, &mut action, self.reverse).break_value()
     }
-}
-pub fn replace<'a>(root: &'a Root, replacee: &'a Debruijn, replacement: &Debruijn) -> Root {
-    Root(_replace(&root.0, replacee, replacement))
-}
-fn _replace<'a>(node: &'a Debruijn, replacee: &'a Debruijn, replacement: &Debruijn) -> Debruijn {
-    if std::ptr::eq(node, replacee) {
-        replacement.clone()
-    } else {
-        match node {
-            Debruijn::Index(_) => node.clone(),
-            Debruijn::Application { func, arg } => {
-                let func = Box::new(_replace(func, replacee, replacement));
-                let arg = Box::new(_replace(arg, replacee, replacement));
-                Debruijn::Application { func, arg }
+
+    pub fn preorder_walk<'a, T>(
+        &self,
+        root: &'a Root,
+        mut action: impl FnMut(&'a Debruijn) -> ControlFlow<T>,
+    ) -> Option<T> {
+        fn _preorder_walk<'a, T>(
+            term: &'a Debruijn,
+            action: &mut impl FnMut(&'a Debruijn) -> ControlFlow<T>,
+            reverse: bool,
+        ) -> ControlFlow<T> {
+            action(term)?;
+
+            match term {
+                Debruijn::Index(_) => (),
+                Debruijn::Application { func, arg } => {
+                    if reverse {
+                        _preorder_walk(arg, action, reverse)?;
+                        _preorder_walk(func, action, reverse)?;
+                    } else {
+                        _preorder_walk(func, action, reverse)?;
+                        _preorder_walk(arg, action, reverse)?;
+                    }
+                }
+                Debruijn::Abstraction { body } => _preorder_walk(body, action, reverse)?,
             }
-            Debruijn::Abstraction { body } => {
-                let body = Box::new(_replace(body, replacee, replacement));
-                Debruijn::Abstraction { body }
-            }
+            ControlFlow::Continue(())
         }
+
+        _preorder_walk(&root.0, &mut action, self.reverse).break_value()
     }
 }
 
 #[cfg(test)]
 
 mod test {
-    use std::collections::HashMap;
+    use std::{collections::HashMap, ops::ControlFlow};
 
     use crate::{
         debruijn::{Debruijn, Root},
-        replace::{TreeWalker, VisitOrder, replace},
+        replace::VisitOrder,
     };
 
     fn idx(a: usize) -> Debruijn {
@@ -220,7 +162,11 @@ mod test {
     fn assert_ordering(test_data: TestData, expected_pretty: &str, visit_order: VisitOrder) {
         let expected = test_data.from_string(&expected_pretty);
 
-        let actual: Vec<_> = visit_order.get_iter(&test_data.root).collect();
+        let mut actual = vec![];
+        visit_order.preorder_walk(&test_data.root, |term| {
+            actual.push(term);
+            ControlFlow::Continue::<()>(())
+        });
         let actual_pretty = test_data.into_string(&actual);
 
         assert_eq!(
@@ -241,35 +187,5 @@ mod test {
         let test_data = TestData::new();
         let expected = "f, g, i, h, b, d, e, c, a";
         assert_ordering(test_data, expected, VisitOrder::RIGHT_OUTERMOST);
-    }
-
-    #[test]
-    fn test_replace2() {
-        let replacee: Debruijn = "λ λ λ 5 2 3".parse().unwrap();
-        let new_fragment: Debruijn = "λ λ 6 7 8".parse().unwrap();
-
-        //   1 (λ <replacee>) 2
-        // = 1 (λ λ λ λ 5 2 3) 2
-        let starting = Root(call(call(idx(1), def(replacee.clone())), idx(2)));
-
-        let replacee = find(&starting.0, &replacee).unwrap();
-
-        let actual = replace(&starting, &replacee, &new_fragment);
-        let expected = Root("1 (λ λ λ 6 7 8) 2".parse().unwrap());
-        assert_eq!(actual, expected, "Expected {expected}, got {actual}");
-    }
-
-    fn find<'a>(root: &'a Debruijn, value: &Debruijn) -> Option<&'a Debruijn> {
-        if root == value {
-            Some(root)
-        } else {
-            match root {
-                Debruijn::Index(_) => None,
-                Debruijn::Application { func, arg } => {
-                    find(func, value).or_else(|| find(arg, value))
-                }
-                Debruijn::Abstraction { body } => find(body, value),
-            }
-        }
     }
 }
