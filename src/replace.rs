@@ -1,3 +1,5 @@
+use std::ops::ControlFlow;
+
 use crate::debruijn::{Debruijn, Root};
 
 #[derive(Debug, Clone, Copy)]
@@ -35,6 +37,30 @@ impl VisitOrder {
             (false, false) => todo!(),
         }
     }
+}
+
+pub fn preorder_walk<T>(
+    root: &mut Root,
+    mut action: impl FnMut(&mut Debruijn) -> ControlFlow<T>,
+) -> Option<T> {
+    _preorder_walk(&mut root.0, &mut action).break_value()
+}
+
+fn _preorder_walk<T>(
+    term: &mut Debruijn,
+    action: &mut impl FnMut(&mut Debruijn) -> ControlFlow<T>,
+) -> ControlFlow<T> {
+    action(term)?;
+
+    match term {
+        Debruijn::Index(_) => (),
+        Debruijn::Application { func, arg } => {
+            _preorder_walk(func, action)?;
+            _preorder_walk(arg, action)?;
+        }
+        Debruijn::Abstraction { body } => _preorder_walk(body, action)?,
+    }
+    ControlFlow::Continue(())
 }
 
 struct PreOrder<'a> {

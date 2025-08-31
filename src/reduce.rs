@@ -1,11 +1,11 @@
-use std::fmt::Display;
+use std::{fmt::Display, ops::ControlFlow};
 
 use clap::ValueEnum;
 
 use crate::{
     debruijn::{Debruijn, Root, call, def, idx},
     graph::{NodeIndex, ReductionGraph},
-    replace::{self, VisitOrder},
+    replace::{self, VisitOrder, preorder_walk},
     utils::Rng,
 };
 
@@ -23,14 +23,28 @@ impl Reducer {
     }
 
     pub fn reduce_one(&mut self) -> Option<ReductionResult> {
-        let maybe_redex = get_redexes(&self.root, self.visit_order).next();
-        if let Some(redex) = maybe_redex {
-            let new_root = redex.beta_reduce(&self.root);
-            self.root = new_root;
-            None
-        } else {
-            let bnf = self.root.clone();
-            Some(ReductionResult::NormalForm(bnf))
+        // let maybe_redex = get_redexes(&self.root, self.visit_order).next();
+        // if let Some(redex) = maybe_redex {
+        //     let new_root = redex.beta_reduce(&self.root);
+        //     self.root = new_root;
+        //     None
+        // } else {
+        //     let bnf = self.root.clone();
+        //     Some(ReductionResult::NormalForm(bnf))
+        // }
+
+        let result = preorder_walk(&mut self.root, |term| {
+            if let Some(parts) = extract_redex_parts(term) {
+                let reduced = substitute_arg_into_body(parts);
+                *term = reduced;
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        });
+        match result {
+            Some(()) => None,
+            None => Some(ReductionResult::NormalForm(self.root.clone())),
         }
     }
 }
@@ -49,19 +63,31 @@ impl<'a> Redex<'a> {
     }
 
     pub fn beta_reduce(&self, root: &'a Root) -> Root {
-        let fragment = beta_reduce(&self.redex);
+        let fragment = apply_redex(&self.redex);
         let term = replace::replace(root, &self.redex, &fragment);
         term
     }
 }
 
+#[deprecated = "use get_redex"]
 fn is_redex(term: &Debruijn) -> bool {
-    if let Debruijn::Application { func, .. } = term
-        && let Debruijn::Abstraction { .. } = &**func
+    extract_redex_parts(term).is_some()
+}
+
+struct RedexParts<'a> {
+    body: &'a Debruijn,
+    // it's like a really shitty pirate
+    arg: &'a Debruijn,
+}
+
+fn extract_redex_parts(term: &Debruijn) -> Option<RedexParts<'_>> {
+    if let Debruijn::Application { func, arg } = term
+        && let Debruijn::Abstraction { body } = &**func
     {
-        return true;
+        Some(RedexParts { body, arg })
+    } else {
+        None
     }
-    false
 }
 
 pub fn get_redexes(root: &Root, visit_order: VisitOrder) -> impl Iterator<Item = Redex<'_>> {
@@ -294,23 +320,23 @@ impl<'a> Display for Fragment<'a> {
     }
 }
 
-pub fn beta_reduce(redex: &Debruijn) -> Debruijn {
+pub fn apply_redex(redex: &Debruijn) -> Debruijn {
     match redex {
-        Debruijn::Application { func, arg } => _beta_reduce(&func, &arg),
+        Debruijn::Application { func, arg } => apply_arg_to_func(&func, &arg),
         _ => panic!("Expected an application, got {redex}"),
     }
 }
 
-fn _beta_reduce(func: &Debruijn, arg: &Debruijn) -> Debruijn {
+fn apply_arg_to_func(func: &Debruijn, arg: &Debruijn) -> Debruijn {
     match func {
-        Debruijn::Abstraction { body } => __beta_reduce(&body, arg),
+        Debruijn::Abstraction { body } => substitute_arg_into_body(RedexParts { body, arg }),
         _ => panic!("Expected an abstraction, got {func}"),
     }
 }
 
-fn __beta_reduce(body: &Debruijn, arg: &Debruijn) -> Debruijn {
-    let term = up_one(&arg);
-    let subsituted = substitute(&body, &term);
+fn substitute_arg_into_body(parts: RedexParts) -> Debruijn {
+    let term = up_one(&parts.arg);
+    let subsituted = substitute(&parts.body, &term);
     let unshift = down_one(&subsituted);
     unshift
 }
@@ -405,13 +431,13 @@ fn shift_cutoff(term: &Debruijn, up_by: isize, cutoff: usize) -> Debruijn {
 mod tests {
     use crate::{
         debruijn::{self, Context, Debruijn, call, def},
-        reduce::{_beta_reduce, shift_cutoff, substitute},
+        reduce::{apply_arg_to_func, shift_cutoff, substitute},
         term::Term,
     };
 
     fn beta_reduce(term: &Debruijn) -> Debruijn {
         match term {
-            Debruijn::Application { func, arg } => _beta_reduce(func, arg),
+            Debruijn::Application { func, arg } => apply_arg_to_func(func, arg),
             _ => panic!("Expected an application"),
         }
     }
@@ -461,7 +487,7 @@ mod tests {
         assert_eq!(term, 1.into());
 
         // beta reduce the term "(λx.λy.λz x y z) w"
-        let actual = _beta_reduce(&func_body, &term);
+        let actual = apply_arg_to_func(&func_body, &term);
         // Result should be λw.λx.λy.λz. w y z
         let expected: Debruijn = _compile("λy.λz. w y z", context);
         assert_eq!(expected, def(def(((3, 2), 1))));
@@ -484,7 +510,7 @@ mod tests {
         assert_eq!(term2, 2.into()); // y = 2
 
         // beta reduec the term "λx.(λu.λv.u x) y"
-        let actual = _beta_reduce(&term, &term2);
+        let actual = apply_arg_to_func(&term, &term2);
 
         // Result should be λv.y x (full context is λy.λx.(λv.y x))
         let expected = _compile("λv.y x", context.clone());
@@ -538,7 +564,7 @@ mod tests {
         let expected = compile("λf.λx.f ((λg.λy.y) f x)");
         assert_eq!(expected, def(def((2, (((def(def(1)), 2), 1))))));
 
-        let actual = _beta_reduce(&succ, &zero);
+        let actual = apply_arg_to_func(&succ, &zero);
         assert_eq!(expected, actual)
     }
 }
