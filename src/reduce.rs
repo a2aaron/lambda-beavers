@@ -215,30 +215,6 @@ pub fn reduce(
     (ReductionResult::MaxReductionsReached, max_reductions)
 }
 
-// TODO move to method on ReductionGraph
-pub fn reduce_one(
-    reduction_strategy: &mut ReductionStrategy,
-    graph: &mut ReductionGraph,
-) -> Option<ReductionResult> {
-    if let Some((reduced_term, _)) = graph.bnf() {
-        return Some(ReductionResult::NormalForm(
-            reduced_term.root.as_ref().clone(),
-        ));
-    }
-
-    let node_to_reduce = reduction_strategy.get_node(graph);
-    match node_to_reduce {
-        Some(node_to_reduce) => {
-            let reduction_node = graph.get(node_to_reduce).unwrap();
-            let redex_index = reduction_node.unevaluated_redexes[0];
-            graph.reduce_node(node_to_reduce, redex_index);
-        }
-        _ => return Some(ReductionResult::Irreducible),
-    }
-
-    None
-}
-
 pub enum ReductionStrategy {
     DFS,
     BFS,
@@ -280,29 +256,6 @@ impl From<ReductionStrategyKind> for ReductionStrategy {
             ReductionStrategyKind::BFS => ReductionStrategy::BFS,
             ReductionStrategyKind::Random => ReductionStrategy::random(),
         }
-    }
-}
-
-#[derive(Debug, Copy, Clone, PartialEq, Eq)]
-pub struct Fragment<'a>(pub &'a Debruijn);
-
-impl<'a> Display for Fragment<'a> {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-pub fn apply_redex(redex: &Debruijn) -> Debruijn {
-    match redex {
-        Debruijn::Application { func, arg } => apply_arg_to_func(&func, &arg),
-        _ => panic!("Expected an application, got {redex}"),
-    }
-}
-
-fn apply_arg_to_func(func: &Debruijn, arg: &Debruijn) -> Debruijn {
-    match func {
-        Debruijn::Abstraction { body } => substitute_arg_into_body(&RedexParts { body, arg }),
-        _ => panic!("Expected an abstraction, got {func}"),
     }
 }
 
@@ -401,7 +354,7 @@ fn shift_cutoff(term: &Debruijn, up_by: isize, cutoff: usize) -> Debruijn {
 mod tests {
     use crate::{
         debruijn::{self, Context, Debruijn, call, def},
-        reduce::{apply_arg_to_func, shift_cutoff, substitute},
+        reduce::{RedexParts, shift_cutoff, substitute, substitute_arg_into_body},
         term::Term,
     };
 
@@ -409,6 +362,13 @@ mod tests {
         match term {
             Debruijn::Application { func, arg } => apply_arg_to_func(func, arg),
             _ => panic!("Expected an application"),
+        }
+    }
+
+    fn apply_arg_to_func(func: &Debruijn, arg: &Debruijn) -> Debruijn {
+        match func {
+            Debruijn::Abstraction { body } => substitute_arg_into_body(&RedexParts { body, arg }),
+            _ => panic!("Expected an abstraction, got {func}"),
         }
     }
 
