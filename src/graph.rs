@@ -1,10 +1,6 @@
 use std::{collections::HashMap, fmt::Display, ops::ControlFlow, rc::Rc};
 
-use crate::{
-    debruijn::Root,
-    reduce::{self, Redex, get_redexes},
-    replace::VisitOrder,
-};
+use crate::{debruijn::Root, replace::VisitOrder};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RedexIndex(usize);
@@ -23,7 +19,7 @@ pub struct ReductionNode {
 
 impl ReductionNode {
     fn from_root(root: Rc<Root>, visit_order: VisitOrder) -> ReductionNode {
-        let num_redexes = reduce::get_redexes(&root, visit_order).len();
+        let num_redexes = root.count_redexes();
         let unevaluated_redexes = (0..num_redexes).map(RedexIndex).collect();
 
         ReductionNode {
@@ -43,22 +39,20 @@ impl ReductionNode {
         self.unevaluated_redexes.remove(index);
 
         let mut root = self.root.as_ref().clone();
-        let redex = get_redexes(&root, self.visit_order)[redex_index.0];
-        redex.beta_reduce(&mut root);
-        root
-    }
-
-    fn is_bnf(&self) -> bool {
-        self.visit_order
-            .preorder_walk(&self.root, |term| {
-                if let Some(_) = Redex::try_new(term) {
-                    // If we find any redex, then it's not BNF, return false
-                    ControlFlow::Break(false)
+        let redex = {
+            let mut i = 0;
+            root.walk_redexes(self.visit_order, |redex| {
+                if i == redex_index.0 {
+                    ControlFlow::Break(redex)
                 } else {
+                    i += 1;
                     ControlFlow::Continue(())
                 }
             })
-            .unwrap_or(true) // Otherwise, we found no redexes, so it's BNF
+            .unwrap()
+        };
+        redex.beta_reduce(&mut root);
+        root
     }
 
     fn is_unevaled(&self, redex_index: RedexIndex) -> bool {
@@ -131,7 +125,7 @@ impl ReductionGraph {
                     self.incomplete_nodes.push(index);
                 }
 
-                if reduction_node.is_bnf() {
+                if reduction_node.root.is_bnf() {
                     assert!(
                         self.beta_normal_form.is_none(),
                         "BNF was already found at {} but trying to set it again at {}.",
@@ -165,7 +159,7 @@ impl ReductionGraph {
 
         let (new_node_index, already_exists) = self.add_node_from_root(reduced_term);
         let new_node = self.get(new_node_index).unwrap();
-        let is_bnf = new_node.is_bnf();
+        let is_bnf = new_node.root.is_bnf();
 
         let new_edge = (node_index, new_node_index);
         self.add_edge(node_index, new_node_index);
@@ -243,7 +237,6 @@ mod test {
     use crate::{
         debruijn::{Debruijn, Root},
         graph::{NodeIndex, ReductionGraph, ReductionNode},
-        reduce::get_redexes,
         replace::VisitOrder,
     };
 
@@ -277,10 +270,10 @@ mod test {
         let root = Rc::new(Root(Debruijn::from_str(term).unwrap()));
         let node = ReductionNode::from_root(root.clone(), visit_order);
         assert!(
-            !node.is_bnf(),
+            !node.root.is_bnf(),
             "Expected {} to be BNF. Redex: {:?}",
             node.root,
-            get_redexes(root.as_ref(), visit_order)
+            root.get_redexes(visit_order)
         );
     }
 

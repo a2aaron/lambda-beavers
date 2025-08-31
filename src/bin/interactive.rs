@@ -6,7 +6,7 @@ use lambda_beaver::{
     debruijn::{Debruijn, Root},
     parse,
     print::{NodeLabelType, PrintableTerm},
-    reduce::{self, Redex},
+    reduce::Redex,
     replace::VisitOrder,
 };
 
@@ -81,7 +81,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut history = vec![];
 
     loop {
-        let redexes = reduce::get_redexes(&current_term, VisitOrder::LEFT_OUTERMOST);
+        let redexes = current_term.get_redexes(VisitOrder::LEFT_OUTERMOST);
         let reductions: Vec<_> = redexes
             .iter()
             .enumerate()

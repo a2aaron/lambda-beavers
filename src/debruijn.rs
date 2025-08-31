@@ -2,18 +2,62 @@ use std::{
     collections::HashMap,
     error::Error,
     fmt::{Binary, Display},
+    ops::ControlFlow,
     str::FromStr,
 };
 
 use crate::{
-    parse::debruijn,
-    parse::term,
+    parse::{debruijn, term},
+    reduce::Redex,
+    replace::VisitOrder,
     term::{Literal, Term},
 };
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct Root(pub Debruijn);
+
+impl Root {
+    pub fn walk_redexes<T>(
+        &self,
+        visit_order: VisitOrder,
+        mut action: impl FnMut(Redex) -> ControlFlow<T>,
+    ) -> Option<T> {
+        visit_order.preorder_walk(self, |term| {
+            if let Some(redex) = Redex::try_new(term) {
+                action(redex)?;
+            }
+            ControlFlow::Continue(())
+        })
+    }
+
+    pub fn get_redexes(&self, visit_order: VisitOrder) -> Vec<Redex> {
+        let mut redexes = vec![];
+        self.walk_redexes(visit_order, |redex| {
+            redexes.push(redex);
+            ControlFlow::Continue::<()>(())
+        });
+        redexes
+    }
+
+    pub fn count_redexes(&self) -> usize {
+        let mut count = 0;
+        self.walk_redexes(VisitOrder::LEFT_OUTERMOST, |_| {
+            count += 1;
+            ControlFlow::Continue::<()>(())
+        });
+        count
+    }
+
+    pub fn is_bnf(&self) -> bool {
+        self.walk_redexes(VisitOrder::LEFT_OUTERMOST, |_| {
+            // If we find any redex, then it's not BNF, return false
+            ControlFlow::Break(false)
+        })
+        .unwrap_or(true) // Otherwise, we found no redexes, so it's BNF
+    }
+}
+
 impl Display for Root {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(f, "{}", self.0)

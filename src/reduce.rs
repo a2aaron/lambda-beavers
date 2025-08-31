@@ -99,18 +99,6 @@ fn extract_redex_parts(term: &Debruijn) -> Option<RedexParts<'_>> {
     }
 }
 
-// TODO: likely move to method on Root or possibly VisitOrder
-pub fn get_redexes(root: &Root, visit_order: VisitOrder) -> Vec<Redex> {
-    let mut redexes = vec![];
-    visit_order.preorder_walk(root, |term| {
-        if let Some(redex) = Redex::try_new(term) {
-            redexes.push(redex);
-        }
-        ControlFlow::Continue::<()>(())
-    });
-    redexes
-}
-
 // see https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture15.pdf
 // and also https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture13.pdf
 
