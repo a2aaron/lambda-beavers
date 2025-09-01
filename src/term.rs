@@ -82,8 +82,14 @@ impl Context {
 
     fn push_variable(&mut self) -> Literal {
         let alphabet = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
-        let literal = alphabet.chars().nth(self.variables.len()).unwrap();
-        let literal = Literal(literal.to_string());
+        let n = self.variables.len();
+        let letter = alphabet.chars().nth(n % alphabet.len()).unwrap();
+        let subscript = n / alphabet.len();
+        let literal = if subscript > 0 {
+            Literal(format!("{letter}{}", subscript - 1))
+        } else {
+            Literal(letter.to_string())
+        };
         self.variables.push(literal.clone());
         literal
     }
