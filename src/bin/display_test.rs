@@ -1,4 +1,4 @@
-use std::time::Duration;
+use std::{sync::LazyLock, time::Duration};
 
 use clap::Parser;
 use lambda_beaver::{
@@ -8,11 +8,17 @@ use lambda_beaver::{
 };
 
 const TESTS: &str = include_str!("../../tests/tests.txt");
+static TEST_COUNT: LazyLock<u64> =
+    LazyLock::new(|| TESTS.split('\n').filter(|x| x.contains(": ")).count() as _);
 
 #[derive(Debug, Parser)]
 struct Args {
-    start: usize,
-    end: Option<usize>,
+    #[arg(value_parser = clap::value_parser!(u64).range(0..*TEST_COUNT))]
+    start: u64,
+    #[arg(value_parser = clap::value_parser!(u64).range(0..*TEST_COUNT))]
+    end: Option<u64>,
+    #[arg(short, long)]
+    all: bool,
     #[arg(short, long, action)]
     run: bool,
     #[arg(short, long, action)]
@@ -22,16 +28,19 @@ struct Args {
 }
 
 fn main() {
-    let args = Args::parse();
+    let mut args = Args::parse();
 
     let n = args.start;
+    if args.all {
+        args.end = Some(*TEST_COUNT - 1);
+    }
 
     if let Some(end) = args.end {
         for i in n..=end {
-            run(i, &args);
+            run(i as _, &args);
         }
     } else {
-        run(n, &args);
+        run(n as _, &args);
     }
 }
 
