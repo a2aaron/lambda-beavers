@@ -8,7 +8,7 @@ use std::{
 
 use crate::{
     parse::{debruijn, term},
-    reduce::{Redex, extract_redex_parts, substitute_arg_into_body},
+    reduce::{Redex, extract_redex_parts_mut, substitute_arg_into_body_mut},
     replace::VisitOrder,
     term::{Literal, Term},
 };
@@ -28,10 +28,9 @@ impl Root {
     pub fn apply(&mut self, redex: Redex) {
         let result = VisitOrder::LEFT_OUTERMOST.preorder_walk_mut(self, |term| {
             if std::ptr::eq(redex.redex, term)
-                && let Some(parts) = extract_redex_parts(term)
+                && let Some(parts) = extract_redex_parts_mut(term)
             {
-                let reduced = substitute_arg_into_body(&parts);
-                *term = reduced;
+                *term = substitute_arg_into_body_mut(parts);
                 ControlFlow::Break(())
             } else {
                 ControlFlow::Continue(())

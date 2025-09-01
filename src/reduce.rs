@@ -3,7 +3,7 @@ use std::{fmt::Display, ops::ControlFlow};
 use clap::ValueEnum;
 
 use crate::{
-    debruijn::{Debruijn, Root, call, def, idx},
+    debruijn::{Debruijn, Root},
     graph::{NodeIndex, ReductionGraph},
     replace::VisitOrder,
     utils::Rng,
@@ -24,8 +24,8 @@ impl Reducer {
 
     pub fn reduce_one(&mut self) -> Option<ReductionResult> {
         let result = self.visit_order.preorder_walk_mut(&mut self.root, |term| {
-            if let Some(parts) = extract_redex_parts(term) {
-                let reduced = substitute_arg_into_body(&parts);
+            if let Some(parts) = extract_redex_parts_mut(term) {
+                let reduced = substitute_arg_into_body_mut(parts);
                 *term = reduced;
                 ControlFlow::Break(())
             } else {
@@ -47,7 +47,7 @@ pub struct Redex {
 
 impl Redex {
     pub fn try_new(redex: &Debruijn) -> Option<Redex> {
-        if let Some(_parts) = extract_redex_parts(redex) {
+        if is_redex(redex) {
             Some(Redex { redex })
         } else {
             None
@@ -55,18 +55,28 @@ impl Redex {
     }
 }
 
-#[derive(Debug, Clone)]
-pub struct RedexParts<'a> {
-    body: &'a Debruijn,
-    // it's like a really shitty pirate
-    arg: &'a Debruijn,
+fn is_redex(term: &Debruijn) -> bool {
+    if let Debruijn::Application { func, .. } = term
+        && let Debruijn::Abstraction { .. } = &**func
+    {
+        true
+    } else {
+        false
+    }
 }
 
-pub fn extract_redex_parts(term: &Debruijn) -> Option<RedexParts<'_>> {
+#[derive(Debug)]
+pub struct RedexPartsMut<'a> {
+    pub body: &'a mut Debruijn,
+    // it's like a really shitty pirate
+    arg: &'a mut Debruijn,
+}
+
+pub fn extract_redex_parts_mut(term: &mut Debruijn) -> Option<RedexPartsMut<'_>> {
     if let Debruijn::Application { func, arg } = term
-        && let Debruijn::Abstraction { body } = &**func
+        && let Debruijn::Abstraction { body } = &mut **func
     {
-        Some(RedexParts { body, arg })
+        Some(RedexPartsMut { body, arg })
     } else {
         None
     }
@@ -259,93 +269,88 @@ impl From<ReductionStrategyKind> for ReductionStrategy {
     }
 }
 
-pub fn substitute_arg_into_body(parts: &RedexParts) -> Debruijn {
-    let term = up_one(parts.arg);
-    let subsituted = substitute(parts.body, &term);
-    let unshift = down_one(&subsituted);
-    unshift
+pub fn substitute_arg_into_body_mut(parts: RedexPartsMut) -> Debruijn {
+    up_one_mut(parts.arg);
+    substitute_mut(parts.body, parts.arg);
+    down_one_mut(parts.body);
+    // Extract the value out of parts.body without cloning
+    std::mem::replace(parts.body, Debruijn::Index(0))
 }
 
-fn substitute(function_body: &Debruijn, replacer: &Debruijn) -> Debruijn {
-    // This tries to substitute indicies that point to the implicit lambda that `function_body` is
-    // part of.
-    // Consider, for example, where we want to subsitute into λ 0 1 2, sow e have function body = 0 1 2.
-    // in this case, 0 would be replaced by `replacer`. Note that we need to track depth, so the index
-    // we match on (the `match_index`) will go up by one every time we go into a nested abstraction.
-    // For example: In λ 0 λ 1 λ 2 (so `function_body` = 0 λ 1 λ 2), we'd substitute `replacer`
-    // into 0, 1, and 2.
-    // Also note that when we recurse into a nested abstraction, we also must bump up the indicies for
-    // any free variables in `replacer` by the current depth to accomodate for the fact that those need to point over
-    // additional lambdas.
-    fn _substitute(
-        function_body: &mut Debruijn,
-        match_index: usize,
-        replacer: &Debruijn,
-        depth: usize,
-    ) {
-        match function_body {
-            Debruijn::Index(term_index) => {
-                if *term_index == match_index {
-                    // Bump up free variables by `depth`
-                    let replacer = up_by(replacer, depth);
-                    *function_body = replacer;
-                }
-            }
-            Debruijn::Application { func, arg } => {
-                _substitute(func, match_index, replacer, depth);
-                _substitute(arg, match_index, replacer, depth);
-            }
-            Debruijn::Abstraction { body } => {
-                _substitute(body, match_index + 1, &replacer, depth + 1);
+fn substitute_mut(function_body: &mut Debruijn, replacer: &Debruijn) {
+    _substitute_mut(function_body, 1, &replacer, 0);
+}
+
+// This tries to substitute indicies that point to the implicit lambda that `function_body` is
+// part of.
+// Consider, for example, where we want to subsitute into λ 0 1 2, sow e have function body = 0 1 2.
+// in this case, 0 would be replaced by `replacer`. Note that we need to track depth, so the index
+// we match on (the `match_index`) will go up by one every time we go into a nested abstraction.
+// For example: In λ 0 λ 1 λ 2 (so `function_body` = 0 λ 1 λ 2), we'd substitute `replacer`
+// into 0, 1, and 2.
+// Also note that when we recurse into a nested abstraction, we also must bump up the indicies for
+// any free variables in `replacer` by the current depth to accomodate for the fact that those need to point over
+// additional lambdas.
+fn _substitute_mut(
+    function_body: &mut Debruijn,
+    match_index: usize,
+    replacer: &Debruijn,
+    depth: usize,
+) {
+    match function_body {
+        Debruijn::Index(term_index) => {
+            if *term_index == match_index {
+                // Bump up free variables by `depth`
+                let mut replacer = replacer.clone();
+                up_by_mut(&mut replacer, depth);
+                *function_body = replacer;
             }
         }
+        Debruijn::Application { func, arg } => {
+            _substitute_mut(func, match_index, replacer, depth);
+            _substitute_mut(arg, match_index, replacer, depth);
+        }
+        Debruijn::Abstraction { body } => {
+            _substitute_mut(body, match_index + 1, &replacer, depth + 1);
+        }
     }
-    let mut term = function_body.clone();
-    _substitute(&mut term, 1, &replacer, 0);
-    term
 }
 
-fn up_by(term: &Debruijn, up_by: usize) -> Debruijn {
-    shift_cutoff(term, up_by as isize, 1)
+fn up_by_mut(term: &mut Debruijn, up_by: usize) {
+    shift_cutoff_mut(term, up_by as isize, 1)
 }
 
 // ↑ n = n         if n < cutoff
 //       n + up_by otherwise
 // ↑ λ t = λ (↑ t) where up_by -> up_by and cutoff -> cutoff + 1
 // ↑ (t1 t2) = (↑ t1) (↑ t2)
-fn up_one(term: &Debruijn) -> Debruijn {
-    shift_cutoff(term, 1, 1)
+fn up_one_mut(term: &mut Debruijn) {
+    shift_cutoff_mut(term, 1, 1)
 }
 
-fn down_one(term: &Debruijn) -> Debruijn {
-    shift_cutoff(term, -1, 1)
+fn down_one_mut(term: &mut Debruijn) {
+    shift_cutoff_mut(term, -1, 1)
 }
 
 /// Shift the indicies for all terms up by an amount. Indicies below the cutoff are not modified
 /// This is useful during beta reduction because we need to "drop out" an abstraction.
-fn shift_cutoff(term: &Debruijn, up_by: isize, cutoff: usize) -> Debruijn {
+fn shift_cutoff_mut(term: &mut Debruijn, up_by: isize, cutoff: usize) {
     match term {
         Debruijn::Index(term_index) => {
-            if *term_index < cutoff {
-                Debruijn::Index(*term_index)
-            } else {
-                // Recall that an index starts at 1, so if cutoff is set to 1, then this branch
-                // will always be taken.
-                let index = term_index.checked_add_signed(up_by).unwrap();
-                idx(index)
+            // Recall that an index starts at 1, so if cutoff is set to 1, then this branch will always be taken.
+            if *term_index >= cutoff {
+                *term_index = term_index.checked_add_signed(up_by).unwrap();
             }
         }
         Debruijn::Application { func, arg } => {
-            let call_func = shift_cutoff(func, up_by, cutoff);
-            let call_arg = shift_cutoff(arg, up_by, cutoff);
-            call(call_func, call_arg)
+            shift_cutoff_mut(func, up_by, cutoff);
+            shift_cutoff_mut(arg, up_by, cutoff);
         }
         Debruijn::Abstraction { body } => {
             // We add one to the cutoff here because we don't want to modify bound variables
             // For example, if we're at the outer-most lambda, then any Index(1)s in the lambda body
             // are referring to that lambda's bound variable and we don't modify it.
-            let body = shift_cutoff(body, up_by, cutoff + 1);
-            def(body)
+            shift_cutoff_mut(body, up_by, cutoff + 1);
         }
     }
 }
@@ -354,7 +359,7 @@ fn shift_cutoff(term: &Debruijn, up_by: isize, cutoff: usize) -> Debruijn {
 mod tests {
     use crate::{
         debruijn::{self, Context, Debruijn, call, def},
-        reduce::{RedexParts, shift_cutoff, substitute, substitute_arg_into_body},
+        reduce::{RedexPartsMut, shift_cutoff_mut, substitute_arg_into_body_mut, substitute_mut},
         term::Term,
     };
 
@@ -366,8 +371,16 @@ mod tests {
     }
 
     fn apply_arg_to_func(func: &Debruijn, arg: &Debruijn) -> Debruijn {
+        let func = func.clone();
+        let mut arg = arg.clone();
         match func {
-            Debruijn::Abstraction { body } => substitute_arg_into_body(&RedexParts { body, arg }),
+            Debruijn::Abstraction { mut body } => {
+                let new_body = substitute_arg_into_body_mut(RedexPartsMut {
+                    body: &mut body,
+                    arg: &mut arg,
+                });
+                new_body
+            }
             _ => panic!("Expected an abstraction, got {func}"),
         }
     }
@@ -384,23 +397,23 @@ mod tests {
 
     #[test]
     fn shift_cutoff_1() {
-        let term: Debruijn = 1.into();
+        let mut term: Debruijn = 1.into();
 
         let expected: Debruijn = 2.into();
-        let actual = shift_cutoff(&term, 1, 1);
-        assert_eq!(expected, actual);
+        shift_cutoff_mut(&mut term, 1, 1);
+        assert_eq!(expected, term);
     }
 
     #[test]
     fn substitute_simple() {
-        let term: Debruijn = 1.into(); // λx.x
-        let term2: Debruijn = 1.into(); // x
+        let mut term: Debruijn = 1.into(); // λx.x
+        let replacer: Debruijn = 1.into(); // x
 
         // Make the substitution "x = x" into the term "x"
-        let actual = substitute(&term, &term2);
+        substitute_mut(&mut term, &replacer);
         // Just "x"
         let expected: Debruijn = 1.into();
-        assert_eq!(actual, expected);
+        assert_eq!(term, expected);
     }
 
     #[test]
@@ -454,14 +467,14 @@ mod tests {
 
     #[test]
     fn substitute_shadowing() {
-        let term: Debruijn = def(1); // λx.x
-        let term2: Debruijn = 1.into(); // x
+        let mut term: Debruijn = def(1); // λx.x
+        let mut replacer: Debruijn = 1.into(); // x
 
         // Make the substitution "x = x" into the term "λx.x"
-        let actual = substitute(&term, &term2);
+        substitute_mut(&mut term, &mut replacer);
         // Result should be λx.x, because the inner x is shadowed
         let expected: Debruijn = def(1).into();
-        assert_eq!(actual, expected);
+        assert_eq!(term, expected);
     }
 
     #[test]
