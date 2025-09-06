@@ -27,9 +27,8 @@ impl Reducer {
         let result = self
             .visit_order
             .preorder_walk_mut_2(&mut self.root, |term| {
-                if let Ok(redex) = debruijn_inner::Redex::try_from(&mut *term) {
-                    let new_body = debruijn_inner::substitute_arg_into_body_mut(redex);
-                    *term = new_body;
+                if let Ok(redex) = debruijn_inner::RedexMut::try_from(&mut *term) {
+                    *term = debruijn_inner::substitute_arg_into_body_mut(redex);
                     ControlFlow::Break(())
                 } else {
                     ControlFlow::Continue(())
