@@ -4,38 +4,41 @@ use clap::ValueEnum;
 
 use crate::{
     debruijn::{Debruijn, Root},
+    debruijn_inner::{self, Root2},
     graph::{NodeIndex, ReductionGraph},
     replace::VisitOrder,
     utils::Rng,
 };
 
 pub struct Reducer {
-    pub root: Root,
+    pub root: Root2,
     visit_order: VisitOrder,
 }
 
 impl Reducer {
     pub fn new(root: Root, visit_order: VisitOrder) -> Self {
         Self {
-            root: root,
+            root: Root2::from(root),
             visit_order,
         }
     }
 
     pub fn reduce_one(&mut self) -> Option<ReductionResult> {
-        let result = self.visit_order.preorder_walk_mut(&mut self.root, |term| {
-            if let Some(parts) = extract_redex_parts_mut(term) {
-                let reduced = substitute_arg_into_body_mut(parts);
-                *term = reduced;
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        });
+        let result = self
+            .visit_order
+            .preorder_walk_mut_2(&mut self.root, |term| {
+                if let Ok(redex) = debruijn_inner::Redex::try_from(&mut *term) {
+                    let new_body = debruijn_inner::substitute_arg_into_body_mut(redex);
+                    *term = new_body;
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            });
         match result {
             Some(()) => None,
             // This clone is fine, it occurs at the end of all reductions
-            None => Some(ReductionResult::NormalForm(self.root.clone())),
+            None => Some(ReductionResult::NormalForm(Root::from(self.root.clone()))),
         }
     }
 }

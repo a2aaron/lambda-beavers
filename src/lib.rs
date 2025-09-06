@@ -7,6 +7,7 @@
 
 pub mod common_terms;
 pub mod debruijn;
+mod debruijn_inner;
 pub mod graph;
 pub mod parse {
     pub mod binary;

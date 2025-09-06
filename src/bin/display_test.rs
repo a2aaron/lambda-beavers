@@ -2,6 +2,7 @@ use std::{sync::LazyLock, time::Duration};
 
 use clap::Parser;
 use lambda_beaver::{
+    reduce::ReductionResult,
     replace::VisitOrder,
     term::Term,
     utils::strong_reduction_test::{parse_line, reduce_with_timeout},
@@ -60,9 +61,23 @@ fn run(n: usize, args: &Args) {
         let timeout = args.timeout.map(Duration::from_secs);
         let (result, duration) = reduce_with_timeout(&starting, visit_order, timeout);
         let duration = duration.as_millis();
-        match result {
-            Some(result) => println!("{n},{duration},{result}"),
-            None => println!("{n},{duration},Timed out"),
-        }
+
+        let message = match result {
+            Some(result) => match result {
+                ReductionResult::NormalForm(result) => {
+                    if reduced != result {
+                        panic!("Failed! Expected: {}, Actual: {}", reduced.0, result.0);
+                    } else {
+                        format!("Normal Form,{}", result.0)
+                    }
+                }
+                ReductionResult::Irreducible => {
+                    panic!("Failed: Expected: {}, Actual: <irreducible>", reduced.0)
+                }
+                ReductionResult::MaxReductionsReached => format!("Max Reductions Reached"),
+            },
+            None => "Timed out".to_string(),
+        };
+        println!("{n},{duration},{message}");
     }
 }

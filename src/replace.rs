@@ -4,7 +4,7 @@ use crate::debruijn::{Debruijn, Root};
 
 #[derive(Debug, Clone, Copy)]
 pub struct VisitOrder {
-    reverse: bool,
+    pub(crate) reverse: bool,
 }
 
 impl VisitOrder {
