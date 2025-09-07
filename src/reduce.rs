@@ -4,40 +4,42 @@ use clap::ValueEnum;
 
 use crate::{
     debruijn::{Debruijn, Root},
-    debruijn_inner::{self, Root2},
+    debruijn_inner::{self, FlatRoot},
     graph::{NodeIndex, ReductionGraph},
     replace::VisitOrder,
     utils::Rng,
 };
 
 pub struct Reducer {
-    pub root: Root2,
+    pub root: FlatRoot,
     visit_order: VisitOrder,
 }
 
 impl Reducer {
     pub fn new(root: Root, visit_order: VisitOrder) -> Self {
         Self {
-            root: Root2::from(root),
+            root: FlatRoot::from(root),
             visit_order,
         }
     }
 
     pub fn reduce_one(&mut self) -> Option<ReductionResult> {
-        let result = self
-            .visit_order
-            .preorder_walk_mut_2(&mut self.root, |term| {
-                if let Ok(redex) = debruijn_inner::RedexMut::try_from(&mut *term) {
-                    *term = debruijn_inner::substitute_arg_into_body_mut(redex);
-                    ControlFlow::Break(())
-                } else {
-                    ControlFlow::Continue(())
-                }
-            });
+        let result =
+            self.visit_order
+                .preorder_walk_mut_2(&mut self.root, |root, parent, term_i| {
+                    if let Some(redex) = debruijn_inner::RedexMut::try_get(root, parent, term_i) {
+                        debruijn_inner::substitute_arg_into_body_mut(root, redex);
+                        ControlFlow::Break(())
+                    } else {
+                        ControlFlow::Continue(())
+                    }
+                });
         match result {
             Some(()) => None,
             // This clone is fine, it occurs at the end of all reductions
-            None => Some(ReductionResult::NormalForm(Root::from(self.root.clone()))),
+            None => Some(ReductionResult::NormalForm(Root(Debruijn::from(
+                &self.root,
+            )))),
         }
     }
 }
