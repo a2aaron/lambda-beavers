@@ -243,24 +243,11 @@ pub enum Parent {
     Arg(TermIndex),
 }
 
-impl Parent {
-    /// Get the inner TermIndex
-    fn get_term(&self) -> TermIndex {
-        match self {
-            Parent::Body(term) => *term,
-            Parent::Func(term) => *term,
-            Parent::Arg(term) => *term,
-        }
-    }
-}
-
 #[derive(Debug)]
 pub struct RedexMut {
     // Term that this redex is a child of. If this is none, then the Redex is actually the root (and therefore is
     // pointed to by FlatRoot.root)
     parent: Option<Parent>,
-    // The Application containing the abstraction and argument. This must be an Application
-    app: TermIndex,
     // The Abstraction containing the body. This must be an Abstraction
     abs: TermIndex,
     // The body of the Abstraction. This must be pointed to by `abs`
@@ -272,16 +259,11 @@ pub struct RedexMut {
 }
 
 impl RedexMut {
-    pub fn try_get(
-        terms: &FlatRoot,
-        parent: Option<Parent>,
-        term_i: TermIndex,
-    ) -> Option<RedexMut> {
-        match terms[term_i] {
+    pub fn try_get(terms: &FlatRoot, parent: Option<Parent>, app: TermIndex) -> Option<RedexMut> {
+        match terms[app] {
             DebruijnNode::Application { func, arg } => match terms[func] {
                 DebruijnNode::Abstraction { body, usage } => Some(RedexMut {
                     parent,
-                    app: term_i,
                     abs: func,
                     body,
                     arg,
@@ -333,30 +315,24 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
         // Instead, just point the term to the body.
         repoint_node(root, redex.parent, redex.body);
         // Since the argument is not used, the entire arg subtree is garbage now.
-        mark_subtree_as_garbage(root, redex.arg);
     } else {
         // Otherwise, perform substitution as usual
         // We need to first fix up the argument indicies since we are entering into an abstraction
         up_one_mut(root, redex.arg);
+
         // Then perform the actual substition on body.
-        substitute_mut(root, redex.body, redex.arg);
-        // Finally, fix down the body indicies, since we are dropping out the abstraction
-        down_one_mut(root, redex.body);
+        // This may end up causing abs's body to get repointed if the redex body consists of a
+        // single leaf node that gets substituted.
+        let (parent, new_body) = substitute_mut(root, redex);
+
+        // Then, fix down the (potentially new body) indicies, since we are dropping out the abstraction
+        // (We target abs because body may be junk now.)
+        down_one_mut(root, new_body);
 
         // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
-        repoint_node(root, redex.parent, redex.body);
+        repoint_node(root, parent, new_body);
     };
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
-    mark_node_as_garbage(root, redex.app);
-    mark_node_as_garbage(root, redex.abs);
-}
-
-fn mark_node_as_garbage(_root: &mut FlatRoot, _term: TermIndex) {
-    // TODO: implement garbage collection
-}
-
-fn mark_subtree_as_garbage(_root: &mut FlatRoot, _term: TermIndex) {
-    // TODO: implement garbage collection
 }
 
 /// Repoint the term at `child` so that it is the child of `parent`. This does not affect the
@@ -367,7 +343,10 @@ fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
     match parent {
         Some(Parent::Body(parent)) => {
             let DebruijnNode::Abstraction { .. } = root[parent] else {
-                unreachable!()
+                unreachable!(
+                    "Expected abstraction, got {:?} at {} in {:#?}",
+                    root[parent], parent, root
+                )
             };
             root[parent] = DebruijnNode::Abstraction {
                 body: child,
@@ -376,13 +355,19 @@ fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
         }
         Some(Parent::Func(parent)) => {
             let DebruijnNode::Application { arg, .. } = root[parent] else {
-                unreachable!()
+                unreachable!(
+                    "Expected application, got {:?} at {} in {:#?}",
+                    root[parent], parent, root
+                )
             };
             root[parent] = DebruijnNode::Application { func: child, arg };
         }
         Some(Parent::Arg(parent)) => {
             let DebruijnNode::Application { func, .. } = root[parent] else {
-                unreachable!()
+                unreachable!(
+                    "Expected application, got {:?} at {} in {:#?}",
+                    root[parent], parent, root
+                )
             };
             root[parent] = DebruijnNode::Application { func, arg: child }
         }
@@ -394,15 +379,24 @@ fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
     };
 }
 
-fn substitute_mut(root: &mut FlatRoot, body: TermIndex, arg: TermIndex) {
+// Substitute new copies of the arg into the body.
+// Each time the argument is subsituted, a clone of it is allocated and fixed up. Then the leaf
+// node being substituted has it's parent repointed to the new argument subtree (with the leaf
+// becoming garbage)
+// Note that this means if the redex body consists of a single leaf node that gets substituted
+// (so it's parent node is the redex abs), then redex.abs gets repointed and the body is garbage now
+// Hence, to help with this, the return value of this method is the location of the redex.abs's body,
+// (which is either a newly allocated arg subtree or the existing body)
+fn substitute_mut(root: &mut FlatRoot, redex: RedexMut) -> (Option<Parent>, TermIndex) {
     fn _substitute_mut(
         root: &mut FlatRoot,
-        term: Parent,
+        parent: Parent,
+        term: TermIndex,
         redex_arg: TermIndex,
         match_index: usize,
         depth: usize,
     ) {
-        match root[term.get_term()] {
+        match root[term] {
             DebruijnNode::Index(term_index) => {
                 if term_index == match_index {
                     // TODO: Optimization opportunity: Instead of making `arg` become garbage, instead
@@ -416,25 +410,41 @@ fn substitute_mut(root: &mut FlatRoot, body: TermIndex, arg: TermIndex) {
                     };
                     // Bump up free variables by `depth`
                     up_by_mut(root, new_arg, depth);
-                    repoint_node(root, Some(term), new_arg);
+                    repoint_node(root, Some(parent), new_arg);
                 }
             }
             DebruijnNode::Abstraction { body, .. } => {
                 _substitute_mut(
                     root,
-                    Parent::Body(body),
+                    Parent::Body(term),
+                    body,
                     redex_arg,
                     match_index + 1,
                     depth + 1,
                 );
             }
             DebruijnNode::Application { func, arg } => {
-                _substitute_mut(root, Parent::Func(func), redex_arg, match_index, depth);
-                _substitute_mut(root, Parent::Arg(arg), redex_arg, match_index, depth);
+                _substitute_mut(
+                    root,
+                    Parent::Func(term),
+                    func,
+                    redex_arg,
+                    match_index,
+                    depth,
+                );
+                _substitute_mut(root, Parent::Arg(term), arg, redex_arg, match_index, depth);
             }
         }
     }
-    _substitute_mut(root, Parent::Body(body), arg, 1, 0);
+    _substitute_mut(root, Parent::Body(redex.abs), redex.body, redex.arg, 1, 0);
+
+    let DebruijnNode::Abstraction { body, .. } = root[redex.abs] else {
+        unreachable!(
+            "expected abstraction, got {:?} at {} in {root:#?}",
+            root[redex.abs], redex.abs
+        );
+    };
+    (redex.parent, body)
 }
 
 fn up_by_mut(root: &mut FlatRoot, term: TermIndex, up_by: usize) {
@@ -581,7 +591,7 @@ mod test {
     }
 
     #[test]
-    fn no_usage() {
+    fn usage_zero() {
         let mut root = compile("(λ 2) (λ 50)");
 
         let redex = RedexMut::try_get(&root, None, 0).unwrap();
@@ -590,11 +600,14 @@ mod test {
         substitute_arg_into_body_mut(&mut root, redex);
 
         let expected = compile("1");
-        assert_eq!(root, expected);
+
+        let actual = Debruijn::from(&root);
+        let expected = Debruijn::from(&expected);
+        assert_eq!(actual, expected, "Expected {expected}, got {actual}");
     }
 
     #[test]
-    fn one_usage() {
+    fn usage_one() {
         let mut root = compile("(λ 1) (λ 50)");
 
         let redex = RedexMut::try_get(&mut root, None, 0).unwrap();
@@ -603,6 +616,57 @@ mod test {
         substitute_arg_into_body_mut(&mut root, redex);
 
         let expected = compile("λ 50");
-        assert_eq!(root, expected);
+
+        let actual = Debruijn::from(&root);
+        let expected = Debruijn::from(&expected);
+        assert_eq!(actual, expected, "Expected {expected}, got {actual}");
+    }
+
+    #[test]
+    fn body_is_leaf() {
+        let mut root = compile("(λ 1) (1 2 3 4)");
+
+        let redex = RedexMut::try_get(&mut root, None, 0).unwrap();
+        assert_eq!(redex.usage, 1);
+
+        substitute_arg_into_body_mut(&mut root, redex);
+
+        let expected = compile("1 2 3 4");
+
+        let actual = Debruijn::from(&root);
+        let expected = Debruijn::from(&expected);
+        assert_eq!(actual, expected, "Expected {expected}, got {actual}");
+    }
+
+    #[test]
+    fn body_is_not_leaf() {
+        let mut root = compile("(λ λ 2) (1 2 3 4)");
+
+        let redex = RedexMut::try_get(&mut root, None, 0).unwrap();
+        assert_eq!(redex.usage, 1);
+
+        substitute_arg_into_body_mut(&mut root, redex);
+
+        let expected = compile("λ 2 3 4 5");
+
+        let actual = Debruijn::from(&root);
+        let expected = Debruijn::from(&expected);
+        assert_eq!(actual, expected, "Expected {expected}, got {actual}");
+    }
+
+    #[test]
+    fn usage_many() {
+        let mut root = compile("(λ 1 λ 2 λ 3 λ 4) 100");
+
+        let redex = RedexMut::try_get(&mut root, None, 0).unwrap();
+        assert_eq!(redex.usage, 4);
+
+        substitute_arg_into_body_mut(&mut root, redex);
+
+        let expected = compile("100 λ 101 λ 102 λ 103");
+
+        let actual = Debruijn::from(&root);
+        let expected = Debruijn::from(&expected);
+        assert_eq!(actual, expected, "Expected {expected}, got {actual}");
     }
 }
