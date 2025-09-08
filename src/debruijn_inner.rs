@@ -509,7 +509,7 @@ fn substitute_and_fix_body_mut(
         redex_arg: TermIndex,
         match_index: DebruijnIndex,
         depth: DebruijnDepth,
-    ) {
+    ) -> (bool, Option<TermIndex>) {
         match root[term] {
             DebruijnNode::Index(term_index) => {
                 if term_index == match_index {
@@ -530,16 +530,20 @@ fn substitute_and_fix_body_mut(
                     };
 
                     repoint_node(root, Some(parent), new_arg);
+                    (true, Some(new_arg))
                 } else if term_index > depth {
                     // Variable is a free variable, but is NOT getting substituted.
                     // Remember that the body of the term is getting dropped out of the abstraction
                     // Because of this, we need to reduce the term_index by one, since there's one
                     // less abstraction to jump over for the index.
                     root[term] = DebruijnNode::Index(term_index - 1);
+                    (false, None)
+                } else {
+                    (false, None)
                 }
             }
             DebruijnNode::Abstraction { body, .. } => {
-                _substitute_mut(
+                let (did_sub_body, new_body) = _substitute_mut(
                     root,
                     Parent::Body(term),
                     body,
@@ -547,9 +551,16 @@ fn substitute_and_fix_body_mut(
                     match_index + 1,
                     depth + 1,
                 );
+                // Compute usage due to substitution
+                if did_sub_body {
+                    let body = new_body.unwrap_or(body);
+                    let usage = compute_usage_flat(root, body);
+                    root[term] = DebruijnNode::Abstraction { body, usage };
+                }
+                (did_sub_body, None)
             }
             DebruijnNode::Application { func, arg } => {
-                _substitute_mut(
+                let (did_sub_func, _) = _substitute_mut(
                     root,
                     Parent::Func(term),
                     func,
@@ -557,7 +568,9 @@ fn substitute_and_fix_body_mut(
                     match_index,
                     depth,
                 );
-                _substitute_mut(root, Parent::Arg(term), arg, redex_arg, match_index, depth);
+                let (did_sub_arg, _) =
+                    _substitute_mut(root, Parent::Arg(term), arg, redex_arg, match_index, depth);
+                (did_sub_func || did_sub_arg, None)
             }
         }
     }
