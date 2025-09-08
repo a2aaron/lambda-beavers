@@ -80,7 +80,7 @@ impl FlatRoot {
 
     fn alloc_one(&mut self, term: Option<DebruijnNode>) -> TermIndex {
         // If none, then alloc a dummy node, this should be fixed up afterwards
-        let term = term.unwrap_or(DebruijnNode::Index(TermIndex::MAX));
+        let term = term.unwrap_or(DebruijnNode::Index(DebruijnIndex::MAX));
         let term_index = self.backing.len();
         self.backing.push(term);
         term_index
