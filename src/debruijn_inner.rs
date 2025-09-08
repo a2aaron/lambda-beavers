@@ -46,24 +46,36 @@ pub struct FlatRoot {
 }
 impl FlatRoot {
     // Clone the given subtree. The returned value points to the newly allocated subtree.
-    fn clone_subtree(&mut self, term: TermIndex) -> TermIndex {
-        match self[term] {
-            DebruijnNode::Index(index) => self.alloc_one(Some(DebruijnNode::Index(index))),
-            DebruijnNode::Abstraction { body, usage } => {
-                let abs = self.alloc_one(None);
-                let body = self.clone_subtree(body);
-                self[abs] = DebruijnNode::Abstraction { body, usage };
-                abs
-            }
-            DebruijnNode::Application { func, arg } => {
-                let app = self.alloc_one(None);
-                let func = self.clone_subtree(func);
-                let arg = self.clone_subtree(arg);
+    fn clone_subtree_and_fix_up(&mut self, term: TermIndex, up_by: usize) -> TermIndex {
+        fn _clone_subtree_and_fix_up(
+            root: &mut FlatRoot,
+            term: TermIndex,
+            up_by: usize,
+            depth: usize,
+        ) -> TermIndex {
+            match root[term] {
+                DebruijnNode::Index(index) => {
+                    let index = if index >= depth { index + up_by } else { index };
+                    root.alloc_one(Some(DebruijnNode::Index(index)))
+                }
+                DebruijnNode::Abstraction { body, usage } => {
+                    let abs = root.alloc_one(None);
+                    let body = _clone_subtree_and_fix_up(root, body, up_by, depth + 1);
+                    root[abs] = DebruijnNode::Abstraction { body, usage };
+                    abs
+                }
+                DebruijnNode::Application { func, arg } => {
+                    let app = root.alloc_one(None);
+                    let func = _clone_subtree_and_fix_up(root, func, up_by, depth);
+                    let arg = _clone_subtree_and_fix_up(root, arg, up_by, depth);
 
-                self[app] = DebruijnNode::Application { func, arg };
-                app
+                    root[app] = DebruijnNode::Application { func, arg };
+                    app
+                }
             }
         }
+
+        _clone_subtree_and_fix_up(self, term, up_by, 1)
     }
 
     fn alloc_one(&mut self, term: Option<DebruijnNode>) -> TermIndex {
@@ -403,17 +415,17 @@ fn substitute_and_fix_body_mut(
                     let last_arg_allocation = false;
 
                     let new_arg = if !last_arg_allocation {
-                        root.clone_subtree(redex_arg)
+                        root.clone_subtree_and_fix_up(redex_arg, depth)
                     } else {
+                        // Bump up free variables by `depth`
+                        // Note that normally we would have fixed up the argument by one prior to
+                        // calling this method. However, we also fix down the entire body by one after
+                        // calling the method. Both of these fixups cancel out, so we still only just
+                        // fix up by `depth`
+                        up_by_mut(root, redex_arg, depth);
                         redex_arg
                     };
 
-                    // Bump up free variables by `depth`
-                    // Note that normally we would have fixed up the argument by one prior to
-                    // calling this method. However, we also fix down the entire body by one after
-                    // calling the method. Both of these fixups cancel out, so we still only just
-                    // fix up by `depth`
-                    up_by_mut(root, new_arg, depth);
                     repoint_node(root, Some(parent), new_arg);
                 } else if term_index > depth {
                     // Variable is a free variable, but is NOT getting substituted.
