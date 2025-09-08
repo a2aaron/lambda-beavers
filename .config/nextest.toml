@@ -3,8 +3,21 @@ slow-timeout = { period = "1s", terminate-after = 5 }
 default-filter = 'not (test(strong_reduction_test_))'
 final-status-level = 'slow'
 
+[profile.full-fast]
+fail-fast = true
+default-filter = 'all()'
+final-status-level = 'slow' 
+
 [profile.full]
 slow-timeout = { period = "1s", terminate-after = 5 }
 fail-fast = false
 default-filter = 'all()'
-final-status-level = 'slow'
+final-status-level = 'slow' 
+
+
+[profile.strong-only]
+slow-timeout = { period = "1s", terminate-after = 5 }
+fail-fast = false
+default-filter = 'test(strong_reduction_test_)'
+final-status-level = 'slow' 
+

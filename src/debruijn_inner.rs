@@ -317,17 +317,13 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
         // Since the argument is not used, the entire arg subtree is garbage now.
     } else {
         // Otherwise, perform substitution as usual
-        // We need to first fix up the argument indicies since we are entering into an abstraction
-        up_one_mut(root, redex.arg);
 
-        // Then perform the actual substition on body.
+        // Perform the actual substition on body.
+        // This method actually fuses the fixing down/up that needs to happen for the whole body
+        // in addition to performing substitutions.
         // This may end up causing abs's body to get repointed if the redex body consists of a
         // single leaf node that gets substituted.
-        let (parent, new_body) = substitute_mut(root, redex);
-
-        // Then, fix down the (potentially new body) indicies, since we are dropping out the abstraction
-        // (We target abs because body may be junk now.)
-        down_one_mut(root, new_body);
+        let (parent, new_body) = substitute_and_fix_body_mut(root, redex);
 
         // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
         repoint_node(root, parent, new_body);
@@ -387,7 +383,10 @@ fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
 // (so it's parent node is the redex abs), then redex.abs gets repointed and the body is garbage now
 // Hence, to help with this, the return value of this method is the location of the redex.abs's body,
 // (which is either a newly allocated arg subtree or the existing body)
-fn substitute_mut(root: &mut FlatRoot, redex: RedexMut) -> (Option<Parent>, TermIndex) {
+fn substitute_and_fix_body_mut(
+    root: &mut FlatRoot,
+    redex: RedexMut,
+) -> (Option<Parent>, TermIndex) {
     fn _substitute_mut(
         root: &mut FlatRoot,
         parent: Parent,
@@ -408,9 +407,20 @@ fn substitute_mut(root: &mut FlatRoot, redex: RedexMut) -> (Option<Parent>, Term
                     } else {
                         redex_arg
                     };
+
                     // Bump up free variables by `depth`
+                    // Note that normally we would have fixed up the argument by one prior to
+                    // calling this method. However, we also fix down the entire body by one after
+                    // calling the method. Both of these fixups cancel out, so we still only just
+                    // fix up by `depth`
                     up_by_mut(root, new_arg, depth);
                     repoint_node(root, Some(parent), new_arg);
+                } else if term_index > depth {
+                    // Variable is a free variable, but is NOT getting substituted.
+                    // Remember that the body of the term is getting dropped out of the abstraction
+                    // Because of this, we need to reduce the term_index by one, since there's one
+                    // less abstraction to jump over for the index.
+                    root[term] = DebruijnNode::Index(term_index - 1);
                 }
             }
             DebruijnNode::Abstraction { body, .. } => {
@@ -455,9 +465,6 @@ fn up_by_mut(root: &mut FlatRoot, term: TermIndex, up_by: usize) {
 //       n + up_by otherwise
 // ↑ λ t = λ (↑ t) where up_by -> up_by and cutoff -> cutoff + 1
 // ↑ (t1 t2) = (↑ t1) (↑ t2)
-fn up_one_mut(root: &mut FlatRoot, term: TermIndex) {
-    shift_cutoff_mut(root, term, 1, 1)
-}
 
 fn down_one_mut(root: &mut FlatRoot, term: TermIndex) {
     shift_cutoff_mut(root, term, -1, 1)
