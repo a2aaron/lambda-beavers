@@ -51,7 +51,7 @@ impl FlatRoot {
             root: &mut FlatRoot,
             term: TermIndex,
             up_by: usize,
-            depth: usize,
+            depth: DebruijnDepth,
         ) -> TermIndex {
             match root[term] {
                 DebruijnNode::Index(index) => {
@@ -160,7 +160,7 @@ impl From<&FlatRoot> for Debruijn {
 /// ter the body of an abstraction
 /// eg: in λ 1 λ 2 λ 3, we have that 1, 2, and 3 all refer to the same variable, so the usage is 3
 fn compute_usage(body: &Debruijn) -> usize {
-    fn _compute_usage(term: &Debruijn, depth: usize) -> usize {
+    fn _compute_usage(term: &Debruijn, depth: DebruijnDepth) -> usize {
         match term {
             Debruijn::Index(index) => (*index == depth) as usize,
             Debruijn::Application { func, arg } => {
@@ -181,7 +181,7 @@ fn compute_usage(body: &Debruijn) -> usize {
 /// ter the body of an abstraction
 /// eg: in λ 1 λ 2 λ 3, we have that 1, 2, and 3 all refer to the same variable, so the usage is 3
 fn compute_usage_flat(root: &FlatRoot, body: TermIndex) -> usize {
-    fn _compute_usage(root: &FlatRoot, term_i: TermIndex, depth: usize) -> usize {
+    fn _compute_usage(root: &FlatRoot, term_i: TermIndex, depth: DebruijnDepth) -> usize {
         match root[term_i] {
             DebruijnNode::Index(index) => (index == depth) as usize,
             DebruijnNode::Application { func, arg } => {
@@ -195,6 +195,11 @@ fn compute_usage_flat(root: &FlatRoot, body: TermIndex) -> usize {
     // the abstraction itself as input rather than it's body), then this would be 0.
     _compute_usage(root, body, 1)
 }
+
+// The depth relative to some term. This is used to determine if a variable is free within a term
+// If a given Index node has a DebruijnIndex >= DebruijnDepth, then that Index node is a free variable
+// with respect to that )
+type DebruijnDepth = usize;
 
 // The index for the DebruijnNode::Index variant. This is an index for the actual lambda term and works
 // just like how Debruijn::Index works.
@@ -404,8 +409,8 @@ fn substitute_and_fix_body_mut(
         parent: Parent,
         term: TermIndex,
         redex_arg: TermIndex,
-        match_index: usize,
-        depth: usize,
+        match_index: DebruijnIndex,
+        depth: DebruijnDepth,
     ) {
         match root[term] {
             DebruijnNode::Index(term_index) => {
@@ -484,24 +489,24 @@ fn down_one_mut(root: &mut FlatRoot, term: TermIndex) {
 
 /// Shift the indicies for all terms up by an amount. Indicies below the cutoff are not modified
 /// This is useful during beta reduction because we need to "drop out" an abstraction.
-fn shift_cutoff_mut(root: &mut FlatRoot, term: TermIndex, up_by: isize, cutoff: usize) {
+fn shift_cutoff_mut(root: &mut FlatRoot, term: TermIndex, up_by: isize, depth: DebruijnDepth) {
     match root[term] {
         DebruijnNode::Index(term_index) => {
             // Recall that an index starts at 1, so if cutoff is set to 1, then this branch will always be taken.
-            if term_index >= cutoff {
+            if term_index >= depth {
                 let new_index = term_index.checked_add_signed(up_by).unwrap();
                 root.backing[term] = DebruijnNode::Index(new_index);
             }
         }
         DebruijnNode::Application { func, arg } => {
-            shift_cutoff_mut(root, func, up_by, cutoff);
-            shift_cutoff_mut(root, arg, up_by, cutoff);
+            shift_cutoff_mut(root, func, up_by, depth);
+            shift_cutoff_mut(root, arg, up_by, depth);
         }
         DebruijnNode::Abstraction { body, .. } => {
             // We add one to the cutoff here because we don't want to modify bound variables
             // For example, if we're at the outer-most lambda, then any Index(1)s in the lambda body
             // are referring to that lambda's bound variable and we don't modify it.
-            shift_cutoff_mut(root, body, up_by, cutoff + 1);
+            shift_cutoff_mut(root, body, up_by, depth + 1);
         }
     }
 }
