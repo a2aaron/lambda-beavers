@@ -45,39 +45,10 @@ pub struct FlatRoot {
     root: TermIndex,
 }
 impl FlatRoot {
-    // Clone the given subtree. The returned value points to the newly allocated subtree.
-    fn clone_subtree_and_fix_up(&mut self, term: TermIndex, up_by: usize) -> TermIndex {
-        fn _clone_subtree_and_fix_up(
-            root: &mut FlatRoot,
-            term: TermIndex,
-            up_by: usize,
-            depth: DebruijnDepth,
-        ) -> TermIndex {
-            match root[term] {
-                DebruijnNode::Index(index) => {
-                    let index = if index >= depth { index + up_by } else { index };
-                    root.alloc_one(Some(DebruijnNode::Index(index)))
-                }
-                DebruijnNode::Abstraction { body, usage } => {
-                    let abs = root.alloc_one(None);
-                    let body = _clone_subtree_and_fix_up(root, body, up_by, depth + 1);
-                    root[abs] = DebruijnNode::Abstraction { body, usage };
-                    abs
-                }
-                DebruijnNode::Application { func, arg } => {
-                    let app = root.alloc_one(None);
-                    let func = _clone_subtree_and_fix_up(root, func, up_by, depth);
-                    let arg = _clone_subtree_and_fix_up(root, arg, up_by, depth);
-
-                    root[app] = DebruijnNode::Application { func, arg };
-                    app
-                }
-            }
-        }
-
-        _clone_subtree_and_fix_up(self, term, up_by, 1)
-    }
-
+    /// Allocate the given term onto the backing vector. If none is passed, then a dummy node is
+    /// allocated, which should be modified by the caller. Otherwise, the node is set to the node
+    /// in the input `term`.
+    /// The return value is the index to the newly allocated node.
     fn alloc_one(&mut self, term: Option<DebruijnNode>) -> TermIndex {
         // If none, then alloc a dummy node, this should be fixed up afterwards
         let term = term.unwrap_or(DebruijnNode::Index(DebruijnIndex::MAX));
@@ -420,7 +391,7 @@ fn substitute_and_fix_body_mut(
                     let last_arg_allocation = false;
 
                     let new_arg = if !last_arg_allocation {
-                        root.clone_subtree_and_fix_up(redex_arg, depth)
+                        clone_subtree_and_fix_up(root, redex_arg, depth)
                     } else {
                         // Bump up free variables by `depth`
                         // Note that normally we would have fixed up the argument by one prior to
@@ -472,6 +443,41 @@ fn substitute_and_fix_body_mut(
         );
     };
     (redex.parent, body)
+}
+
+/// Clone the given subtree and fix up each free variable by up_by. This effectively fuses the
+/// up_by and clone steps together for substitute_mut, eliminating a second tree walk.
+/// The returned value points to the newly allocated subtree.
+fn clone_subtree_and_fix_up(root: &mut FlatRoot, term: TermIndex, up_by: usize) -> TermIndex {
+    fn _clone_subtree_and_fix_up(
+        root: &mut FlatRoot,
+        term: TermIndex,
+        up_by: usize,
+        depth: DebruijnDepth,
+    ) -> TermIndex {
+        match root[term] {
+            DebruijnNode::Index(index) => {
+                let index = if index >= depth { index + up_by } else { index };
+                root.alloc_one(Some(DebruijnNode::Index(index)))
+            }
+            DebruijnNode::Abstraction { body, usage } => {
+                let abs = root.alloc_one(None);
+                let body = _clone_subtree_and_fix_up(root, body, up_by, depth + 1);
+                root[abs] = DebruijnNode::Abstraction { body, usage };
+                abs
+            }
+            DebruijnNode::Application { func, arg } => {
+                let app = root.alloc_one(None);
+                let func = _clone_subtree_and_fix_up(root, func, up_by, depth);
+                let arg = _clone_subtree_and_fix_up(root, arg, up_by, depth);
+
+                root[app] = DebruijnNode::Application { func, arg };
+                app
+            }
+        }
+    }
+
+    _clone_subtree_and_fix_up(root, term, up_by, 1)
 }
 
 fn up_by_mut(root: &mut FlatRoot, term: TermIndex, up_by: usize) {
