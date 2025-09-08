@@ -3,10 +3,10 @@ use std::{fmt::Display, str::FromStr};
 use clap::Parser;
 use inquire::Select;
 use lambda_beaver::{
-    debruijn::{Debruijn, Root},
+    debruijn::Debruijn,
+    debruijn_inner::{DebruijnNode, FlatRoot, TermIndex, substitute_arg_into_body_mut},
     parse,
     print::{NodeLabelType, PrintableTerm},
-    reduce::Redex,
     replace::VisitOrder,
 };
 
@@ -20,18 +20,22 @@ struct Args {
     node_label: NodeLabelType,
 }
 
-fn print_highlighted<'a>(root: &'a Root, highlighted: Redex) -> String {
-    fn get_printable_terms<'a>(node: &'a Debruijn, highlighted: Redex) -> PrintableTerm {
-        match node {
-            Debruijn::Index(i) => PrintableTerm::Leaf(format!("{i}")),
-            Debruijn::Abstraction { body } => PrintableTerm::Abstraction {
+fn print_highlighted<'a>(root: &'a FlatRoot, highlighted: TermIndex) -> String {
+    fn get_printable_terms<'a>(
+        root: &'a FlatRoot,
+        term: TermIndex,
+        highlighted: TermIndex,
+    ) -> PrintableTerm {
+        match root[term] {
+            DebruijnNode::Index(i) => PrintableTerm::Leaf(format!("{i}")),
+            DebruijnNode::Abstraction { body, .. } => PrintableTerm::Abstraction {
                 body_head: "λ ".to_string(),
-                body: Box::new(get_printable_terms(body, highlighted)),
+                body: Box::new(get_printable_terms(root, body, highlighted)),
             },
-            Debruijn::Application { func, arg } => {
-                let func = get_printable_terms(&func, highlighted);
-                let arg = get_printable_terms(&arg, highlighted);
-                let highlight = std::ptr::eq(node, highlighted.redex);
+            DebruijnNode::Application { func, arg } => {
+                let func = get_printable_terms(root, func, highlighted);
+                let arg = get_printable_terms(root, arg, highlighted);
+                let highlight = term == highlighted;
 
                 PrintableTerm::Application {
                     highlight,
@@ -42,7 +46,7 @@ fn print_highlighted<'a>(root: &'a Root, highlighted: Redex) -> String {
         }
     }
 
-    let printable_terms = get_printable_terms(&root.0, highlighted);
+    let printable_terms = get_printable_terms(&root, root.root, highlighted);
     printable_terms.print()
 }
 
@@ -76,7 +80,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
     };
-    let mut current_term = Root(current_term);
+    let mut current_term = FlatRoot::from(&current_term);
 
     let mut history = vec![];
 
@@ -87,7 +91,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .enumerate()
             .map(|(redex_index, redex)| {
                 // TODO: would be nice to not print out the full term if it is over 80ish characters long
-                let highlighted = print_highlighted(&current_term, *redex);
+                let highlighted = print_highlighted(&current_term, redex.abs);
                 Choice::Reduce(redex_index, highlighted)
             })
             .collect();
@@ -114,7 +118,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Choice::Quit => break,
             Choice::Reduce(redex_index, _highlighted_string) => {
                 history.push(current_term.clone());
-                current_term.apply(redexes[redex_index]);
+                substitute_arg_into_body_mut(&mut current_term, redexes[redex_index]);
             }
         }
     }

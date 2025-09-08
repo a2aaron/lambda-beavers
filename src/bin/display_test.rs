@@ -66,13 +66,13 @@ fn run(n: usize, args: &Args) {
             Some(result) => match result {
                 ReductionResult::NormalForm(result) => {
                     if reduced != result {
-                        panic!("Failed! Expected: {}, Actual: {}", reduced.0, result.0);
+                        panic!("Failed! Expected: {}, Actual: {}", reduced, result);
                     } else {
-                        format!("Normal Form,{}", result.0)
+                        format!("Normal Form,{}", result)
                     }
                 }
                 ReductionResult::Irreducible => {
-                    panic!("Failed: Expected: {}, Actual: <irreducible>", reduced.0)
+                    panic!("Failed: Expected: {}, Actual: <irreducible>", reduced)
                 }
                 ReductionResult::MaxReductionsReached => format!("Max Reductions Reached"),
             },

@@ -1,9 +1,6 @@
 use std::{fmt::Display, str::FromStr};
 
-use crate::{
-    debruijn::{Debruijn, Root},
-    parse::term,
-};
+use crate::{debruijn::Debruijn, debruijn_inner::FlatRoot, parse::term};
 
 /// A literal
 /// TODO: This should eventually become more sophisticated, possibly containing
@@ -99,14 +96,14 @@ impl Context {
     }
 }
 
-impl From<Root> for Term {
-    fn from(root: Root) -> Self {
-        Term::from(&root)
+impl From<FlatRoot> for Term {
+    fn from(root: FlatRoot) -> Self {
+        Term::from(Debruijn::from(&root))
     }
 }
-impl From<&Root> for Term {
-    fn from(root: &Root) -> Self {
-        Term::from(&root.0)
+impl From<&FlatRoot> for Term {
+    fn from(root: &FlatRoot) -> Self {
+        Term::from(Debruijn::from(root))
     }
 }
 impl From<Debruijn> for Term {

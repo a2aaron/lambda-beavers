@@ -2,7 +2,7 @@ use clap::Parser;
 use std::collections::HashMap;
 
 use lambda_beaver::{
-    debruijn::Root,
+    debruijn::Debruijn,
     parse,
     reduce::{self, ReductionResult},
     replace::VisitOrder,
@@ -66,13 +66,12 @@ fn main() {
     for length in min_bitlength..=max_bitlength {
         let terms = utils::bitstring_permutations(length)
             .filter_map(|bitstring| parse::binary::from_vec(bitstring).ok())
-            .map(Root);
+            .map(Debruijn::from);
 
         for term in terms {
             let term_binary = format!("{term:b}");
             let term_classic = Term::from(&term);
-            let (result, reductions_used) =
-                reduce::reduce(term.clone(), visit_order, max_reductions);
+            let (result, reductions_used) = reduce::reduce(&term, visit_order, max_reductions);
             match result {
                 ReductionResult::NormalForm(bnf) => {
                     let bnf_classic = Term::from(&bnf);

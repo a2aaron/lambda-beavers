@@ -1,8 +1,48 @@
-use std::ops::{ControlFlow, Index, IndexMut};
+use core::fmt;
+use std::{
+    fmt::{Binary, Display},
+    ops::{ControlFlow, Index, IndexMut},
+    str::FromStr,
+};
 
 use crate::{debruijn::Debruijn, replace::VisitOrder};
 
 impl VisitOrder {
+    pub fn preorder_walk_2<T>(
+        &self,
+        root: &FlatRoot,
+        mut action: impl FnMut(&FlatRoot, Option<Parent>, TermIndex) -> ControlFlow<T>,
+    ) -> Option<T> {
+        fn _preorder_walk<T>(
+            root: &FlatRoot,
+            parent: Option<Parent>,
+            term: TermIndex,
+            action: &mut impl FnMut(&FlatRoot, Option<Parent>, TermIndex) -> ControlFlow<T>,
+            reverse: bool,
+        ) -> ControlFlow<T> {
+            action(root, parent, term)?;
+
+            match root[term] {
+                DebruijnNode::Index(_) => (),
+                DebruijnNode::Abstraction { body, .. } => {
+                    _preorder_walk(root, Some(Parent::Body(term)), body, action, reverse)?
+                }
+                DebruijnNode::Application { func, arg } => {
+                    if reverse {
+                        _preorder_walk(root, Some(Parent::Arg(term)), arg, action, reverse)?;
+                        _preorder_walk(root, Some(Parent::Func(term)), func, action, reverse)?;
+                    } else {
+                        _preorder_walk(root, Some(Parent::Func(term)), func, action, reverse)?;
+                        _preorder_walk(root, Some(Parent::Arg(term)), arg, action, reverse)?;
+                    }
+                }
+            }
+            ControlFlow::Continue(())
+        }
+
+        _preorder_walk(root, None, root.root, &mut action, self.reverse).break_value()
+    }
+
     pub fn preorder_walk_mut_2<T>(
         &self,
         root: &mut FlatRoot,
@@ -39,10 +79,10 @@ impl VisitOrder {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FlatRoot {
-    backing: Vec<DebruijnNode>,
-    root: TermIndex,
+    pub backing: Vec<DebruijnNode>,
+    pub root: TermIndex,
 }
 impl FlatRoot {
     /// Allocate the given term onto the backing vector. If none is passed, then a dummy node is
@@ -55,6 +95,79 @@ impl FlatRoot {
         let term_index = self.backing.len();
         self.backing.push(term);
         term_index
+    }
+
+    pub fn is_bnf(&self) -> bool {
+        let result = VisitOrder::LEFT_OUTERMOST.preorder_walk_2(self, |root, parent, term_i| {
+            if RedexMut::try_get(root, parent, term_i).is_some() {
+                ControlFlow::Break(false)
+            } else {
+                ControlFlow::Continue(())
+            }
+        });
+        result.unwrap_or(true)
+    }
+
+    pub fn get_redexes(&self, visit_order: VisitOrder) -> Vec<RedexMut> {
+        let mut redexes = vec![];
+        visit_order.preorder_walk_2(self, |root, parent, term_i| {
+            if let Some(redex) = RedexMut::try_get(root, parent, term_i) {
+                redexes.push(redex);
+            }
+            ControlFlow::Continue::<()>(())
+        });
+        redexes
+    }
+
+    pub fn normalized(&self) -> FlatRoot {
+        fn _clone(old_root: &FlatRoot, new_root: &mut FlatRoot, term: TermIndex) -> TermIndex {
+            match old_root[term] {
+                DebruijnNode::Index(idx) => {
+                    let idx = DebruijnNode::Index(idx);
+                    new_root.alloc_one(Some(idx))
+                }
+                DebruijnNode::Abstraction { body, usage } => {
+                    let abs = new_root.alloc_one(None);
+                    let body = _clone(old_root, new_root, body);
+                    new_root[abs] = DebruijnNode::Abstraction { body, usage };
+                    abs
+                }
+                DebruijnNode::Application { func, arg } => {
+                    let app = new_root.alloc_one(None);
+                    let func = _clone(old_root, new_root, func);
+                    let arg = _clone(old_root, new_root, arg);
+                    new_root[app] = DebruijnNode::Application { func, arg };
+                    app
+                }
+            }
+        }
+
+        let mut new_root = FlatRoot {
+            backing: vec![],
+            root: 0,
+        };
+        _clone(self, &mut new_root, self.root);
+        new_root
+    }
+}
+
+impl FromStr for FlatRoot {
+    type Err = <Debruijn as FromStr>::Err;
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(FlatRoot::from(&Debruijn::from_str(s)?))
+    }
+}
+
+impl Display for FlatRoot {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        Display::fmt(&Debruijn::from(self), f)
+    }
+}
+
+impl Binary for FlatRoot {
+    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+        Binary::fmt(&Debruijn::from(self), f)
     }
 }
 
@@ -72,25 +185,28 @@ impl IndexMut<TermIndex> for FlatRoot {
     }
 }
 
-impl<T> From<T> for FlatRoot
-where
-    T: Into<Debruijn>,
-{
-    fn from(term: T) -> Self {
-        fn flatten(root: &mut FlatRoot, term: Debruijn) -> TermIndex {
+impl From<Debruijn> for FlatRoot {
+    fn from(value: Debruijn) -> Self {
+        FlatRoot::from(&value)
+    }
+}
+
+impl From<&Debruijn> for FlatRoot {
+    fn from(term: &Debruijn) -> Self {
+        fn flatten(root: &mut FlatRoot, term: &Debruijn) -> TermIndex {
             match term {
-                Debruijn::Index(index) => root.alloc_one(Some(DebruijnNode::Index(index))),
+                Debruijn::Index(index) => root.alloc_one(Some(DebruijnNode::Index(*index))),
                 Debruijn::Abstraction { body } => {
                     let usage = compute_usage(&body);
                     let abs = root.alloc_one(None);
-                    let body = flatten(root, *body);
+                    let body = flatten(root, body);
                     root[abs] = DebruijnNode::Abstraction { body, usage };
                     abs
                 }
                 Debruijn::Application { func, arg } => {
                     let app = root.alloc_one(None);
-                    let func = flatten(root, *func);
-                    let arg = flatten(root, *arg);
+                    let func = flatten(root, func);
+                    let arg = flatten(root, arg);
                     root[app] = DebruijnNode::Application { func, arg };
                     app
                 }
@@ -101,7 +217,7 @@ where
             backing: vec![],
             root: 0,
         };
-        flatten(&mut root, term.into());
+        flatten(&mut root, term);
         root
     }
 }
@@ -177,9 +293,9 @@ type DebruijnDepth = usize;
 type DebruijnIndex = usize;
 
 // The index for a given DebruijnNode when inside of a FlatRoot
-type TermIndex = usize;
+pub type TermIndex = usize;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DebruijnNode {
     Index(DebruijnIndex),
     Abstraction {
@@ -218,7 +334,7 @@ impl Default for DebruijnNode {
 /// Represents the parent of a given DebruijnNode. The TermIndex in each variant points to the parent
 /// node (and not the child node). In methods which take Option<Parent>, generally None indicates that
 /// a term is the root of the lambda term and therefore has no parent.
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Parent {
     /// Indicates that the parent is an Abstraction and the child is pointed to
     /// by the parent's `body` field.
@@ -231,13 +347,13 @@ pub enum Parent {
     Arg(TermIndex),
 }
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct RedexMut {
     // Term that this redex is a child of. If this is none, then the Redex is actually the root (and therefore is
     // pointed to by FlatRoot.root)
     parent: Option<Parent>,
     // The Abstraction containing the body. This must be an Abstraction
-    abs: TermIndex,
+    pub abs: TermIndex,
     // The body of the Abstraction. This must be pointed to by `abs`
     body: TermIndex,
     // The argument of the Application. This must be pointed to by `app.arg`
@@ -247,9 +363,9 @@ pub struct RedexMut {
 }
 
 impl RedexMut {
-    pub fn try_get(terms: &FlatRoot, parent: Option<Parent>, app: TermIndex) -> Option<RedexMut> {
-        match terms[app] {
-            DebruijnNode::Application { func, arg } => match terms[func] {
+    pub fn try_get(root: &FlatRoot, parent: Option<Parent>, app: TermIndex) -> Option<RedexMut> {
+        match root[app] {
+            DebruijnNode::Application { func, arg } => match root[func] {
                 DebruijnNode::Abstraction { body, usage } => Some(RedexMut {
                     parent,
                     abs: func,
@@ -362,6 +478,17 @@ fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
         }
     };
 }
+
+// This tries to substitute indicies that point to the implicit lambda that `function_body` is
+// part of.
+// Consider, for example, where we want to subsitute into λ 0 1 2, sow e have function body = 0 1 2.
+// in this case, 0 would be replaced by `replacer`. Note that we need to track depth, so the index
+// we match on (the `match_index`) will go up by one every time we go into a nested abstraction.
+// For example: In λ 0 λ 1 λ 2 (so `function_body` = 0 λ 1 λ 2), we'd substitute `replacer`
+// into 0, 1, and 2.
+// Also note that when we recurse into a nested abstraction, we also must bump up the indicies for
+// any free variables in `replacer` by the current depth to accomodate for the fact that those need to point over
+// additional lambdas.
 
 // Substitute new copies of the arg into the body.
 // Each time the argument is subsituted, a clone of it is allocated and fixed up. Then the leaf
@@ -531,13 +658,13 @@ mod test {
     use crate::debruijn::Debruijn;
 
     fn compile(term: &str) -> FlatRoot {
-        FlatRoot::from(Debruijn::from_str(term).unwrap())
+        FlatRoot::from(&Debruijn::from_str(term).unwrap())
     }
 
     #[test]
     fn flattening_trivial_idx() {
         let original = Debruijn::from("0");
-        let actual = FlatRoot::from(original);
+        let actual = FlatRoot::from(&original);
         let expected = FlatRoot {
             backing: vec![DebruijnNode::Index(0)],
             root: 0,
@@ -548,7 +675,7 @@ mod test {
     #[test]
     fn flattening_trivial_abs() {
         let original = Debruijn::from("λ 1");
-        let actual = FlatRoot::from(original);
+        let actual = FlatRoot::from(&original);
         let expected = FlatRoot {
             backing: vec![
                 DebruijnNode::Abstraction { body: 1, usage: 1 },
@@ -562,7 +689,7 @@ mod test {
     #[test]
     fn flattening_trivial_abs_2() {
         let original = Debruijn::from("λ λ 1");
-        let actual = FlatRoot::from(original);
+        let actual = FlatRoot::from(&original);
         let expected = FlatRoot {
             backing: vec![
                 DebruijnNode::Abstraction { body: 1, usage: 0 },
@@ -577,7 +704,7 @@ mod test {
     #[test]
     fn flattening_trivial_app() {
         let original = Debruijn::from("1 2");
-        let actual = FlatRoot::from(original);
+        let actual = FlatRoot::from(&original);
         let expected = FlatRoot {
             backing: vec![
                 DebruijnNode::Application { func: 1, arg: 2 },
@@ -592,7 +719,7 @@ mod test {
     #[test]
     fn flattening_trivial_app_2() {
         let original = Debruijn::from("(1 2) (3 4)");
-        let actual = FlatRoot::from(original);
+        let actual = FlatRoot::from(&original);
         let expected = FlatRoot {
             backing: vec![
                 DebruijnNode::Application { func: 1, arg: 4 }, // 0
@@ -611,7 +738,7 @@ mod test {
     #[test]
     fn round_trip() {
         let original = Debruijn::from("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2");
-        let flat = FlatRoot::from(original.clone());
+        let flat = FlatRoot::from(&original);
         let roundtripped = Debruijn::from(&flat);
 
         assert_eq!(

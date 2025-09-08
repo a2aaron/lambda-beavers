@@ -1,6 +1,9 @@
-use std::{collections::HashMap, fmt::Display, ops::ControlFlow, rc::Rc};
+use std::{collections::HashMap, fmt::Display};
 
-use crate::{debruijn::Root, replace::VisitOrder};
+use crate::{
+    debruijn_inner::{FlatRoot, RedexMut, substitute_arg_into_body_mut},
+    replace::VisitOrder,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct RedexIndex(usize);
@@ -12,51 +15,27 @@ impl Display for RedexIndex {
 
 #[derive(Debug)]
 pub struct ReductionNode {
-    pub root: Rc<Root>,
-    visit_order: VisitOrder,
-    pub unevaluated_redexes: Vec<RedexIndex>,
+    pub root: FlatRoot,
+    pub unevaluated_redexes: Vec<RedexMut>,
 }
 
 impl ReductionNode {
-    fn from_root(root: Rc<Root>, visit_order: VisitOrder) -> ReductionNode {
-        let num_redexes = root.count_redexes();
-        let unevaluated_redexes = (0..num_redexes).map(RedexIndex).collect();
-
+    fn from_root(root: FlatRoot, visit_order: VisitOrder) -> ReductionNode {
+        let unevaluated_redexes = root.get_redexes(visit_order);
         ReductionNode {
-            root: root.clone(),
-            visit_order,
+            root,
             unevaluated_redexes,
         }
     }
 
-    fn evaluate_redex(&mut self, redex_index: RedexIndex) -> Root {
-        assert!(self.is_unevaled(redex_index));
-        let index = self
-            .unevaluated_redexes
-            .iter()
-            .position(|redex_idx| *redex_idx == redex_index)
-            .unwrap();
-        self.unevaluated_redexes.remove(index);
+    fn evaluate_redex(&mut self, redex: RedexMut) -> FlatRoot {
+        let redex_index = self.unevaluated_redexes.iter().position(|r| *r == redex);
+        assert!(redex_index.is_some());
+        self.unevaluated_redexes.remove(redex_index.unwrap());
 
-        let mut root = self.root.as_ref().clone();
-        let redex = {
-            let mut i = 0;
-            root.walk_redexes(self.visit_order, |redex| {
-                if i == redex_index.0 {
-                    ControlFlow::Break(redex)
-                } else {
-                    i += 1;
-                    ControlFlow::Continue(())
-                }
-            })
-            .unwrap()
-        };
-        root.apply(redex);
-        root
-    }
-
-    fn is_unevaled(&self, redex_index: RedexIndex) -> bool {
-        self.unevaluated_redexes.contains(&redex_index)
+        let mut root = self.root.clone();
+        substitute_arg_into_body_mut(&mut root, redex);
+        root.normalized()
     }
 
     fn has_unevaled_redexes(&self) -> bool {
@@ -76,7 +55,7 @@ impl Display for NodeIndex {
 #[derive(Debug)]
 pub struct ReductionGraph {
     nodes: Vec<ReductionNode>,
-    term_to_node: HashMap<Rc<Root>, NodeIndex>,
+    term_to_node: HashMap<FlatRoot, NodeIndex>,
     pub incomplete_nodes: Vec<NodeIndex>,
     edges: Vec<(NodeIndex, NodeIndex)>,
     beta_normal_form: Option<NodeIndex>,
@@ -103,19 +82,18 @@ impl ReductionGraph {
         }
     }
 
-    pub fn with_root(root: Root, visit_order: VisitOrder) -> ReductionGraph {
+    pub fn with_root(root: FlatRoot, visit_order: VisitOrder) -> ReductionGraph {
         let mut graph = ReductionGraph::new(visit_order);
         let root_index = graph.add_node_from_root(root).0;
         graph.root = Some(root_index);
         graph
     }
 
-    fn add_node_from_root(&mut self, root: Root) -> (NodeIndex, bool) {
+    fn add_node_from_root(&mut self, root: FlatRoot) -> (NodeIndex, bool) {
         let index = self.term_to_node.get(&root).copied();
         match index {
             Some(index) => (index, false),
             None => {
-                let root = Rc::new(root);
                 // Rc clone is cheap
                 let reduction_node = ReductionNode::from_root(root.clone(), self.visit_order);
                 let index = NodeIndex(self.nodes.len());
@@ -127,9 +105,9 @@ impl ReductionGraph {
                 if reduction_node.root.is_bnf() {
                     assert!(
                         self.beta_normal_form.is_none(),
-                        "BNF was already found at {} but trying to set it again at {}.",
-                        self.get(self.beta_normal_form.unwrap()).unwrap().root,
-                        reduction_node.root
+                        "BNF was already found at {:#?} but trying to set it again at {:#?}.",
+                        self.bnf().unwrap(),
+                        reduction_node
                     );
                     self.beta_normal_form = Some(index);
                 }
@@ -144,14 +122,14 @@ impl ReductionGraph {
         self.edges.push((start, end));
     }
 
-    pub fn reduce_node(&mut self, node_index: NodeIndex, redex_index: RedexIndex) -> GraphUpdate {
+    pub fn reduce_node(&mut self, node_index: NodeIndex, redex: RedexMut) -> GraphUpdate {
         let node = self.nodes.get_mut(node_index.0).unwrap();
         assert!(
             node.has_unevaled_redexes(),
             "node at {node_index} must have unevaluated redex"
         );
 
-        let reduced_term = node.evaluate_redex(redex_index);
+        let reduced_term = node.evaluate_redex(redex);
         if !node.has_unevaled_redexes() {
             self.set_fully_evaled(node_index);
         }
@@ -231,20 +209,20 @@ impl ReductionGraph {
 
 #[cfg(test)]
 mod test {
-    use std::{rc::Rc, str::FromStr};
+    use std::str::FromStr;
 
     use crate::{
-        debruijn::{Debruijn, Root},
+        debruijn_inner::FlatRoot,
         graph::{NodeIndex, ReductionGraph, ReductionNode},
         replace::VisitOrder,
     };
 
     impl ReductionGraph {
-        fn contains_term(&self, term: &Root) -> bool {
+        fn contains_term(&self, term: &FlatRoot) -> bool {
             self.get_by_term(term).is_some()
         }
 
-        fn contains_edge(&self, a: &Root, b: &Root) -> bool {
+        fn contains_edge(&self, a: &FlatRoot, b: &FlatRoot) -> bool {
             if let Some(a) = self.get_by_term(a)
                 && let Some(b) = self.get_by_term(b)
             {
@@ -254,10 +232,10 @@ mod test {
             }
         }
 
-        fn get_by_term(&self, root: &Root) -> Option<NodeIndex> {
+        fn get_by_term(&self, root: &FlatRoot) -> Option<NodeIndex> {
             self.nodes
                 .iter()
-                .position(|the_node| *the_node.root == *root)
+                .position(|the_node| the_node.root == *root)
                 .map(NodeIndex)
         }
     }
@@ -266,7 +244,7 @@ mod test {
     fn bnf_check() {
         let visit_order = VisitOrder::LEFT_OUTERMOST;
         let term = "(λ 1) λ λ 1";
-        let root = Rc::new(Root(Debruijn::from_str(term).unwrap()));
+        let root = FlatRoot::from_str(term).unwrap();
         let node = ReductionNode::from_root(root.clone(), visit_order);
         assert!(
             !node.root.is_bnf(),
@@ -279,13 +257,13 @@ mod test {
     #[test]
     fn graph_and_true_false() {
         let root = "(((λ (λ ((2 1) 2))) (λ (λ 2))) (λ (λ 1)))";
-        let root = Root(Debruijn::from_str(root).unwrap().into());
+        let root = FlatRoot::from_str(root).unwrap().into();
         let mut graph = ReductionGraph::with_root(root, VisitOrder::LEFT_OUTERMOST);
 
         while graph.any_reducible() {
             let node_idx = graph.incomplete_nodes[0];
             let node = graph.get(node_idx).unwrap();
-            let redex = node.unevaluated_redexes[0];
+            let redex = node.unevaluated_redexes[0].clone();
             graph.reduce_node(node_idx, redex);
         }
 
@@ -299,7 +277,7 @@ mod test {
             "(λ (λ 1))",                                 // 6
         ];
 
-        let nodes = nodes.map(|node| Root::from_str(node).unwrap());
+        let nodes = nodes.map(|node| FlatRoot::from_str(node).unwrap());
 
         let edges = [
             (0, 1),

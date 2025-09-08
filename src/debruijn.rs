@@ -1,112 +1,14 @@
-use std::{
-    collections::HashMap,
-    error::Error,
-    fmt::{Binary, Display},
-    ops::ControlFlow,
-    str::FromStr,
-};
+use std::{collections::HashMap, error::Error, fmt::Binary, str::FromStr};
 
 use crate::{
     parse::{debruijn, term},
-    reduce::{Redex, extract_redex_parts_mut, substitute_arg_into_body_mut},
-    replace::VisitOrder,
     term::{Literal, Term},
 };
 use std::fmt;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[deprecated]
 pub struct Root(pub Debruijn);
-
-impl Root {
-    /// Apply the Redex to the Root, reducing Root via beta reduction.
-    /// # Panics
-    /// The Redex needs to come from the Root passed into here.
-    /// Otherwise, the ptr::eq in the closure will never find your Redex. If this occurs, the method
-    /// will panic.
-    ///
-    /// This means that you should not clone a Root and then pass in the old redex into the new Root
-    pub fn apply(&mut self, redex: Redex) {
-        let result = VisitOrder::LEFT_OUTERMOST.preorder_walk_mut(self, |term| {
-            if std::ptr::eq(redex.redex, term)
-                && let Some(parts) = extract_redex_parts_mut(term)
-            {
-                *term = substitute_arg_into_body_mut(parts);
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        });
-        // Require that we did actually find the redex and reduce it.
-        assert!(result.is_some());
-    }
-
-    pub fn walk_redexes<T>(
-        &self,
-        visit_order: VisitOrder,
-        mut action: impl FnMut(Redex) -> ControlFlow<T>,
-    ) -> Option<T> {
-        visit_order.preorder_walk(self, |term| {
-            if let Some(redex) = Redex::try_new(term) {
-                action(redex)?;
-            }
-            ControlFlow::Continue(())
-        })
-    }
-
-    pub fn get_redexes(&self, visit_order: VisitOrder) -> Vec<Redex> {
-        let mut redexes = vec![];
-        self.walk_redexes(visit_order, |redex| {
-            redexes.push(redex);
-            ControlFlow::Continue::<()>(())
-        });
-        redexes
-    }
-
-    pub fn count_redexes(&self) -> usize {
-        let mut count = 0;
-        self.walk_redexes(VisitOrder::LEFT_OUTERMOST, |_| {
-            count += 1;
-            ControlFlow::Continue::<()>(())
-        });
-        count
-    }
-
-    pub fn is_bnf(&self) -> bool {
-        self.walk_redexes(VisitOrder::LEFT_OUTERMOST, |_| {
-            // If we find any redex, then it's not BNF, return false
-            ControlFlow::Break(false)
-        })
-        .unwrap_or(true) // Otherwise, we found no redexes, so it's BNF
-    }
-}
-
-impl Display for Root {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-impl Binary for Root {
-    fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
-        Binary::fmt(&self.0, f)
-    }
-}
-impl From<Debruijn> for Root {
-    fn from(value: Debruijn) -> Self {
-        Root(value)
-    }
-}
-impl From<Root> for Debruijn {
-    fn from(value: Root) -> Self {
-        value.0
-    }
-}
-impl FromStr for Root {
-    type Err = Box<dyn Error>;
-
-    fn from_str(term: &str) -> Result<Self, Self::Err> {
-        Ok(Root(Debruijn::from_str(term)?))
-    }
-}
 
 /// A Debruijn term.
 /// Note that this notation is 1-indexed.

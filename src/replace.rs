@@ -1,7 +1,3 @@
-use std::ops::ControlFlow;
-
-use crate::debruijn::{Debruijn, Root};
-
 #[derive(Debug, Clone, Copy)]
 pub struct VisitOrder {
     pub(crate) reverse: bool,
@@ -10,68 +6,6 @@ pub struct VisitOrder {
 impl VisitOrder {
     pub const LEFT_OUTERMOST: VisitOrder = VisitOrder { reverse: false };
     pub const RIGHT_OUTERMOST: VisitOrder = VisitOrder { reverse: true };
-
-    pub fn preorder_walk_mut<T>(
-        &self,
-        root: &mut Root,
-        mut action: impl FnMut(&mut Debruijn) -> ControlFlow<T>,
-    ) -> Option<T> {
-        fn _preorder_walk_mut<T>(
-            term: &mut Debruijn,
-            action: &mut impl FnMut(&mut Debruijn) -> ControlFlow<T>,
-            reverse: bool,
-        ) -> ControlFlow<T> {
-            action(term)?;
-
-            match term {
-                Debruijn::Index(_) => (),
-                Debruijn::Application { func, arg } => {
-                    if reverse {
-                        _preorder_walk_mut(arg, action, reverse)?;
-                        _preorder_walk_mut(func, action, reverse)?;
-                    } else {
-                        _preorder_walk_mut(func, action, reverse)?;
-                        _preorder_walk_mut(arg, action, reverse)?;
-                    }
-                }
-                Debruijn::Abstraction { body } => _preorder_walk_mut(body, action, reverse)?,
-            }
-            ControlFlow::Continue(())
-        }
-
-        _preorder_walk_mut(&mut root.0, &mut action, self.reverse).break_value()
-    }
-
-    pub fn preorder_walk<'a, T>(
-        &self,
-        root: &'a Root,
-        mut action: impl FnMut(&'a Debruijn) -> ControlFlow<T>,
-    ) -> Option<T> {
-        fn _preorder_walk<'a, T>(
-            term: &'a Debruijn,
-            action: &mut impl FnMut(&'a Debruijn) -> ControlFlow<T>,
-            reverse: bool,
-        ) -> ControlFlow<T> {
-            action(term)?;
-
-            match term {
-                Debruijn::Index(_) => (),
-                Debruijn::Application { func, arg } => {
-                    if reverse {
-                        _preorder_walk(arg, action, reverse)?;
-                        _preorder_walk(func, action, reverse)?;
-                    } else {
-                        _preorder_walk(func, action, reverse)?;
-                        _preorder_walk(arg, action, reverse)?;
-                    }
-                }
-                Debruijn::Abstraction { body } => _preorder_walk(body, action, reverse)?,
-            }
-            ControlFlow::Continue(())
-        }
-
-        _preorder_walk(&root.0, &mut action, self.reverse).break_value()
-    }
 }
 
 #[cfg(test)]
@@ -80,32 +14,27 @@ mod test {
     use std::{collections::HashMap, ops::ControlFlow};
 
     use crate::{
-        debruijn::{Debruijn, Root},
+        debruijn_inner::{DebruijnNode, FlatRoot, TermIndex},
         replace::VisitOrder,
     };
 
-    fn idx(a: usize) -> Debruijn {
-        Debruijn::Index(a)
+    fn idx(a: usize) -> DebruijnNode {
+        DebruijnNode::Index(a)
     }
 
-    fn def(body: Debruijn) -> Debruijn {
-        Debruijn::Abstraction {
-            body: Box::new(body.clone()),
-        }
+    fn def(body: usize) -> DebruijnNode {
+        DebruijnNode::Abstraction { body, usage: 0 }
     }
 
-    fn call(a: Debruijn, b: Debruijn) -> Debruijn {
-        Debruijn::Application {
-            func: Box::new(a.clone()),
-            arg: Box::new(b.clone()),
-        }
+    fn call(func: usize, arg: usize) -> DebruijnNode {
+        DebruijnNode::Application { func, arg }
     }
 
-    type NodeToName = HashMap<Debruijn, String>;
-    type NameToNode = HashMap<String, Debruijn>;
+    type NodeToName = HashMap<TermIndex, String>;
+    type NameToNode = HashMap<String, TermIndex>;
 
     struct TestData {
-        root: Root,
+        root: FlatRoot,
         node_to_name: NodeToName,
         name_to_node: NameToNode,
     }
@@ -119,22 +48,43 @@ mod test {
         //    / \    \
         //   C   E    H
         fn new() -> TestData {
-            let a = ("a".to_string(), idx(0));
-            let c = ("c".to_string(), idx(1));
-            let e = ("e".to_string(), idx(2));
-            let h = ("h".to_string(), idx(3));
-            let i = ("i".to_string(), def(h.1.clone()));
-            let g = ("g".to_string(), def(i.1.clone()));
-            let d = ("d".to_string(), call(c.1.clone(), e.1.clone()));
-            let b = ("b".to_string(), call(a.1.clone(), d.1.clone()));
-            let f = ("f".to_string(), call(b.1.clone(), g.1.clone()));
+            let root = FlatRoot {
+                backing: vec![
+                    call(1, 6), // 0 | F -> B, G
+                    call(2, 3), // 1 | B -> A, D
+                    idx(0),     // 2 | A
+                    call(4, 5), // 3 | D -> C, E
+                    idx(1),     // 4 | C
+                    idx(2),     // 5 | E
+                    def(7),     // 6 | G -> I
+                    def(8),     // 7 | I -> H
+                    idx(3),     // 8 | H
+                ],
+                root: 0,
+            };
 
-            let root = Root(f.1.clone());
+            let nodes = [
+                ("f", 0),
+                ("b", 1),
+                ("a", 2),
+                ("d", 3),
+                ("c", 4),
+                ("e", 5),
+                ("g", 6),
+                ("i", 7),
+                ("h", 8),
+            ];
 
-            let nodes = [a, b, c, d, e, f, g, h, i];
-            let name_to_node = HashMap::from(nodes.clone());
-
-            let node_to_name = nodes.iter().cloned().map(|(a, b)| (b, a)).collect();
+            let name_to_node = nodes
+                .iter()
+                .cloned()
+                .map(|(a, b)| (a.to_string(), b))
+                .collect();
+            let node_to_name = nodes
+                .iter()
+                .cloned()
+                .map(|(a, b)| (b, a.to_string()))
+                .collect();
 
             TestData {
                 node_to_name,
@@ -143,7 +93,7 @@ mod test {
             }
         }
 
-        fn into_string(&self, order: &[&Debruijn]) -> String {
+        fn into_string(&self, order: &[TermIndex]) -> String {
             order
                 .iter()
                 .map(|node| self.node_to_name[node].clone())
@@ -151,10 +101,10 @@ mod test {
                 .collect()
         }
 
-        fn from_string(&self, order: &str) -> Vec<&Debruijn> {
+        fn from_string(&self, order: &str) -> Vec<TermIndex> {
             order
                 .split(",")
-                .map(|string| &self.name_to_node[string.trim()])
+                .map(|string| self.name_to_node[string.trim()])
                 .collect()
         }
     }
@@ -163,7 +113,7 @@ mod test {
         let expected = test_data.from_string(&expected_pretty);
 
         let mut actual = vec![];
-        visit_order.preorder_walk(&test_data.root, |term| {
+        visit_order.preorder_walk_2(&test_data.root, |_, _, term| {
             actual.push(term);
             ControlFlow::Continue::<()>(())
         });

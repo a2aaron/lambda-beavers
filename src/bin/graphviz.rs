@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use clap::Parser;
-use lambda_beaver::{debruijn::Root, print::NodeLabelType};
+use lambda_beaver::{debruijn_inner::FlatRoot, print::NodeLabelType};
 
 use lambda_beaver::parse;
 use lambda_beaver::reduce::{ReductionStrategy, ReductionStrategyKind};
@@ -21,7 +21,7 @@ pub fn to_graphviz(graph: &ReductionGraph, node_label: NodeLabelType) -> String 
         output.push(bnf);
     }
     for (node, i) in graph.nodes() {
-        let label = node_label.to_string(&node.root.0);
+        let label = node_label.to_string(&Debruijn::from(&node.root));
         let node = format!("{} [label = \"{}\"];", i, label);
         output.push(node);
     }
@@ -45,8 +45,8 @@ pub fn reduce_with_stats(
         match node_to_reduce {
             Some(node_to_reduce) => {
                 // TODO: select this via strategy
-                let redex_index = graph.get(node_to_reduce).unwrap().unevaluated_redexes[0];
-                let graph_update = graph.reduce_node(node_to_reduce, redex_index);
+                let redex = graph.get(node_to_reduce).unwrap().unevaluated_redexes[0];
+                let graph_update = graph.reduce_node(node_to_reduce, redex);
                 if graph_update.is_bnf {
                     bnf_found_at = Some(i);
                 }
@@ -125,7 +125,7 @@ fn main() {
             }
         },
     };
-    let term = Root(term);
+    let term = FlatRoot::from(&term);
     let max_reductions = args.max_reductions;
     let strategy = ReductionStrategy::from(args.strategy);
     let node_label = args.node_label;
