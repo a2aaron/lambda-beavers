@@ -5,14 +5,6 @@ use crate::{
     treewalk::VisitOrder,
 };
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct RedexIndex(usize);
-impl Display for RedexIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "redex_{}", self.0)
-    }
-}
-
 #[derive(Debug)]
 pub struct ReductionNode {
     pub root: FlatRoot,
