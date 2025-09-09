@@ -1,6 +1,6 @@
 use std::{error::Error, fmt::Display};
 
-use crate::term::{self, Term};
+use crate::term::{self, Classic};
 
 pub type ParseResult<T> = Result<T, ParseError>;
 
@@ -155,7 +155,7 @@ impl std::fmt::Display for ParseError {
     }
 }
 
-pub fn parse_program(tokens: &[Token]) -> ParseResult<Term> {
+pub fn parse_program(tokens: &[Token]) -> ParseResult<Classic> {
     if tokens.is_empty() {
         return Err(ParseError::Empty);
     }
@@ -165,8 +165,8 @@ pub fn parse_program(tokens: &[Token]) -> ParseResult<Term> {
     Ok(term)
 }
 
-fn parse_term_up_to_paren(tokens: &mut TokenStream) -> ParseResult<Term> {
-    fn wrap(current_term: Option<Term>, term: Term) -> Option<Term> {
+fn parse_term_up_to_paren(tokens: &mut TokenStream) -> ParseResult<Classic> {
+    fn wrap(current_term: Option<Classic>, term: Classic) -> Option<Classic> {
         if let Some(term1) = current_term {
             return Some(term::call(term1, term));
         } else {
@@ -174,7 +174,7 @@ fn parse_term_up_to_paren(tokens: &mut TokenStream) -> ParseResult<Term> {
         }
     }
 
-    let mut current_term: Option<Term> = None;
+    let mut current_term: Option<Classic> = None;
     while let Some(token) = tokens.peek() {
         match token {
             Token::LeftParen => {
@@ -216,7 +216,7 @@ mod tests {
         ($input:expr, $expected:expr) => {{
             let tokens = tokenize($input);
             let actual = parse_program(&tokens).unwrap();
-            let expected = Term::from($expected);
+            let expected = Classic::from($expected);
             assert_eq!(expected, actual);
         }};
     }

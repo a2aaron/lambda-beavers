@@ -28,13 +28,19 @@ impl From<String> for Literal {
 
 /// A term in the lambda calculus.
 #[derive(Debug, PartialEq, Eq)]
-pub enum Term {
+pub enum Classic {
     Literal(Literal),
-    Abstraction { arg: Literal, body: Box<Term> },
-    Application { func: Box<Term>, arg: Box<Term> },
+    Abstraction {
+        arg: Literal,
+        body: Box<Classic>,
+    },
+    Application {
+        func: Box<Classic>,
+        arg: Box<Classic>,
+    },
 }
 
-impl FromStr for Term {
+impl FromStr for Classic {
     type Err = term::ParseError;
 
     fn from_str(term: &str) -> Result<Self, Self::Err> {
@@ -43,22 +49,22 @@ impl FromStr for Term {
     }
 }
 
-impl From<&str> for Term {
+impl From<&str> for Classic {
     fn from(value: &str) -> Self {
         lit(value)
     }
 }
 
-impl From<String> for Term {
+impl From<String> for Classic {
     fn from(value: String) -> Self {
         lit(value)
     }
 }
 
-impl<A, B> From<(A, B)> for Term
+impl<A, B> From<(A, B)> for Classic
 where
-    A: Into<Term>,
-    B: Into<Term>,
+    A: Into<Classic>,
+    B: Into<Classic>,
 {
     fn from((a, b): (A, B)) -> Self {
         call(a, b)
@@ -96,22 +102,22 @@ impl Context {
     }
 }
 
-impl From<FlatRoot> for Term {
+impl From<FlatRoot> for Classic {
     fn from(root: FlatRoot) -> Self {
-        Term::from(Debruijn::from(&root))
+        Classic::from(Debruijn::from(&root))
     }
 }
-impl From<&FlatRoot> for Term {
+impl From<&FlatRoot> for Classic {
     fn from(root: &FlatRoot) -> Self {
-        Term::from(Debruijn::from(root))
+        Classic::from(Debruijn::from(root))
     }
 }
-impl From<Debruijn> for Term {
+impl From<Debruijn> for Classic {
     fn from(debruijn: Debruijn) -> Self {
-        Term::from(&debruijn)
+        Classic::from(&debruijn)
     }
 }
-impl From<&Debruijn> for Term {
+impl From<&Debruijn> for Classic {
     fn from(debruijn: &Debruijn) -> Self {
         from_debruijn(debruijn, &mut Context::new())
     }
@@ -119,7 +125,7 @@ impl From<&Debruijn> for Term {
 
 // Turn a Debruijn term into a classic Term.
 // depth refers to how many layers of
-fn from_debruijn(debruijn: &Debruijn, ctx: &mut Context) -> Term {
+fn from_debruijn(debruijn: &Debruijn, ctx: &mut Context) -> Classic {
     match debruijn {
         Debruijn::Index(index) => lit(ctx.get(*index).unwrap_or_else(|| {
             // Indicies which are greater than the current depth are unbound.
@@ -144,21 +150,21 @@ fn from_debruijn(debruijn: &Debruijn, ctx: &mut Context) -> Term {
 }
 
 // Helper method to create a Literal
-pub fn lit(l: impl Into<Literal>) -> Term {
-    Term::Literal(l.into())
+pub fn lit(l: impl Into<Literal>) -> Classic {
+    Classic::Literal(l.into())
 }
 
 // Helper method to create a lambda abstraction
-pub fn def(i: impl Into<Literal>, b: impl Into<Term>) -> Term {
-    Term::Abstraction {
+pub fn def(i: impl Into<Literal>, b: impl Into<Classic>) -> Classic {
+    Classic::Abstraction {
         arg: i.into(),
         body: Box::new(b.into()),
     }
 }
 
 // Helper method to create a function application
-pub fn call(a: impl Into<Term>, b: impl Into<Term>) -> Term {
-    Term::Application {
+pub fn call(a: impl Into<Classic>, b: impl Into<Classic>) -> Classic {
+    Classic::Application {
         func: Box::new(a.into()),
         arg: Box::new(b.into()),
     }

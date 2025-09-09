@@ -2,7 +2,7 @@ use std::{collections::HashMap, error::Error, fmt::Binary, str::FromStr};
 
 use crate::{
     parse::{debruijn, term},
-    term::{Literal, Term},
+    term::{Classic, Literal},
 };
 use std::fmt;
 
@@ -86,10 +86,10 @@ impl FromStr for Debruijn {
     }
 }
 
-impl TryFrom<Term> for Debruijn {
+impl TryFrom<Classic> for Debruijn {
     type Error = String;
 
-    fn try_from(term: Term) -> Result<Self, Self::Error> {
+    fn try_from(term: Classic) -> Result<Self, Self::Error> {
         compile(term, &mut Context::default())
     }
 }
@@ -97,19 +97,19 @@ impl TryFrom<Term> for Debruijn {
 /// Compile a term. Note that if there are any free variables (that is, a variable
 /// which does not appear in the binding of an Abstraction in the term), then it
 /// needs to be bound in the Context object.
-pub fn compile(term: Term, ctx: &mut Context) -> Result<Debruijn, String> {
+pub fn compile(term: Classic, ctx: &mut Context) -> Result<Debruijn, String> {
     let term = match term {
-        Term::Literal(literal) => match ctx.get_index(literal.clone()) {
+        Classic::Literal(literal) => match ctx.get_index(literal.clone()) {
             Some(index) => idx(index),
             None => return Err(format!("unbound variable {}", literal)),
         },
-        Term::Abstraction { arg, body } => {
+        Classic::Abstraction { arg, body } => {
             ctx.push_literal(arg.clone());
             let term = compile(*body, ctx)?;
             ctx.pop_literal(arg);
             def(term)
         }
-        Term::Application { func, arg } => {
+        Classic::Application { func, arg } => {
             let term1 = compile(*func, ctx)?;
             let term2 = compile(*arg, ctx)?;
             call(term1, term2)
@@ -180,12 +180,12 @@ pub fn call(a: impl Into<Debruijn>, b: impl Into<Debruijn>) -> Debruijn {
 mod test {
     use crate::{
         debruijn::{Context, Debruijn, call, def, idx},
-        term::Term,
+        term::Classic,
     };
 
     macro_rules! assert_compile {
         ($input:expr, $expected:expr) => {{
-            let term: Term = $input.parse().unwrap();
+            let term: Classic = $input.parse().unwrap();
             let actual = term.try_into().unwrap();
             assert_eq!($expected, actual);
         }};
@@ -193,7 +193,7 @@ mod test {
 
     macro_rules! assert_compile_with_context {
         ($input:expr, $expected:expr, $ctx:expr) => {{
-            let term: Term = $input.parse().unwrap();
+            let term: Classic = $input.parse().unwrap();
             let actual = crate::debruijn::compile(term, &mut $ctx).unwrap();
             assert_eq!($expected, actual);
         }};
@@ -201,7 +201,7 @@ mod test {
 
     macro_rules! assert_invalid {
         ($input:expr) => {{
-            let term: Term = $input.parse().unwrap();
+            let term: Classic = $input.parse().unwrap();
             let actual = Debruijn::try_from(term);
             assert!(actual.is_err())
         }};

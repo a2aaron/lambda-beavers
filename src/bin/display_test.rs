@@ -3,7 +3,7 @@ use std::{sync::LazyLock, time::Duration};
 use clap::Parser;
 use lambda_beaver::{
     reduce::ReductionResult,
-    term::Term,
+    term::Classic,
     treewalk::VisitOrder,
     utils::strong_reduction_test::{parse_line, reduce_with_timeout},
 };
@@ -50,9 +50,9 @@ fn run(n: usize, args: &Args) {
     let (starting, reduced) = parse_line(test);
     if args.print {
         println!("{}", test);
-        println!("Starting (Classic): {}", Term::from(&starting));
+        println!("Starting (Classic): {}", Classic::from(&starting));
         println!("Starting (Debruijn): {}", starting);
-        println!("Reduced  (Classic): {}", Term::from(&reduced));
+        println!("Reduced  (Classic): {}", Classic::from(&reduced));
         println!("Reduced (Debruijn): {}", reduced);
     }
 

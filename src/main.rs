@@ -5,7 +5,7 @@ use lambda_beaver::{
     debruijn::Debruijn,
     parse,
     reduce::{self, ReductionResult},
-    term::Term,
+    term::Classic,
     treewalk::VisitOrder,
     utils::{self},
 };
@@ -70,11 +70,11 @@ fn main() {
 
         for term in terms {
             let term_binary = format!("{term:b}");
-            let term_classic = Term::from(&term);
+            let term_classic = Classic::from(&term);
             let (result, reductions_used) = reduce::reduce(&term, visit_order, max_reductions);
             match result {
                 ReductionResult::NormalForm(bnf) => {
-                    let bnf_classic = Term::from(&bnf);
+                    let bnf_classic = Classic::from(&bnf);
                     let bnf_binary = format!("{:b}", bnf);
                     println!(
                         "{term_binary} -> {bnf_binary} | {term} -> {bnf} | {term_classic} -> {bnf_classic} | lengths: {} -> {} | found in {reductions_used}",

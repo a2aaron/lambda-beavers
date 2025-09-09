@@ -3,7 +3,7 @@
 
 use lambda_beaver::{
     reduce::ReductionResult,
-    term::Term,
+    term::Classic,
     treewalk::VisitOrder,
     utils::strong_reduction_test::{parse_line, reduce_with_timeout},
 };
@@ -41,8 +41,8 @@ fn assert_test(test: &str, test_i: usize) {
     let (starting, expected) = parse_line(test);
     let (reduction_result, _) = reduce_with_timeout(&starting, visit_order, timeout);
 
-    let starting_classic = Term::from(&starting);
-    let expected_classic = Term::from(&expected);
+    let starting_classic = Classic::from(&starting);
+    let expected_classic = Classic::from(&expected);
     match reduction_result {
         Some(ReductionResult::NormalForm(actual)) => {
             assert_eq!(

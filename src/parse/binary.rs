@@ -122,7 +122,7 @@ mod test {
     use crate::{
         debruijn::Debruijn,
         parse::binary::{self, BinaryTokenStream},
-        term::Term,
+        term::Classic,
     };
 
     #[test]
@@ -147,7 +147,7 @@ mod test {
 
     #[test]
     fn parse_omega() {
-        let term_classic = Term::from_str("(λx.x x)(λx.x x)").unwrap();
+        let term_classic = Classic::from_str("(λx.x x)(λx.x x)").unwrap();
         let term_classic = Debruijn::try_from(term_classic).unwrap();
 
         let term_debruijn = Debruijn::from_str("(λ 1 1)(λ 1 1)").unwrap();

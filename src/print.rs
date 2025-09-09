@@ -2,7 +2,7 @@ use std::fmt::{self, Display};
 
 use clap::ValueEnum;
 
-use crate::{common_terms, debruijn::Debruijn, term::Term};
+use crate::{common_terms, debruijn::Debruijn, term::Classic};
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
 pub enum NodeLabelType {
@@ -20,7 +20,7 @@ impl NodeLabelType {
             NodeLabelType::DebruijnCommonTerm => common_terms::to_string(term),
             NodeLabelType::Binary => format!("{:b}", term),
             NodeLabelType::BinaryLen => format!("{:b}", term).len().to_string(),
-            NodeLabelType::Classic => format!("{}", Term::from(term)),
+            NodeLabelType::Classic => format!("{}", Classic::from(term)),
         }
     }
 }
@@ -155,15 +155,15 @@ impl From<&Debruijn> for PrintableTerm {
     }
 }
 
-impl From<&Term> for PrintableTerm {
-    fn from(value: &Term) -> Self {
+impl From<&Classic> for PrintableTerm {
+    fn from(value: &Classic) -> Self {
         match value {
-            Term::Literal(literal) => PrintableTerm::Leaf(format!("{literal}")),
-            Term::Abstraction { arg, body } => PrintableTerm::Abstraction {
+            Classic::Literal(literal) => PrintableTerm::Leaf(format!("{literal}")),
+            Classic::Abstraction { arg, body } => PrintableTerm::Abstraction {
                 body_head: format!("λ{arg}. "),
                 body: Box::new(PrintableTerm::from(&**body)),
             },
-            Term::Application { func, arg } => PrintableTerm::Application {
+            Classic::Application { func, arg } => PrintableTerm::Application {
                 func: Box::new(PrintableTerm::from(&**func)),
                 arg: Box::new(PrintableTerm::from(&**arg)),
                 highlight: false,
@@ -179,7 +179,7 @@ impl Display for Debruijn {
     }
 }
 
-impl Display for Term {
+impl Display for Classic {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let printable_term = PrintableTerm::from(self);
         write!(f, "{}", printable_term.print())
@@ -188,7 +188,7 @@ impl Display for Term {
 
 #[cfg(test)]
 mod test {
-    use crate::{debruijn::Debruijn, parse::binary, term::Term, utils};
+    use crate::{debruijn::Debruijn, parse::binary, term::Classic, utils};
 
     #[test]
     fn display_and_parse() {
@@ -228,9 +228,9 @@ mod test {
                     .collect();
                 if let Ok(binary_term) = binary::from_vec(bitstring) {
                     if binary_term.is_closed_term() {
-                        let classic_term: Term = Term::from(&binary_term);
+                        let classic_term: Classic = Classic::from(&binary_term);
                         let string = format!("{}", classic_term);
-                        let classic_term_reparsed: Term = string.parse().unwrap();
+                        let classic_term_reparsed: Classic = string.parse().unwrap();
                         assert_eq!(
                             classic_term, classic_term_reparsed,
                             "terms did not match! binary {bitstring_string} -> {binary_term} -> {string} -> {classic_term_reparsed}"
