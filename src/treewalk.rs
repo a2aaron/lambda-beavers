@@ -14,7 +14,7 @@ mod test {
     use std::{collections::HashMap, ops::ControlFlow};
 
     use crate::{
-        debruijn_inner::{DebruijnNode, FlatRoot, TermIndex},
+        debruijn_flat::{DebruijnNode, FlatRoot, TermIndex},
         treewalk::VisitOrder,
     };
 

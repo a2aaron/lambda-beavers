@@ -4,7 +4,7 @@ use clap::Parser;
 use inquire::Select;
 use lambda_beaver::{
     debruijn::Debruijn,
-    debruijn_inner::{DebruijnNode, FlatRoot, TermIndex, substitute_arg_into_body_mut},
+    debruijn_flat::{DebruijnNode, FlatRoot, TermIndex, substitute_arg_into_body_mut},
     parse,
     print::{NodeLabelType, PrintableTerm},
     treewalk::VisitOrder,

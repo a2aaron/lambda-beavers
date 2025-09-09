@@ -4,7 +4,7 @@ use clap::ValueEnum;
 
 use crate::{
     debruijn::Debruijn,
-    debruijn_inner::{self, FlatRoot},
+    debruijn_flat::{self, FlatRoot},
     graph::{NodeIndex, ReductionGraph},
     treewalk::VisitOrder,
     utils::Rng,
@@ -27,8 +27,8 @@ impl Reducer {
         let result =
             self.visit_order
                 .preorder_walk_mut_2(&mut self.root, |root, parent, term_i| {
-                    if let Some(redex) = debruijn_inner::RedexMut::try_get(root, parent, term_i) {
-                        debruijn_inner::substitute_arg_into_body_mut(root, redex);
+                    if let Some(redex) = debruijn_flat::RedexMut::try_get(root, parent, term_i) {
+                        debruijn_flat::substitute_arg_into_body_mut(root, redex);
                         ControlFlow::Break(())
                     } else {
                         ControlFlow::Continue(())

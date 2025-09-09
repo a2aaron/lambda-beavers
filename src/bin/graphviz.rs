@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use clap::Parser;
-use lambda_beaver::{debruijn_inner::FlatRoot, print::NodeLabelType};
+use lambda_beaver::{debruijn_flat::FlatRoot, print::NodeLabelType};
 
 use lambda_beaver::parse;
 use lambda_beaver::reduce::{ReductionStrategy, ReductionStrategyKind};
