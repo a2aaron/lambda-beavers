@@ -60,7 +60,7 @@ pub mod strong_reduction_test {
         debruijn::Debruijn,
         parse,
         reduce::{Reducer, ReductionResult},
-        replace::VisitOrder,
+        treewalk::VisitOrder,
     };
 
     pub fn parse_line(line: &str) -> (Debruijn, Debruijn) {

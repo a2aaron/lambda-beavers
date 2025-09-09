@@ -5,8 +5,8 @@ use lambda_beaver::{
     debruijn::Debruijn,
     parse,
     reduce::{self, ReductionResult},
-    replace::VisitOrder,
     term::Term,
+    treewalk::VisitOrder,
     utils::{self},
 };
 

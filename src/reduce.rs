@@ -6,7 +6,7 @@ use crate::{
     debruijn::Debruijn,
     debruijn_inner::{self, FlatRoot},
     graph::{NodeIndex, ReductionGraph},
-    replace::VisitOrder,
+    treewalk::VisitOrder,
     utils::Rng,
 };
 

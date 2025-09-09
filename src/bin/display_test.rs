@@ -3,8 +3,8 @@ use std::{sync::LazyLock, time::Duration};
 use clap::Parser;
 use lambda_beaver::{
     reduce::ReductionResult,
-    replace::VisitOrder,
     term::Term,
+    treewalk::VisitOrder,
     utils::strong_reduction_test::{parse_line, reduce_with_timeout},
 };
 

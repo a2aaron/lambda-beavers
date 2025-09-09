@@ -5,7 +5,7 @@ use std::{
     str::FromStr,
 };
 
-use crate::{debruijn::Debruijn, replace::VisitOrder};
+use crate::{debruijn::Debruijn, treewalk::VisitOrder};
 
 impl VisitOrder {
     pub fn preorder_walk_2<T>(

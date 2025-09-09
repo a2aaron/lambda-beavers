@@ -5,7 +5,7 @@ use lambda_beaver::{debruijn_inner::FlatRoot, print::NodeLabelType};
 
 use lambda_beaver::parse;
 use lambda_beaver::reduce::{ReductionStrategy, ReductionStrategyKind};
-use lambda_beaver::replace::VisitOrder;
+use lambda_beaver::treewalk::VisitOrder;
 use lambda_beaver::{debruijn::Debruijn, graph::ReductionGraph};
 
 pub fn to_graphviz(graph: &ReductionGraph, node_label: NodeLabelType) -> String {

@@ -15,7 +15,7 @@ mod test {
 
     use crate::{
         debruijn_inner::{DebruijnNode, FlatRoot, TermIndex},
-        replace::VisitOrder,
+        treewalk::VisitOrder,
     };
 
     fn idx(a: usize) -> DebruijnNode {

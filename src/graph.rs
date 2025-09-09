@@ -2,7 +2,7 @@ use std::{collections::HashMap, fmt::Display};
 
 use crate::{
     debruijn_inner::{FlatRoot, RedexMut, substitute_arg_into_body_mut},
-    replace::VisitOrder,
+    treewalk::VisitOrder,
 };
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -214,7 +214,7 @@ mod test {
     use crate::{
         debruijn_inner::FlatRoot,
         graph::{NodeIndex, ReductionGraph, ReductionNode},
-        replace::VisitOrder,
+        treewalk::VisitOrder,
     };
 
     impl ReductionGraph {

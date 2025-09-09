@@ -7,7 +7,7 @@ use lambda_beaver::{
     debruijn_inner::{DebruijnNode, FlatRoot, TermIndex, substitute_arg_into_body_mut},
     parse,
     print::{NodeLabelType, PrintableTerm},
-    replace::VisitOrder,
+    treewalk::VisitOrder,
 };
 
 #[derive(Parser, Debug)]
