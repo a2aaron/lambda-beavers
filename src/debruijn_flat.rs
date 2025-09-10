@@ -85,6 +85,13 @@ pub struct FlatRoot {
     pub root: TermIndex,
 }
 impl FlatRoot {
+    fn new() -> FlatRoot {
+        FlatRoot {
+            backing: vec![],
+            root: TermIndex(0),
+        }
+    }
+
     /// Allocate the given term onto the backing vector. If none is passed, then a dummy node is
     /// allocated, which should be modified by the caller. Otherwise, the node is set to the node
     /// in the input `term`.
@@ -92,7 +99,7 @@ impl FlatRoot {
     fn alloc_one(&mut self, term: Option<DebruijnNode>) -> TermIndex {
         // If none, then alloc a dummy node, this should be fixed up afterwards
         let term = term.unwrap_or(DebruijnNode::Index(DebruijnIndex::MAX));
-        let term_index = self.backing.len();
+        let term_index = TermIndex(self.backing.len());
         self.backing.push(term);
         term_index
     }
@@ -142,10 +149,7 @@ impl FlatRoot {
             }
         }
 
-        let mut new_root = FlatRoot {
-            backing: vec![],
-            root: 0,
-        };
+        let mut new_root = FlatRoot::new();
         _clone(self, &mut new_root, self.root);
         new_root
     }
@@ -175,13 +179,22 @@ impl Index<TermIndex> for FlatRoot {
     type Output = DebruijnNode;
 
     fn index(&self, index: TermIndex) -> &Self::Output {
-        &self.backing[index]
+        &self.backing[index.0]
     }
 }
 
 impl IndexMut<TermIndex> for FlatRoot {
     fn index_mut(&mut self, index: TermIndex) -> &mut Self::Output {
-        &mut self.backing[index]
+        &mut self.backing[index.0]
+    }
+}
+
+impl From<Vec<DebruijnNode>> for FlatRoot {
+    fn from(backing: Vec<DebruijnNode>) -> Self {
+        FlatRoot {
+            backing,
+            root: TermIndex(0),
+        }
     }
 }
 
@@ -213,10 +226,7 @@ impl From<&Debruijn> for FlatRoot {
             }
         }
 
-        let mut root = FlatRoot {
-            backing: vec![],
-            root: 0,
-        };
+        let mut root = FlatRoot::new();
         flatten(&mut root, term);
         root
     }
@@ -293,7 +303,14 @@ type DebruijnDepth = usize;
 type DebruijnIndex = usize;
 
 // The index for a given DebruijnNode when inside of a FlatRoot
-pub type TermIndex = usize;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct TermIndex(pub usize);
+
+impl Display for TermIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DebruijnNode {
@@ -641,7 +658,7 @@ fn shift_cutoff_mut(root: &mut FlatRoot, term: TermIndex, up_by: isize, depth: D
             // Recall that an index starts at 1, so if cutoff is set to 1, then this branch will always be taken.
             if term_index >= depth {
                 let new_index = term_index.checked_add_signed(up_by).unwrap();
-                root.backing[term] = DebruijnNode::Index(new_index);
+                root[term] = DebruijnNode::Index(new_index);
             }
         }
         DebruijnNode::Application { func, arg } => {
@@ -674,14 +691,29 @@ mod test {
         FlatRoot::from(&Debruijn::from_str(term).unwrap())
     }
 
+    fn idx(a: usize) -> DebruijnNode {
+        DebruijnNode::Index(a)
+    }
+
+    fn abs(body: usize, usage: usize) -> DebruijnNode {
+        DebruijnNode::Abstraction {
+            body: TermIndex(body),
+            usage,
+        }
+    }
+
+    fn app(func: usize, arg: usize) -> DebruijnNode {
+        DebruijnNode::Application {
+            func: TermIndex(func),
+            arg: TermIndex(arg),
+        }
+    }
+
     #[test]
     fn flattening_trivial_idx() {
         let original = Debruijn::from("0");
         let actual = FlatRoot::from(&original);
-        let expected = FlatRoot {
-            backing: vec![DebruijnNode::Index(0)],
-            root: 0,
-        };
+        let expected = FlatRoot::from(vec![DebruijnNode::Index(0)]);
         assert_eq!(actual, expected)
     }
 
@@ -689,13 +721,7 @@ mod test {
     fn flattening_trivial_abs() {
         let original = Debruijn::from("λ 1");
         let actual = FlatRoot::from(&original);
-        let expected = FlatRoot {
-            backing: vec![
-                DebruijnNode::Abstraction { body: 1, usage: 1 },
-                DebruijnNode::Index(1),
-            ],
-            root: 0,
-        };
+        let expected = FlatRoot::from(vec![abs(1, 1), idx(1)]);
         assert_eq!(actual, expected)
     }
 
@@ -703,14 +729,7 @@ mod test {
     fn flattening_trivial_abs_2() {
         let original = Debruijn::from("λ λ 1");
         let actual = FlatRoot::from(&original);
-        let expected = FlatRoot {
-            backing: vec![
-                DebruijnNode::Abstraction { body: 1, usage: 0 },
-                DebruijnNode::Abstraction { body: 2, usage: 1 },
-                DebruijnNode::Index(1),
-            ],
-            root: 0,
-        };
+        let expected = FlatRoot::from(vec![abs(1, 0), abs(2, 1), idx(1)]);
         assert_eq!(actual, expected)
     }
 
@@ -718,14 +737,7 @@ mod test {
     fn flattening_trivial_app() {
         let original = Debruijn::from("1 2");
         let actual = FlatRoot::from(&original);
-        let expected = FlatRoot {
-            backing: vec![
-                DebruijnNode::Application { func: 1, arg: 2 },
-                DebruijnNode::Index(1),
-                DebruijnNode::Index(2),
-            ],
-            root: 0,
-        };
+        let expected = FlatRoot::from(vec![app(1, 2), idx(1), idx(2)]);
         assert_eq!(actual, expected)
     }
 
@@ -733,18 +745,15 @@ mod test {
     fn flattening_trivial_app_2() {
         let original = Debruijn::from("(1 2) (3 4)");
         let actual = FlatRoot::from(&original);
-        let expected = FlatRoot {
-            backing: vec![
-                DebruijnNode::Application { func: 1, arg: 4 }, // 0
-                DebruijnNode::Application { func: 2, arg: 3 }, // 1
-                DebruijnNode::Index(1),                        // 2
-                DebruijnNode::Index(2),                        // 3
-                DebruijnNode::Application { func: 5, arg: 6 }, // 4
-                DebruijnNode::Index(3),                        // 5
-                DebruijnNode::Index(4),                        // 6
-            ],
-            root: 0,
-        };
+        let expected = FlatRoot::from(vec![
+            app(1, 4), // 0
+            app(2, 3), // 1
+            idx(1),    // 2
+            idx(2),    // 3
+            app(5, 6), // 4
+            idx(3),    // 5
+            idx(4),    // 6
+        ]);
         assert_eq!(actual, expected)
     }
 
@@ -764,7 +773,7 @@ mod test {
     fn usage_zero() {
         let mut root = compile("(λ 2) (λ 50)");
 
-        let redex = RedexMut::try_get(&root, None, 0).unwrap();
+        let redex = RedexMut::try_get(&root, None, TermIndex(0)).unwrap();
         assert_eq!(redex.usage, 0);
 
         substitute_arg_into_body_mut(&mut root, redex);
@@ -780,7 +789,7 @@ mod test {
     fn usage_one() {
         let mut root = compile("(λ 1) (λ 50)");
 
-        let redex = RedexMut::try_get(&mut root, None, 0).unwrap();
+        let redex = RedexMut::try_get(&mut root, None, TermIndex(0)).unwrap();
         assert_eq!(redex.usage, 1);
 
         substitute_arg_into_body_mut(&mut root, redex);
@@ -796,7 +805,7 @@ mod test {
     fn body_is_leaf() {
         let mut root = compile("(λ 1) (1 2 3 4)");
 
-        let redex = RedexMut::try_get(&mut root, None, 0).unwrap();
+        let redex = RedexMut::try_get(&mut root, None, TermIndex(0)).unwrap();
         assert_eq!(redex.usage, 1);
 
         substitute_arg_into_body_mut(&mut root, redex);
@@ -812,7 +821,7 @@ mod test {
     fn body_is_not_leaf() {
         let mut root = compile("(λ λ 2) (1 2 3 4)");
 
-        let redex = RedexMut::try_get(&mut root, None, 0).unwrap();
+        let redex = RedexMut::try_get(&mut root, None, TermIndex(0)).unwrap();
         assert_eq!(redex.usage, 1);
 
         substitute_arg_into_body_mut(&mut root, redex);
@@ -828,7 +837,7 @@ mod test {
     fn usage_many() {
         let mut root = compile("(λ 1 λ 2 λ 3 λ 4) 100");
 
-        let redex = RedexMut::try_get(&mut root, None, 0).unwrap();
+        let redex = RedexMut::try_get(&mut root, None, TermIndex(0)).unwrap();
         assert_eq!(redex.usage, 4);
 
         substitute_arg_into_body_mut(&mut root, redex);

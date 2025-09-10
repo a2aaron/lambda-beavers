@@ -23,11 +23,17 @@ mod test {
     }
 
     fn def(body: usize) -> DebruijnNode {
-        DebruijnNode::Abstraction { body, usage: 0 }
+        DebruijnNode::Abstraction {
+            body: TermIndex(body),
+            usage: 0,
+        }
     }
 
     fn call(func: usize, arg: usize) -> DebruijnNode {
-        DebruijnNode::Application { func, arg }
+        DebruijnNode::Application {
+            func: TermIndex(func),
+            arg: TermIndex(arg),
+        }
     }
 
     type NodeToName = HashMap<TermIndex, String>;
@@ -48,31 +54,28 @@ mod test {
         //    / \    \
         //   C   E    H
         fn new() -> TestData {
-            let root = FlatRoot {
-                backing: vec![
-                    call(1, 6), // 0 | F -> B, G
-                    call(2, 3), // 1 | B -> A, D
-                    idx(0),     // 2 | A
-                    call(4, 5), // 3 | D -> C, E
-                    idx(1),     // 4 | C
-                    idx(2),     // 5 | E
-                    def(7),     // 6 | G -> I
-                    def(8),     // 7 | I -> H
-                    idx(3),     // 8 | H
-                ],
-                root: 0,
-            };
+            let root = FlatRoot::from(vec![
+                call(1, 6), // 0 | F -> B, G
+                call(2, 3), // 1 | B -> A, D
+                idx(0),     // 2 | A
+                call(4, 5), // 3 | D -> C, E
+                idx(1),     // 4 | C
+                idx(2),     // 5 | E
+                def(7),     // 6 | G -> I
+                def(8),     // 7 | I -> H
+                idx(3),     // 8 | H
+            ]);
 
             let nodes = [
-                ("f", 0),
-                ("b", 1),
-                ("a", 2),
-                ("d", 3),
-                ("c", 4),
-                ("e", 5),
-                ("g", 6),
-                ("i", 7),
-                ("h", 8),
+                ("f", TermIndex(0)),
+                ("b", TermIndex(1)),
+                ("a", TermIndex(2)),
+                ("d", TermIndex(3)),
+                ("c", TermIndex(4)),
+                ("e", TermIndex(5)),
+                ("g", TermIndex(6)),
+                ("i", TermIndex(7)),
+                ("h", TermIndex(8)),
             ];
 
             let name_to_node = nodes
