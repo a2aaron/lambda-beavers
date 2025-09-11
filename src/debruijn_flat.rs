@@ -561,6 +561,28 @@ fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
 // Hence, to help with this, the return value of this method is the location of the redex.abs's body,
 // (which is either a newly allocated arg subtree or the existing body)
 fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermIndex {
+    struct Context<'a> {
+        root: &'a mut FlatRoot,
+        redex_arg: TermIndex,
+        usage: usize,
+        substitution_i: usize,
+        match_index: DebruijnIndex,
+        depth: DebruijnDepth,
+    }
+
+    impl<'a> Context<'a> {
+        fn new(root: &'a mut FlatRoot, redex: RedexMut) -> Context<'a> {
+            Context {
+                root,
+                redex_arg: redex.arg,
+                usage: redex.usage,
+                substitution_i: 0,
+                match_index: 1,
+                depth: 0,
+            }
+        }
+    }
+
     // Return values:
     // bool - if true, then this method performed a substitution. If `term` is an abstraction, it's
     // usage may now be stale.
@@ -568,40 +590,34 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
     // term.parent to point to new_arg. This means that the term's parent's old indicies are now pointing
     // to garbage. This is important when returning from an Abstraction call, as compute_usage_flat needs
     // to use the new pointer.
-    fn _substitute_mut(
-        root: &mut FlatRoot,
-        term: TermWithParent,
-        redex_arg: TermIndex,
-        match_index: DebruijnIndex,
-        depth: DebruijnDepth,
-    ) -> (bool, Option<TermIndex>) {
-        match root[term.term] {
+    fn _substitute_mut(term: TermWithParent, ctx: &mut Context) -> (bool, Option<TermIndex>) {
+        match ctx.root[term.term] {
             DebruijnNode::Index(term_index) => {
-                if term_index == match_index {
-                    // TODO: Optimization opportunity: Instead of making `arg` become garbage, instead
-                    // reuse it and avoid doing one alloc.
+                if term_index == ctx.match_index {
+                    // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
                     let last_arg_allocation = false;
 
                     let new_arg = if !last_arg_allocation {
-                        clone_subtree_and_fix_up(root, redex_arg, depth)
+                        clone_subtree_and_fix_up(ctx.root, ctx.redex_arg, ctx.depth)
                     } else {
                         // Bump up free variables by `depth`
                         // Note that normally we would have fixed up the argument by one prior to
                         // calling this method. However, we also fix down the entire body by one after
                         // calling the method. Both of these fixups cancel out, so we still only just
                         // fix up by `depth`
-                        up_by_mut(root, redex_arg, depth);
-                        redex_arg
+                        up_by_mut(ctx.root, ctx.redex_arg, ctx.depth);
+                        ctx.redex_arg
                     };
 
-                    repoint_node(root, term.parent, new_arg);
+                    repoint_node(ctx.root, term.parent, new_arg);
+                    ctx.substitution_i += 1;
                     (true, Some(new_arg))
-                } else if term_index > depth {
+                } else if term_index > ctx.depth {
                     // Variable is a free variable, but is NOT getting substituted.
                     // Remember that the body of the term is getting dropped out of the abstraction
                     // Because of this, we need to reduce the term_index by one, since there's one
                     // less abstraction to jump over for the index.
-                    root[term.term] = DebruijnNode::Index(term_index - 1);
+                    ctx.root[term.term] = DebruijnNode::Index(term_index - 1);
                     (false, None)
                 } else {
                     (false, None)
@@ -609,13 +625,18 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
             }
             DebruijnNode::Abstraction { body, .. } => {
                 let body = TermWithParent::body(term.term, body);
-                let (did_sub_body, new_body) =
-                    _substitute_mut(root, body, redex_arg, match_index + 1, depth + 1);
+
+                ctx.match_index += 1;
+                ctx.depth += 1;
+                let (did_sub_body, new_body) = _substitute_mut(body, ctx);
+                ctx.match_index -= 1;
+                ctx.depth -= 1;
+
                 // Compute usage due to substitution
                 if did_sub_body {
                     let body = new_body.unwrap_or(body.term);
-                    let usage = compute_usage_flat(root, body);
-                    root[term.term] = DebruijnNode::Abstraction { body, usage };
+                    let usage = compute_usage_flat(ctx.root, body);
+                    ctx.root[term.term] = DebruijnNode::Abstraction { body, usage };
                 }
                 (did_sub_body, None)
             }
@@ -623,13 +644,14 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
                 let func = TermWithParent::func(term.term, func);
                 let arg = TermWithParent::arg(term.term, arg);
 
-                let (did_sub_func, _) = _substitute_mut(root, func, redex_arg, match_index, depth);
-                let (did_sub_arg, _) = _substitute_mut(root, arg, redex_arg, match_index, depth);
+                let (did_sub_func, _) = _substitute_mut(func, ctx);
+                let (did_sub_arg, _) = _substitute_mut(arg, ctx);
                 (did_sub_func || did_sub_arg, None)
             }
         }
     }
-    _substitute_mut(root, redex.body, redex.arg, 1, 0);
+    let mut context = Context::new(root, redex);
+    _substitute_mut(redex.body, &mut context);
 
     let DebruijnNode::Abstraction { body, .. } = root[redex.abs] else {
         unreachable!(
