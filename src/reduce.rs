@@ -24,16 +24,16 @@ impl Reducer {
     }
 
     pub fn reduce_one(&mut self) -> Option<ReductionResult> {
-        let result =
-            self.visit_order
-                .preorder_walk_mut_2(&mut self.root, |root, parent, term_i| {
-                    if let Some(redex) = debruijn_flat::RedexMut::try_get(root, parent, term_i) {
-                        debruijn_flat::substitute_arg_into_body_mut(root, redex);
-                        ControlFlow::Break(())
-                    } else {
-                        ControlFlow::Continue(())
-                    }
-                });
+        let result = self
+            .visit_order
+            .preorder_walk_mut_2(&mut self.root, |root, term| {
+                if let Some(redex) = debruijn_flat::RedexMut::try_get(root, term) {
+                    debruijn_flat::substitute_arg_into_body_mut(root, redex);
+                    ControlFlow::Break(())
+                } else {
+                    ControlFlow::Continue(())
+                }
+            });
         match result {
             Some(()) => None,
             // This clone is fine, it occurs at the end of all reductions

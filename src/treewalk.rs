@@ -116,8 +116,8 @@ mod test {
         let expected = test_data.from_string(&expected_pretty);
 
         let mut actual = vec![];
-        visit_order.preorder_walk_2(&test_data.root, |_, _, term| {
-            actual.push(term);
+        visit_order.preorder_walk_2(&test_data.root, |_, term| {
+            actual.push(term.term);
             ControlFlow::Continue::<()>(())
         });
         let actual_pretty = test_data.into_string(&actual);

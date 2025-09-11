@@ -11,71 +11,77 @@ impl VisitOrder {
     pub fn preorder_walk_2<T>(
         &self,
         root: &FlatRoot,
-        mut action: impl FnMut(&FlatRoot, Option<Parent>, TermIndex) -> ControlFlow<T>,
+        mut action: impl FnMut(&FlatRoot, TermWithParent) -> ControlFlow<T>,
     ) -> Option<T> {
         fn _preorder_walk<T>(
             root: &FlatRoot,
-            parent: Option<Parent>,
-            term: TermIndex,
-            action: &mut impl FnMut(&FlatRoot, Option<Parent>, TermIndex) -> ControlFlow<T>,
+            term: TermWithParent,
+            action: &mut impl FnMut(&FlatRoot, TermWithParent) -> ControlFlow<T>,
             reverse: bool,
         ) -> ControlFlow<T> {
-            action(root, parent, term)?;
+            action(root, term)?;
 
+            let term = term.term;
             match root[term] {
                 DebruijnNode::Index(_) => (),
                 DebruijnNode::Abstraction { body, .. } => {
-                    _preorder_walk(root, Some(Parent::Body(term)), body, action, reverse)?
+                    let body = TermWithParent::body(term, body);
+                    _preorder_walk(root, body, action, reverse)?
                 }
                 DebruijnNode::Application { func, arg } => {
+                    let arg = TermWithParent::arg(term, arg);
+                    let func = TermWithParent::func(term, func);
                     if reverse {
-                        _preorder_walk(root, Some(Parent::Arg(term)), arg, action, reverse)?;
-                        _preorder_walk(root, Some(Parent::Func(term)), func, action, reverse)?;
+                        _preorder_walk(root, arg, action, reverse)?;
+                        _preorder_walk(root, func, action, reverse)?;
                     } else {
-                        _preorder_walk(root, Some(Parent::Func(term)), func, action, reverse)?;
-                        _preorder_walk(root, Some(Parent::Arg(term)), arg, action, reverse)?;
+                        _preorder_walk(root, func, action, reverse)?;
+                        _preorder_walk(root, arg, action, reverse)?;
                     }
                 }
             }
             ControlFlow::Continue(())
         }
 
-        _preorder_walk(root, None, root.root, &mut action, self.reverse).break_value()
+        _preorder_walk(root, TermWithParent::root(root), &mut action, self.reverse).break_value()
     }
 
     pub fn preorder_walk_mut_2<T>(
         &self,
         root: &mut FlatRoot,
-        mut action: impl FnMut(&mut FlatRoot, Option<Parent>, TermIndex) -> ControlFlow<T>,
+        mut action: impl FnMut(&mut FlatRoot, TermWithParent) -> ControlFlow<T>,
     ) -> Option<T> {
-        fn _preorder_walk_mut<T>(
+        fn _preorder_walk<T>(
             root: &mut FlatRoot,
-            parent: Option<Parent>,
-            term: TermIndex,
-            action: &mut impl FnMut(&mut FlatRoot, Option<Parent>, TermIndex) -> ControlFlow<T>,
+            term: TermWithParent,
+            action: &mut impl FnMut(&mut FlatRoot, TermWithParent) -> ControlFlow<T>,
             reverse: bool,
         ) -> ControlFlow<T> {
-            action(root, parent, term)?;
+            action(root, term)?;
 
+            let term = term.term;
             match root[term] {
                 DebruijnNode::Index(_) => (),
                 DebruijnNode::Abstraction { body, .. } => {
-                    _preorder_walk_mut(root, Some(Parent::Body(term)), body, action, reverse)?
+                    let body = TermWithParent::body(term, body);
+                    _preorder_walk(root, body, action, reverse)?
                 }
                 DebruijnNode::Application { func, arg } => {
+                    let arg = TermWithParent::arg(term, arg);
+                    let func = TermWithParent::func(term, func);
                     if reverse {
-                        _preorder_walk_mut(root, Some(Parent::Arg(term)), arg, action, reverse)?;
-                        _preorder_walk_mut(root, Some(Parent::Func(term)), func, action, reverse)?;
+                        _preorder_walk(root, arg, action, reverse)?;
+                        _preorder_walk(root, func, action, reverse)?;
                     } else {
-                        _preorder_walk_mut(root, Some(Parent::Func(term)), func, action, reverse)?;
-                        _preorder_walk_mut(root, Some(Parent::Arg(term)), arg, action, reverse)?;
+                        _preorder_walk(root, func, action, reverse)?;
+                        _preorder_walk(root, arg, action, reverse)?;
                     }
                 }
             }
             ControlFlow::Continue(())
         }
 
-        _preorder_walk_mut(root, None, root.root, &mut action, self.reverse).break_value()
+        _preorder_walk(root, TermWithParent::root(root), &mut action, self.reverse).break_value()
     }
 }
 
@@ -105,8 +111,8 @@ impl FlatRoot {
     }
 
     pub fn is_bnf(&self) -> bool {
-        let result = VisitOrder::LEFT_OUTERMOST.preorder_walk_2(self, |root, parent, term_i| {
-            if RedexMut::try_get(root, parent, term_i).is_some() {
+        let result = VisitOrder::LEFT_OUTERMOST.preorder_walk_2(self, |root, term| {
+            if RedexMut::try_get(root, term).is_some() {
                 ControlFlow::Break(false)
             } else {
                 ControlFlow::Continue(())
@@ -117,8 +123,8 @@ impl FlatRoot {
 
     pub fn get_redexes(&self, visit_order: VisitOrder) -> Vec<RedexMut> {
         let mut redexes = vec![];
-        visit_order.preorder_walk_2(self, |root, parent, term_i| {
-            if let Some(redex) = RedexMut::try_get(root, parent, term_i) {
+        visit_order.preorder_walk_2(self, |root, term| {
+            if let Some(redex) = RedexMut::try_get(root, term) {
                 redexes.push(redex);
             }
             ControlFlow::Continue::<()>(())
@@ -312,6 +318,41 @@ impl Display for TermIndex {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct TermWithParent {
+    pub term: TermIndex,
+    parent: Option<Parent>,
+}
+impl TermWithParent {
+    fn body(abs: TermIndex, body: TermIndex) -> TermWithParent {
+        TermWithParent {
+            term: body,
+            parent: Some(Parent::Body(abs)),
+        }
+    }
+
+    fn func(app: TermIndex, func: TermIndex) -> TermWithParent {
+        TermWithParent {
+            term: func,
+            parent: Some(Parent::Func(app)),
+        }
+    }
+
+    fn arg(app: TermIndex, arg: TermIndex) -> TermWithParent {
+        TermWithParent {
+            term: arg,
+            parent: Some(Parent::Arg(app)),
+        }
+    }
+
+    fn root(root: &FlatRoot) -> TermWithParent {
+        TermWithParent {
+            term: root.root,
+            parent: None,
+        }
+    }
+}
+
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DebruijnNode {
     Index(DebruijnIndex),
@@ -366,13 +407,13 @@ pub enum Parent {
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub struct RedexMut {
-    // Term that this redex is a child of. If this is none, then the Redex is actually the root (and therefore is
-    // pointed to by FlatRoot.root)
-    parent: Option<Parent>,
+    // Application term for the redex. If the parent for this is none,
+    // then the Redex is actually the root (and therefore is pointed to by FlatRoot.root)
+    app: TermWithParent,
     // The Abstraction containing the body. This must be an Abstraction
     pub abs: TermIndex,
     // The body of the Abstraction. This must be pointed to by `abs`
-    body: TermIndex,
+    body: TermWithParent,
     // The argument of the Application. This must be pointed to by `app.arg`
     arg: TermIndex,
     // The usage of the `body`. Provided for convinence
@@ -380,16 +421,20 @@ pub struct RedexMut {
 }
 
 impl RedexMut {
-    pub fn try_get(root: &FlatRoot, parent: Option<Parent>, app: TermIndex) -> Option<RedexMut> {
-        match root[app] {
+    pub fn try_get(root: &FlatRoot, app: TermWithParent) -> Option<RedexMut> {
+        match root[app.term] {
             DebruijnNode::Application { func, arg } => match root[func] {
-                DebruijnNode::Abstraction { body, usage } => Some(RedexMut {
-                    parent,
-                    abs: func,
-                    body,
-                    arg,
-                    usage,
-                }),
+                DebruijnNode::Abstraction { body, usage } => {
+                    let body = TermWithParent::body(func, body);
+                    let redex = RedexMut {
+                        app,
+                        abs: func,
+                        body,
+                        arg,
+                        usage,
+                    };
+                    Some(redex)
+                }
                 _ => None,
             },
             _ => None,
@@ -431,10 +476,10 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
 
     if redex.usage == 0 {
         // Fix up the indicies in it to account for the fact that we are still dropping out the abstraction that the body is in.
-        down_one_mut(root, redex.body);
+        down_one_mut(root, redex.body.term);
         // No need to do anything with the argument because it is never used in the body
         // Instead, just point the term to the body.
-        repoint_node(root, redex.parent, redex.body);
+        repoint_node(root, redex.app.parent, redex.body.term);
         // Since the argument is not used, the entire arg subtree is garbage now.
     } else {
         // Otherwise, perform substitution as usual
@@ -521,13 +566,12 @@ fn substitute_and_fix_body_mut(
 ) -> (Option<Parent>, TermIndex) {
     fn _substitute_mut(
         root: &mut FlatRoot,
-        parent: Parent,
-        term: TermIndex,
+        term: TermWithParent,
         redex_arg: TermIndex,
         match_index: DebruijnIndex,
         depth: DebruijnDepth,
     ) -> (bool, Option<TermIndex>) {
-        match root[term] {
+        match root[term.term] {
             DebruijnNode::Index(term_index) => {
                 if term_index == match_index {
                     // TODO: Optimization opportunity: Instead of making `arg` become garbage, instead
@@ -546,52 +590,42 @@ fn substitute_and_fix_body_mut(
                         redex_arg
                     };
 
-                    repoint_node(root, Some(parent), new_arg);
+                    repoint_node(root, term.parent, new_arg);
                     (true, Some(new_arg))
                 } else if term_index > depth {
                     // Variable is a free variable, but is NOT getting substituted.
                     // Remember that the body of the term is getting dropped out of the abstraction
                     // Because of this, we need to reduce the term_index by one, since there's one
                     // less abstraction to jump over for the index.
-                    root[term] = DebruijnNode::Index(term_index - 1);
+                    root[term.term] = DebruijnNode::Index(term_index - 1);
                     (false, None)
                 } else {
                     (false, None)
                 }
             }
             DebruijnNode::Abstraction { body, .. } => {
-                let (did_sub_body, new_body) = _substitute_mut(
-                    root,
-                    Parent::Body(term),
-                    body,
-                    redex_arg,
-                    match_index + 1,
-                    depth + 1,
-                );
+                let body = TermWithParent::body(term.term, body);
+                let (did_sub_body, new_body) =
+                    _substitute_mut(root, body, redex_arg, match_index + 1, depth + 1);
                 // Compute usage due to substitution
                 if did_sub_body {
-                    let body = new_body.unwrap_or(body);
+                    let body = new_body.unwrap_or(body.term);
                     let usage = compute_usage_flat(root, body);
-                    root[term] = DebruijnNode::Abstraction { body, usage };
+                    root[term.term] = DebruijnNode::Abstraction { body, usage };
                 }
                 (did_sub_body, None)
             }
             DebruijnNode::Application { func, arg } => {
-                let (did_sub_func, _) = _substitute_mut(
-                    root,
-                    Parent::Func(term),
-                    func,
-                    redex_arg,
-                    match_index,
-                    depth,
-                );
-                let (did_sub_arg, _) =
-                    _substitute_mut(root, Parent::Arg(term), arg, redex_arg, match_index, depth);
+                let func = TermWithParent::func(term.term, func);
+                let arg = TermWithParent::arg(term.term, arg);
+
+                let (did_sub_func, _) = _substitute_mut(root, func, redex_arg, match_index, depth);
+                let (did_sub_arg, _) = _substitute_mut(root, arg, redex_arg, match_index, depth);
                 (did_sub_func || did_sub_arg, None)
             }
         }
     }
-    _substitute_mut(root, Parent::Body(redex.abs), redex.body, redex.arg, 1, 0);
+    _substitute_mut(root, redex.body, redex.arg, 1, 0);
 
     let DebruijnNode::Abstraction { body, .. } = root[redex.abs] else {
         unreachable!(
@@ -599,7 +633,7 @@ fn substitute_and_fix_body_mut(
             root[redex.abs], redex.abs
         );
     };
-    (redex.parent, body)
+    (redex.app.parent, body)
 }
 
 /// Clone the given subtree and fix up each free variable by up_by. This effectively fuses the
@@ -773,7 +807,7 @@ mod test {
     fn usage_zero() {
         let mut root = compile("(λ 2) (λ 50)");
 
-        let redex = RedexMut::try_get(&root, None, TermIndex(0)).unwrap();
+        let redex = RedexMut::try_get(&root, TermWithParent::root(&root)).unwrap();
         assert_eq!(redex.usage, 0);
 
         substitute_arg_into_body_mut(&mut root, redex);
@@ -789,7 +823,7 @@ mod test {
     fn usage_one() {
         let mut root = compile("(λ 1) (λ 50)");
 
-        let redex = RedexMut::try_get(&mut root, None, TermIndex(0)).unwrap();
+        let redex = RedexMut::try_get(&root, TermWithParent::root(&root)).unwrap();
         assert_eq!(redex.usage, 1);
 
         substitute_arg_into_body_mut(&mut root, redex);
@@ -805,7 +839,7 @@ mod test {
     fn body_is_leaf() {
         let mut root = compile("(λ 1) (1 2 3 4)");
 
-        let redex = RedexMut::try_get(&mut root, None, TermIndex(0)).unwrap();
+        let redex = RedexMut::try_get(&root, TermWithParent::root(&root)).unwrap();
         assert_eq!(redex.usage, 1);
 
         substitute_arg_into_body_mut(&mut root, redex);
@@ -821,7 +855,7 @@ mod test {
     fn body_is_not_leaf() {
         let mut root = compile("(λ λ 2) (1 2 3 4)");
 
-        let redex = RedexMut::try_get(&mut root, None, TermIndex(0)).unwrap();
+        let redex = RedexMut::try_get(&root, TermWithParent::root(&root)).unwrap();
         assert_eq!(redex.usage, 1);
 
         substitute_arg_into_body_mut(&mut root, redex);
@@ -837,7 +871,7 @@ mod test {
     fn usage_many() {
         let mut root = compile("(λ 1 λ 2 λ 3 λ 4) 100");
 
-        let redex = RedexMut::try_get(&mut root, None, TermIndex(0)).unwrap();
+        let redex = RedexMut::try_get(&root, TermWithParent::root(&root)).unwrap();
         assert_eq!(redex.usage, 4);
 
         substitute_arg_into_body_mut(&mut root, redex);
