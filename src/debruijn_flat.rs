@@ -489,10 +489,10 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
         // in addition to performing substitutions.
         // This may end up causing abs's body to get repointed if the redex body consists of a
         // single leaf node that gets substituted.
-        let (parent, new_body) = substitute_and_fix_body_mut(root, redex);
+        let new_body = substitute_and_fix_body_mut(root, redex);
 
         // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
-        repoint_node(root, parent, new_body);
+        repoint_node(root, redex.app.parent, new_body);
     };
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
 }
@@ -560,10 +560,14 @@ fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
 // (so it's parent node is the redex abs), then redex.abs gets repointed and the body is garbage now
 // Hence, to help with this, the return value of this method is the location of the redex.abs's body,
 // (which is either a newly allocated arg subtree or the existing body)
-fn substitute_and_fix_body_mut(
-    root: &mut FlatRoot,
-    redex: RedexMut,
-) -> (Option<Parent>, TermIndex) {
+fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermIndex {
+    // Return values:
+    // bool - if true, then this method performed a substitution. If `term` is an abstraction, it's
+    // usage may now be stale.
+    // Option<TermIndex> - if Some(new_arg), then this method performed an allocation and repointed
+    // term.parent to point to new_arg. This means that the term's parent's old indicies are now pointing
+    // to garbage. This is important when returning from an Abstraction call, as compute_usage_flat needs
+    // to use the new pointer.
     fn _substitute_mut(
         root: &mut FlatRoot,
         term: TermWithParent,
@@ -633,7 +637,7 @@ fn substitute_and_fix_body_mut(
             root[redex.abs], redex.abs
         );
     };
-    (redex.app.parent, body)
+    body
 }
 
 /// Clone the given subtree and fix up each free variable by up_by. This effectively fuses the
