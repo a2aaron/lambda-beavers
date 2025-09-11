@@ -565,7 +565,6 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
         redex_arg: TermIndex,
         usage: usize,
         substitution_i: usize,
-        match_index: DebruijnIndex,
         depth: DebruijnDepth,
     }
 
@@ -575,7 +574,6 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
                 redex_arg: redex.arg,
                 usage: redex.usage,
                 substitution_i: 0,
-                match_index: 1,
                 depth: 0,
             }
         }
@@ -594,8 +592,11 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
         mut ctx: Context,
     ) -> (bool, Option<TermIndex>, Context) {
         match root[term.term] {
-            DebruijnNode::Index(term_index) => {
-                if term_index == ctx.match_index {
+            DebruijnNode::Index(debruijn_index) => {
+                // Note that the depth here is 0-indexed, while debruijn_index is 1-indexed
+                // Hence need to add one to compare properly. (eg: at depth-0, which is to say at
+                // the top body layer, a debruijn index of 1 should get substituted.)
+                if debruijn_index == ctx.depth + 1 {
                     // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
                     let last_arg_allocation = ctx.substitution_i == ctx.usage - 1;
 
@@ -614,12 +615,12 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
                     repoint_node(root, term.parent, new_arg);
                     ctx.substitution_i += 1;
                     (true, Some(new_arg), ctx)
-                } else if term_index > ctx.depth {
+                } else if debruijn_index > ctx.depth {
                     // Variable is a free variable, but is NOT getting substituted.
                     // Remember that the body of the term is getting dropped out of the abstraction
                     // Because of this, we need to reduce the term_index by one, since there's one
                     // less abstraction to jump over for the index.
-                    root[term.term] = DebruijnNode::Index(term_index - 1);
+                    root[term.term] = DebruijnNode::Index(debruijn_index - 1);
                     (false, None, ctx)
                 } else {
                     (false, None, ctx)
@@ -628,10 +629,8 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
             DebruijnNode::Abstraction { body, .. } => {
                 let body = TermWithParent::body(term.term, body);
 
-                ctx.match_index += 1;
                 ctx.depth += 1;
                 let (did_sub_body, new_body, mut ctx) = _substitute_mut(root, body, ctx);
-                ctx.match_index -= 1;
                 ctx.depth -= 1;
 
                 // Compute usage due to substitution
