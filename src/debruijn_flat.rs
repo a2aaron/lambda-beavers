@@ -597,7 +597,7 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
             DebruijnNode::Index(term_index) => {
                 if term_index == ctx.match_index {
                     // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
-                    let last_arg_allocation = false;
+                    let last_arg_allocation = ctx.substitution_i == ctx.usage - 1;
 
                     let new_arg = if !last_arg_allocation {
                         clone_subtree_and_fix_up(root, ctx.redex_arg, ctx.depth)
@@ -652,8 +652,9 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
             }
         }
     }
-    let context = Context::new(redex);
-    _substitute_mut(root, redex.body, context);
+    let ctx = Context::new(redex);
+    let (_, _, ctx) = _substitute_mut(root, redex.body, ctx);
+    assert_eq!(ctx.substitution_i, ctx.usage);
 
     let DebruijnNode::Abstraction { body, .. } = root[redex.abs] else {
         unreachable!(
