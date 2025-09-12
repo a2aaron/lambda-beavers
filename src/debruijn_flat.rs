@@ -541,7 +541,7 @@ fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
     };
 }
 
-// This tries to substitute indicies that point to the implicit lambda that `function_body` is
+// This substitutes indicies that point to the implicit lambda that `function_body` is
 // part of.
 // Consider, for example, where we want to subsitute into λ 0 1 2, sow e have function body = 0 1 2.
 // in this case, 0 would be replaced by `replacer`. Note that we need to track depth, so the index
@@ -562,20 +562,32 @@ fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
 // (which is either a newly allocated arg subtree or the existing body)
 fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermIndex {
     struct Context {
+        // TermIndex for the redex argument.
         redex_arg: TermIndex,
+        // Recomputed usage values. The i-th entry in this vector corresponds to the abstraction at
+        // depth i.
+        running_usages: Vec<usize>,
+        // Usage of redex body
         usage: usize,
+        // Current substitution index. This gets incremented every time a substiution happens
+        // and is used to perform optimizations where we avoid allocating the last substitution
+        // and just reuse the allocation at redex_arg.
         substitution_i: usize,
-        depth: DebruijnDepth,
     }
 
     impl Context {
         fn new(redex: RedexMut) -> Context {
             Context {
                 redex_arg: redex.arg,
+                running_usages: vec![],
                 usage: redex.usage,
                 substitution_i: 0,
-                depth: 0,
             }
+        }
+
+        // Current depth. This is 0-indexed.
+        fn depth(&self) -> usize {
+            self.running_usages.len()
         }
     }
 
@@ -587,73 +599,75 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
     // to garbage. This is important when returning from an Abstraction call, as compute_usage_flat needs
     // to use the new pointer.
     fn _substitute_mut(
+        ctx: &mut Context,
         root: &mut FlatRoot,
         term: TermWithParent,
-        mut ctx: Context,
-    ) -> (bool, Option<TermIndex>, Context) {
+    ) -> (bool, Option<TermIndex>) {
         match root[term.term] {
             DebruijnNode::Index(debruijn_index) => {
                 // Note that the depth here is 0-indexed, while debruijn_index is 1-indexed
                 // Hence need to add one to compare properly. (eg: at depth-0, which is to say at
                 // the top body layer, a debruijn index of 1 should get substituted.)
-                if debruijn_index == ctx.depth + 1 {
+                if debruijn_index == ctx.depth() + 1 {
                     // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
                     let last_arg_allocation = ctx.substitution_i == ctx.usage - 1;
 
                     let new_arg = if !last_arg_allocation {
-                        clone_subtree_and_fix_up(root, ctx.redex_arg, ctx.depth)
+                        clone_subtree_and_fix_up(root, ctx.redex_arg, ctx.depth())
                     } else {
                         // Bump up free variables by `depth`
                         // Note that normally we would have fixed up the argument by one prior to
                         // calling this method. However, we also fix down the entire body by one after
                         // calling the method. Both of these fixups cancel out, so we still only just
                         // fix up by `depth`
-                        up_by_mut(root, ctx.redex_arg, ctx.depth);
+                        up_by_mut(root, ctx.redex_arg, ctx.depth());
                         ctx.redex_arg
                     };
 
                     repoint_node(root, term.parent, new_arg);
                     ctx.substitution_i += 1;
-                    (true, Some(new_arg), ctx)
-                } else if debruijn_index > ctx.depth {
+                    (true, Some(new_arg))
+                } else if debruijn_index > ctx.depth() {
                     // Variable is a free variable, but is NOT getting substituted.
                     // Remember that the body of the term is getting dropped out of the abstraction
                     // Because of this, we need to reduce the term_index by one, since there's one
                     // less abstraction to jump over for the index.
                     root[term.term] = DebruijnNode::Index(debruijn_index - 1);
-                    (false, None, ctx)
+                    (false, None)
                 } else {
-                    (false, None, ctx)
+                    (false, None)
                 }
             }
-            DebruijnNode::Abstraction { body, .. } => {
+            DebruijnNode::Abstraction { body, usage } => {
                 let body = TermWithParent::body(term.term, body);
 
-                ctx.depth += 1;
-                let (did_sub_body, new_body, mut ctx) = _substitute_mut(root, body, ctx);
-                ctx.depth -= 1;
+                ctx.running_usages.push(0);
+                let (did_sub_body, new_body) = _substitute_mut(ctx, root, body);
+                let _usage = ctx.running_usages.pop().unwrap();
 
                 // Compute usage due to substitution
                 if did_sub_body {
                     let body = new_body.unwrap_or(body.term);
-                    let usage = compute_usage_flat(root, body);
                     root[term.term] = DebruijnNode::Abstraction { body, usage };
                 }
-                (did_sub_body, None, ctx)
+                (did_sub_body, None)
             }
             DebruijnNode::Application { func, arg } => {
                 let func = TermWithParent::func(term.term, func);
                 let arg = TermWithParent::arg(term.term, arg);
 
-                let (did_sub_func, _, ctx) = _substitute_mut(root, func, ctx);
-                let (did_sub_arg, _, ctx) = _substitute_mut(root, arg, ctx);
-                (did_sub_func || did_sub_arg, None, ctx)
+                let (did_sub_func, _) = _substitute_mut(ctx, root, func);
+                let (did_sub_arg, _) = _substitute_mut(ctx, root, arg);
+                (did_sub_func || did_sub_arg, None)
             }
         }
     }
-    let ctx = Context::new(redex);
-    let (_, _, ctx) = _substitute_mut(root, redex.body, ctx);
-    assert_eq!(ctx.substitution_i, ctx.usage);
+    let mut ctx = Context::new(redex);
+    _substitute_mut(&mut ctx, root, redex.body);
+    assert_eq!(
+        ctx.substitution_i, ctx.usage,
+        "Expected substitution count to equal usage!"
+    );
 
     let DebruijnNode::Abstraction { body, .. } = root[redex.abs] else {
         unreachable!(
@@ -747,7 +761,7 @@ mod test {
     }
 
     mario!();
-    use crate::debruijn::Debruijn;
+    use crate::debruijn::{self, Debruijn};
 
     fn compile(term: &str) -> FlatRoot {
         FlatRoot::from(&Debruijn::from_str(term).unwrap())
