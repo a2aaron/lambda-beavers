@@ -115,3 +115,36 @@ impl From<ReductionStrategyKind> for ReductionStrategy {
         }
     }
 }
+
+#[cfg(test)]
+mod test {
+    use std::str::FromStr;
+
+    use crate::{debruijn::Debruijn, reduce::Reducer, treewalk::VisitOrder};
+
+    fn assert_usage(reducer: &Reducer) {
+        if let Err((failing_term, actual, expected)) = reducer.root.check_usage() {
+            panic!(
+                "Expected usage to be {expected} but got {actual} for node {failing_term} in {:#?}",
+                reducer.root
+            );
+        }
+    }
+
+    #[test]
+    fn parent_usage() {
+        let root =
+            Debruijn::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
+        let mut reducer = Reducer::new(&root, VisitOrder::LEFT_OUTERMOST);
+        println!("init: {:#?}", reducer.root);
+
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+    }
+}

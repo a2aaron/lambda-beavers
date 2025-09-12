@@ -159,6 +159,30 @@ impl FlatRoot {
         _clone(self, &mut new_root, self.root);
         new_root
     }
+
+    pub fn check_usage(&self) -> Result<(), (TermIndex, usize, usize)> {
+        fn _check_usage(root: &FlatRoot, term: TermIndex) -> Result<(), (TermIndex, usize, usize)> {
+            match root[term] {
+                DebruijnNode::Abstraction { body, usage } => {
+                    _check_usage(root, body)?;
+                    let actual = compute_usage_flat(root, body);
+                    let expected = usage;
+                    if actual != expected {
+                        Err((term, actual, expected))
+                    } else {
+                        Ok(())
+                    }
+                }
+                DebruijnNode::Index(_) => Ok(()),
+                DebruijnNode::Application { func, arg } => {
+                    _check_usage(root, func)?;
+                    _check_usage(root, arg)?;
+                    Ok(())
+                }
+            }
+        }
+        _check_usage(&self, self.root)
+    }
 }
 
 impl FromStr for FlatRoot {
