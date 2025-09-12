@@ -474,6 +474,50 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
     // Note that we can actually avoid arg from becoming garbage if we re-use it's allocation (assuming
     // it is ever actually used in body). However this is not implemented at time of writing
 
+    // Some notes on how usage changes
+    // First, defining usage: Usage is a property of abstractions. A given abstraction binds a particular
+    // variable to itself, which I will call the bound variable.
+    // The usage of an abstraction is the number of times the bound variable appears in the body of
+    // the abstraction. The usage is a natural number and can be zero.
+    // As an example, in λa.λb.b, there are two abstractions. The first one binds a (λa) and the second
+    // one binds b (λb). For the first one, it's usage is zero because a does not appear in the body
+    // of λa. For the second one, it's usage is one because b appears once in the body.
+    //
+    // We can also talk about the usage of an abstraction in a given subterm.
+    // Consider this: λa.(λb.a b) (λc.a a).
+    // The usage of a in λb is one, while the usage of a in λc is two.
+    // In addition, the usage of b in λc and the usage of c in λb are both zero.
+    // (We might say that, in the first paragraph, we were talking about "the usage of a in λa"
+    // or "the usage of b in λb")
+
+    // There are two things we care about that may change during substitution:
+    // - child abstractions in body (incl body itself)
+    // - parent abstractions in parent (incl parent itself)
+    // Notably, the usages for body and it's children do not change because we are substituting arg
+    // into body. arg cannot possibly capture
+    // aany variables in the body subtree, since arg isn't in said subtree. Therefore, none of the
+    // body usages change.
+    // The parent-chain can have it's usage change, but fortunately this is easy to compute.
+    // Suppose we have parent abstraction λx
+    // Let's say that the usage of args in the body is A
+    // and the usage of x in the args is B
+    // then, when redex evaluation is done, args will be substituted into the body A times
+    // Each time it is, we will get another copy of args containing B uses of x
+    // This results in A * B usages getting added
+    // Then, when we drop out the original args subtree, we lose B uses of x
+    // This results in a total change of A * B - B = (A - 1) * B uses of x.
+    //
+    // This explains the behavior of
+    // few different cases such as:
+    // 1. If the usage of args in the body is 0, then the usage of x will decrease by B
+    //    because (0 - 1) * B = -B
+    // 2. If the usage of args in the body is 1, then the usage of x remains constant
+    //    because (1 - 1) * B = 0 * B = 0
+    // 3. If the usage of x in args is 0, then the usage of x remains constant
+    //    because (A - 1) * 0 = 0
+    // (Moreover, if the (total) usage of x is 0, then after evaluation, the usage of x remains
+    // zero.)
+
     if redex.usage == 0 {
         // Fix up the indicies in it to account for the fact that we are still dropping out the abstraction that the body is in.
         down_one_mut(root, redex.body.term);
