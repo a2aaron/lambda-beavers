@@ -236,6 +236,26 @@ impl FlatRoot {
         output.push(format!("}}"));
         output.join("\n")
     }
+
+    fn get_abs(&self, term: TermIndex) -> Abstraction {
+        match self[term] {
+            DebruijnNode::Abstraction { body, usage } => Abstraction { body, usage },
+            _ => panic!(
+                "Expected abstraction for term @ {term}, got {:?}",
+                self[term]
+            ),
+        }
+    }
+
+    fn get_app(&self, term: TermIndex) -> Application {
+        match self[term] {
+            DebruijnNode::Application { func, arg } => Application { func, arg },
+            _ => panic!(
+                "Expected abstraction for term @ {term}, got {:?}",
+                self[term]
+            ),
+        }
+    }
 }
 
 impl FromStr for FlatRoot {
@@ -437,6 +457,20 @@ impl TermWithParent {
             parent: None,
         }
     }
+}
+
+struct Abstraction {
+    body: TermIndex,
+    /// Number of times the input argument is used in the body
+    /// If this is zero, then when doing argument substitution, the algorithm can just
+    /// return the body and throw away the argument!
+    /// This value is constant over the lifetime of the Abstraction (this will become not true if
+    /// we do "partial" substition where not all usages of the input argument are substituted)
+    usage: Usage,
+}
+struct Application {
+    func: TermIndex,
+    arg: TermIndex,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -668,13 +702,11 @@ fn update_parent_chain_usage(
 
     let usage_by_depth = get_usage_by_depth(root, arg, parent_chain);
     for (depth, parent_term) in parent_chain.iter().enumerate() {
-        let DebruijnNode::Abstraction { body, usage } = root[*parent_term] else {
-            unreachable!()
-        };
+        let Abstraction { body, usage } = root.get_abs(*parent_term);
+
         let usage_of_parent_in_args = usage_by_depth[depth];
         let usage_delta: isize = (body_usage as isize - 1) * usage_of_parent_in_args as isize;
         let usage = usage.checked_add_signed(usage_delta).unwrap();
-        // let usage = compute_usage_flat(root, body);
         root[*parent_term] = DebruijnNode::Abstraction { body, usage }
     }
 }
@@ -754,30 +786,15 @@ fn get_usage_by_depth(root: &FlatRoot, arg: TermIndex, parent_chain: &[TermIndex
 fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
     match parent {
         Some(Parent::Body(parent)) => {
-            let DebruijnNode::Abstraction { usage, .. } = root[parent] else {
-                unreachable!(
-                    "Expected abstraction, got {:?} at {} in {:#?}",
-                    root[parent], parent, root
-                )
-            };
+            let Abstraction { usage, .. } = root.get_abs(parent);
             root[parent] = DebruijnNode::Abstraction { body: child, usage }
         }
         Some(Parent::Func(parent)) => {
-            let DebruijnNode::Application { arg, .. } = root[parent] else {
-                unreachable!(
-                    "Expected application, got {:?} at {} in {:#?}",
-                    root[parent], parent, root
-                )
-            };
+            let Application { arg, .. } = root.get_app(parent);
             root[parent] = DebruijnNode::Application { func: child, arg };
         }
         Some(Parent::Arg(parent)) => {
-            let DebruijnNode::Application { func, .. } = root[parent] else {
-                unreachable!(
-                    "Expected application, got {:?} at {} in {:#?}",
-                    root[parent], parent, root
-                )
-            };
+            let Application { func, .. } = root.get_app(parent);
             root[parent] = DebruijnNode::Application { func, arg: child }
         }
         // Root
@@ -916,12 +933,7 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: &RedexMut) -> TermInd
         "Expected substitution count to equal usage!"
     );
 
-    let DebruijnNode::Abstraction { body, .. } = root[redex.abs] else {
-        unreachable!(
-            "expected abstraction, got {:?} at {} in {root:#?}",
-            root[redex.abs], redex.abs
-        );
-    };
+    let Abstraction { body, .. } = root.get_abs(redex.abs);
     body
 }
 
