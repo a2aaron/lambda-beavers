@@ -657,7 +657,7 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
         }
 
         // Current depth. This is 0-indexed.
-        fn depth(&self) -> usize {
+        fn depth(&self) -> DebruijnDepth {
             self.running_usages.len()
         }
     }
@@ -752,11 +752,15 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
 /// Clone the given subtree and fix up each free variable by up_by. This effectively fuses the
 /// up_by and clone steps together for substitute_mut, eliminating a second tree walk.
 /// The returned value points to the newly allocated subtree.
-fn clone_subtree_and_fix_up(root: &mut FlatRoot, term: TermIndex, up_by: usize) -> TermIndex {
+fn clone_subtree_and_fix_up(
+    root: &mut FlatRoot,
+    term: TermIndex,
+    up_by: DebruijnDepth,
+) -> TermIndex {
     fn _clone_subtree_and_fix_up(
         root: &mut FlatRoot,
         term: TermIndex,
-        up_by: usize,
+        up_by: DebruijnDepth,
         depth: DebruijnDepth,
     ) -> TermIndex {
         match root[term] {
@@ -784,7 +788,7 @@ fn clone_subtree_and_fix_up(root: &mut FlatRoot, term: TermIndex, up_by: usize) 
     _clone_subtree_and_fix_up(root, term, up_by, 1)
 }
 
-fn up_by_mut(root: &mut FlatRoot, term: TermIndex, up_by: usize) {
+fn up_by_mut(root: &mut FlatRoot, term: TermIndex, up_by: DebruijnDepth) {
     shift_cutoff_mut(root, term, up_by as isize, 1)
 }
 
@@ -832,13 +836,13 @@ mod test {
     }
 
     mario!();
-    use crate::debruijn::{self, Debruijn};
+    use crate::debruijn::Debruijn;
 
     fn compile(term: &str) -> FlatRoot {
         FlatRoot::from(&Debruijn::from_str(term).unwrap())
     }
 
-    fn idx(a: usize) -> DebruijnNode {
+    fn idx(a: DebruijnIndex) -> DebruijnNode {
         DebruijnNode::Index(a)
     }
 
