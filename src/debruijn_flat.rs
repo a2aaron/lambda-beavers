@@ -345,6 +345,12 @@ impl Display for TermIndex {
     }
 }
 
+impl From<usize> for TermIndex {
+    fn from(value: usize) -> Self {
+        TermIndex(value)
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct TermWithParent {
     pub term: TermIndex,
@@ -846,17 +852,17 @@ mod test {
         DebruijnNode::Index(a)
     }
 
-    fn abs(body: usize, usage: Usage) -> DebruijnNode {
+    fn abs(body: impl Into<TermIndex>, usage: Usage) -> DebruijnNode {
         DebruijnNode::Abstraction {
-            body: TermIndex(body),
+            body: body.into(),
             usage,
         }
     }
 
-    fn app(func: usize, arg: usize) -> DebruijnNode {
+    fn app(func: impl Into<TermIndex>, arg: impl Into<TermIndex>) -> DebruijnNode {
         DebruijnNode::Application {
-            func: TermIndex(func),
-            arg: TermIndex(arg),
+            func: func.into(),
+            arg: arg.into(),
         }
     }
 
