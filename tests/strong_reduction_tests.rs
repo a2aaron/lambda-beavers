@@ -74,6 +74,8 @@ fn assert_usage(test: &str, test_i: usize) {
     }
 }
 
+// note: this is used by the strong-only tests.
+#[allow(dead_code)]
 fn assert_test(test: &str, test_i: usize) {
     let visit_order = VisitOrder::LEFT_OUTERMOST;
     let timeout = None; // Some(Duration::from_secs(5));
