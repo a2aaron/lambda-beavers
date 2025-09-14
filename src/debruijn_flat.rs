@@ -160,8 +160,8 @@ impl FlatRoot {
         new_root
     }
 
-    pub fn check_usage(&self) -> Result<(), (TermIndex, usize, usize)> {
-        fn _check_usage(root: &FlatRoot, term: TermIndex) -> Result<(), (TermIndex, usize, usize)> {
+    pub fn check_usage(&self) -> Result<(), (TermIndex, Usage, Usage)> {
+        fn _check_usage(root: &FlatRoot, term: TermIndex) -> Result<(), (TermIndex, Usage, Usage)> {
             match root[term] {
                 DebruijnNode::Abstraction { body, usage } => {
                     _check_usage(root, body)?;
@@ -286,8 +286,8 @@ impl From<&FlatRoot> for Debruijn {
 /// `body` must be the body of the abstraction!
 /// ter the body of an abstraction
 /// eg: in λ 1 λ 2 λ 3, we have that 1, 2, and 3 all refer to the same variable, so the usage is 3
-fn compute_usage(body: &Debruijn) -> usize {
-    fn _compute_usage(term: &Debruijn, depth: DebruijnDepth) -> usize {
+fn compute_usage(body: &Debruijn) -> Usage {
+    fn _compute_usage(term: &Debruijn, depth: DebruijnDepth) -> Usage {
         match term {
             Debruijn::Index(index) => (*index == depth) as usize,
             Debruijn::Application { func, arg } => {
@@ -307,8 +307,8 @@ fn compute_usage(body: &Debruijn) -> usize {
 /// `body` must be the body of the abstraction!
 /// ter the body of an abstraction
 /// eg: in λ 1 λ 2 λ 3, we have that 1, 2, and 3 all refer to the same variable, so the usage is 3
-fn compute_usage_flat(root: &FlatRoot, body: TermIndex) -> usize {
-    fn _compute_usage(root: &FlatRoot, term_i: TermIndex, depth: DebruijnDepth) -> usize {
+fn compute_usage_flat(root: &FlatRoot, body: TermIndex) -> Usage {
+    fn _compute_usage(root: &FlatRoot, term_i: TermIndex, depth: DebruijnDepth) -> Usage {
         match root[term_i] {
             DebruijnNode::Index(index) => (index == depth) as usize,
             DebruijnNode::Application { func, arg } => {
@@ -331,6 +331,9 @@ type DebruijnDepth = usize;
 // The index for the DebruijnNode::Index variant. This is an index for the actual lambda term and works
 // just like how Debruijn::Index works.
 type DebruijnIndex = usize;
+
+// The number of times a variable is used in an abstraction.
+type Usage = usize;
 
 // The index for a given DebruijnNode when inside of a FlatRoot
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
@@ -387,7 +390,7 @@ pub enum DebruijnNode {
         /// return the body and throw away the argument!
         /// This value is constant over the lifetime of the Abstraction (this will become not true if
         /// we do "partial" substition where not all usages of the input argument are substituted)
-        usage: usize,
+        usage: Usage,
     },
     Application {
         func: TermIndex,
@@ -441,7 +444,7 @@ pub struct RedexMut {
     // The argument of the Application. This must be pointed to by `app.arg`
     arg: TermIndex,
     // The usage of the `body`. Provided for convinence
-    usage: usize,
+    usage: Usage,
 }
 
 impl RedexMut {
@@ -634,9 +637,9 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
         redex_arg: TermIndex,
         // Recomputed usage values. The i-th entry in this vector corresponds to the abstraction at
         // depth i.
-        running_usages: Vec<usize>,
+        running_usages: Vec<Usage>,
         // Usage of redex body
-        usage: usize,
+        usage: Usage,
         // Current substitution index. This gets incremented every time a substiution happens
         // and is used to perform optimizations where we avoid allocating the last substitution
         // and just reuse the allocation at redex_arg.
@@ -839,7 +842,7 @@ mod test {
         DebruijnNode::Index(a)
     }
 
-    fn abs(body: usize, usage: usize) -> DebruijnNode {
+    fn abs(body: usize, usage: Usage) -> DebruijnNode {
         DebruijnNode::Abstraction {
             body: TermIndex(body),
             usage,
