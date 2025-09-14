@@ -137,8 +137,6 @@ mod test {
     fn parent_usage_simplest() {
         let root = Debruijn::from_str("λ (λ 1 1) (1 1)").unwrap();
         let mut reducer = Reducer::new(&root, VisitOrder::LEFT_OUTERMOST);
-        println!("init: {:#?}", reducer.root);
-
         reducer.reduce_one();
         assert_usage(&reducer);
         reducer.reduce_one();
@@ -147,8 +145,6 @@ mod test {
         assert_usage(&reducer);
         reducer.reduce_one();
         assert_usage(&reducer);
-
-        println!("end: {:#?}", reducer.root);
     }
 
     #[test]
@@ -156,7 +152,6 @@ mod test {
         let root =
             Debruijn::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
         let mut reducer = Reducer::new(&root, VisitOrder::LEFT_OUTERMOST);
-        println!("init: {:#?}", reducer.root);
 
         reducer.reduce_one();
         assert_usage(&reducer);

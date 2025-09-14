@@ -4,7 +4,7 @@
 use lambda_beaver::{
     debruijn::Debruijn,
     debruijn_flat::FlatRoot,
-    reduce::ReductionResult,
+    reduce::{Reducer, ReductionResult},
     term::Classic,
     treewalk::VisitOrder,
     utils::strong_reduction_test::{parse_line, reduce_with_timeout},
@@ -25,15 +25,15 @@ macro_rules! make_test {
 }
 
 macro_rules! make_test_batch {
-    ($from:literal, $to:literal) => {
+    ($from:literal, $to:literal, $invoke:ident) => {
         #[test]
-        fn ${concat(srt_rounttrip_, $from, _to_, $to)}() {
+        fn ${concat(srt_, $invoke, _, $from, _to_, $to)}() {
             let from: usize = $from.parse().unwrap();
             let to: usize = $to.parse().unwrap();
             let mut tests = TESTS.split('\n').skip(from).take(1 + to - from);
             for _ in from..=to {
                 let test = tests.next().unwrap();
-                assert_round_trip(test);
+                $invoke(test);
             }
         }
     }
@@ -48,6 +48,32 @@ fn assert_round_trip(test: &str) {
         starting, roundtripped,
         "Expected {starting}, got {roundtripped}",
     );
+}
+
+fn assert_usage(test: &str) {
+    fn _assert_usage(reducer: &Reducer) {
+        if let Err((failing_term, actual, expected)) = reducer.root.check_usage() {
+            panic!(
+                "Expected usage to be {expected} but got {actual} for node {failing_term} in {}",
+                reducer.root.to_graph()
+            );
+        }
+    }
+    let (starting, expected) = parse_line(test);
+
+    let mut reducer = Reducer::new(&starting, VisitOrder::LEFT_OUTERMOST);
+    loop {
+        let result = reducer.reduce_one();
+        _assert_usage(&reducer);
+        match result {
+            Some(ReductionResult::NormalForm(actual)) => {
+                assert_eq!(actual, expected);
+                break;
+            }
+            None => (),
+            _ => unreachable!(),
+        }
+    }
 }
 
 fn assert_test(test: &str, test_i: usize) {
@@ -82,7 +108,8 @@ fn assert_test(test: &str, test_i: usize) {
     }
 }
 
-make_test_batch!("0", "3465");
+make_test_batch!("0", "3465", assert_round_trip);
+make_test_batch!("0", "100", assert_usage);
 
 make_test!("0");
 make_test!("1");
