@@ -450,7 +450,7 @@ pub struct RedexMut {
     // The argument of the Application. This must be pointed to by `app.arg`
     arg: TermIndex,
     // The usage of the `body`. Provided for convinence
-    usage: Usage,
+    body_usage: Usage,
 }
 
 impl RedexMut {
@@ -464,7 +464,7 @@ impl RedexMut {
                         abs: func,
                         body,
                         arg,
-                        usage,
+                        body_usage: usage,
                     };
                     Some(redex)
                 }
@@ -551,7 +551,7 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
     // (Moreover, if the (total) usage of x is 0, then after evaluation, the usage of x remains
     // zero.)
 
-    if redex.usage == 0 {
+    if redex.body_usage == 0 {
         // Fix up the indicies in it to account for the fact that we are still dropping out the abstraction that the body is in.
         down_one_mut(root, redex.body.term);
         // No need to do anything with the argument because it is never used in the body
@@ -657,7 +657,7 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
             Context {
                 redex_arg: redex.arg,
                 running_usages: vec![],
-                usage: redex.usage,
+                usage: redex.body_usage,
                 substitution_i: 0,
             }
         }
@@ -931,7 +931,7 @@ mod test {
         let mut root = compile("(λ 2) (λ 50)");
 
         let redex = RedexMut::try_get(&root, TermWithParent::root(&root)).unwrap();
-        assert_eq!(redex.usage, 0);
+        assert_eq!(redex.body_usage, 0);
 
         substitute_arg_into_body_mut(&mut root, redex);
 
@@ -947,7 +947,7 @@ mod test {
         let mut root = compile("(λ 1) (λ 50)");
 
         let redex = RedexMut::try_get(&root, TermWithParent::root(&root)).unwrap();
-        assert_eq!(redex.usage, 1);
+        assert_eq!(redex.body_usage, 1);
 
         substitute_arg_into_body_mut(&mut root, redex);
 
@@ -963,7 +963,7 @@ mod test {
         let mut root = compile("(λ 1) (1 2 3 4)");
 
         let redex = RedexMut::try_get(&root, TermWithParent::root(&root)).unwrap();
-        assert_eq!(redex.usage, 1);
+        assert_eq!(redex.body_usage, 1);
 
         substitute_arg_into_body_mut(&mut root, redex);
 
@@ -979,7 +979,7 @@ mod test {
         let mut root = compile("(λ λ 2) (1 2 3 4)");
 
         let redex = RedexMut::try_get(&root, TermWithParent::root(&root)).unwrap();
-        assert_eq!(redex.usage, 1);
+        assert_eq!(redex.body_usage, 1);
 
         substitute_arg_into_body_mut(&mut root, redex);
 
@@ -995,7 +995,7 @@ mod test {
         let mut root = compile("(λ 1 λ 2 λ 3 λ 4) 100");
 
         let redex = RedexMut::try_get(&root, TermWithParent::root(&root)).unwrap();
-        assert_eq!(redex.usage, 4);
+        assert_eq!(redex.body_usage, 4);
 
         substitute_arg_into_body_mut(&mut root, redex);
 
