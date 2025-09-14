@@ -15,25 +15,23 @@ impl VisitOrder {
     ) -> Option<T> {
         fn _preorder_walk<T>(
             root: &FlatRoot,
-            term_with_parent: TermWithParent,
+            term: TermWithParent,
             parent_chain: &mut ParentChain,
             action: &mut impl FnMut(&FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>,
             reverse: bool,
         ) -> ControlFlow<T> {
-            let term = term_with_parent.term;
-            match root[term] {
-                DebruijnNode::Index(_) => action(root, term_with_parent, &parent_chain)?,
-                DebruijnNode::Abstraction { body, .. } => {
-                    // TODO: Is it correct to push to parent chain first?
-                    parent_chain.push(term);
-                    action(root, term_with_parent, &parent_chain)?;
+            action(root, term, &parent_chain)?;
 
+            let term = term.term;
+            match root[term] {
+                DebruijnNode::Index(_) => (),
+                DebruijnNode::Abstraction { body, .. } => {
                     let body = TermWithParent::body(term, body);
+                    parent_chain.push(term);
                     _preorder_walk(root, body, parent_chain, action, reverse)?;
                     parent_chain.pop();
                 }
                 DebruijnNode::Application { func, arg } => {
-                    action(root, term_with_parent, &parent_chain)?;
                     let arg = TermWithParent::arg(term, arg);
                     let func = TermWithParent::func(term, func);
                     if reverse {
