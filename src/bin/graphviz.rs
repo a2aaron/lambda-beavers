@@ -45,7 +45,7 @@ pub fn reduce_with_stats(
         match node_to_reduce {
             Some(node_to_reduce) => {
                 // TODO: select this via strategy
-                let redex = graph.get(node_to_reduce).unwrap().unevaluated_redexes[0];
+                let redex = graph.get(node_to_reduce).unwrap().unevaluated_redexes[0].clone();
                 let graph_update = graph.reduce_node(node_to_reduce, redex);
                 if graph_update.is_bnf {
                     bnf_found_at = Some(i);

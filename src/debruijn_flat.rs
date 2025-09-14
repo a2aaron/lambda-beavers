@@ -438,7 +438,7 @@ pub enum Parent {
     Arg(TermIndex),
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+#[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RedexMut {
     // Application term for the redex. If the parent for this is none,
     // then the Redex is actually the root (and therefore is pointed to by FlatRoot.root)
@@ -561,6 +561,8 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
     } else {
         // Otherwise, perform substitution as usual
 
+        let parent = redex.app.parent;
+
         // Perform the actual substition on body.
         // This method actually fuses the fixing down/up that needs to happen for the whole body
         // in addition to performing substitutions.
@@ -569,7 +571,7 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
         let new_body = substitute_and_fix_body_mut(root, redex);
 
         // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
-        repoint_node(root, redex.app.parent, new_body);
+        repoint_node(root, parent, new_body);
     };
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
 }
@@ -653,7 +655,7 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
     }
 
     impl Context {
-        fn new(redex: RedexMut) -> Context {
+        fn new(redex: &RedexMut) -> Context {
             Context {
                 redex_arg: redex.arg,
                 running_usages: vec![],
@@ -739,7 +741,7 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermInde
             }
         }
     }
-    let mut ctx = Context::new(redex);
+    let mut ctx = Context::new(&redex);
     _substitute_mut(&mut ctx, root, redex.body);
     assert_eq!(
         ctx.substitution_i, ctx.usage,
