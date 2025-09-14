@@ -15,28 +15,16 @@ const TESTS: &str = include_str!("tests.txt");
 macro_rules! make_test {
     ($nth:literal) => {
         #[test]
+        #[cfg(feature = "strong-only")]
         fn ${concat(strong_reduction_test_, $nth)}() {
             let n: usize = $nth.parse().unwrap();
             let test = TESTS.split('\n').nth(n).unwrap();
             assert_test(test, n);
         }
     };
-
-    ($from:literal, $to:literal) => {
-        #[test]
-        fn ${concat(strong_reduction_test_, $from, _to_, $to)}() {
-            let from: usize = $from.parse().unwrap();
-            let to: usize = $to.parse().unwrap();
-            let mut tests = TESTS.split('\n').skip(from).take(1 + to - from);
-            for i in from..=to {
-                let test = tests.next().unwrap();
-                assert_test(test, i);
-            }
-        }
-    }
 }
 
-macro_rules! make_test_others {
+macro_rules! make_test_batch {
     ($from:literal, $to:literal) => {
         #[test]
         fn ${concat(srt_rounttrip_, $from, _to_, $to)}() {
@@ -94,7 +82,7 @@ fn assert_test(test: &str, test_i: usize) {
     }
 }
 
-make_test_others!("0", "3465");
+make_test_batch!("0", "3465");
 
 make_test!("0");
 make_test!("1");

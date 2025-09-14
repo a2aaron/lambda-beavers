@@ -20,4 +20,4 @@ slow-timeout = { period = "1s", terminate-after = 5 }
 fail-fast = false
 default-filter = 'test(strong_reduction_test_)'
 final-status-level = 'slow' 
-
+features = ["strong-only"]

@@ -3,6 +3,9 @@ name = "lambda-beaver"
 version = "0.1.0"
 edition = "2024"
 
+[features]
+strong-only = []
+
 [dependencies]
 # TODO: this should probably turn into a binary-only dependency
 clap = { version = "4.5.43", features = ["derive"] }
