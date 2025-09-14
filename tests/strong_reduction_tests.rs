@@ -33,7 +33,11 @@ macro_rules! make_test {
                 assert_test(test, i);
             }
         }
+    }
+}
 
+macro_rules! make_test_others {
+    ($from:literal, $to:literal) => {
         #[test]
         fn ${concat(srt_rounttrip_, $from, _to_, $to)}() {
             let from: usize = $from.parse().unwrap();
@@ -90,7 +94,7 @@ fn assert_test(test: &str, test_i: usize) {
     }
 }
 
-make_test!("0", "3465");
+make_test_others!("0", "3465");
 
 make_test!("0");
 make_test!("1");
