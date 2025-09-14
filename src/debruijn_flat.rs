@@ -626,6 +626,9 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
     // (Moreover, if the (total) usage of x is 0, then after evaluation, the usage of x remains
     // zero.)
 
+    // Update parent usages.
+    update_parent_chain_usage(root, &redex.parent_chain, redex.body_usage, redex.arg);
+
     if redex.body_usage == 0 {
         // Fix up the indicies in it to account for the fact that we are still dropping out the abstraction that the body is in.
         down_one_mut(root, redex.body.term);
@@ -650,26 +653,30 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
         repoint_node(root, parent, new_body);
     };
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
-
-    // Update parent usages.
-    update_parent_chain_usage(root, &redex.parent_chain, redex.body_usage, redex.arg);
 }
 
 fn update_parent_chain_usage(
     root: &mut FlatRoot,
     parent_chain: &[TermIndex],
-    // Number of times
+    // Number of times body is used
     body_usage: Usage,
     arg: TermIndex,
 ) {
-    // let usage_by_depth = get_usage_by_depth(root, arg, parent_chain);
+    // If there are no parents to update (which happens if the redex is the root)
+    // or otherwise has no abstractions in it's parent path, then do nothing.
+    if parent_chain.is_empty() {
+        return;
+    }
+
+    let usage_by_depth = get_usage_by_depth(root, arg, parent_chain);
     for (depth, parent_term) in parent_chain.iter().enumerate() {
-        // let usage_of_parent_in_args = usage_by_depth[depth];
-        // let usage = usage + (body_usage - 1) * usage_of_parent_in_args;
-        let DebruijnNode::Abstraction { body, .. } = root[*parent_term] else {
+        let DebruijnNode::Abstraction { body, usage } = root[*parent_term] else {
             unreachable!()
         };
-        let usage = compute_usage_flat(root, body);
+        let usage_of_parent_in_args = usage_by_depth[depth];
+        let usage_delta: isize = (body_usage as isize - 1) * usage_of_parent_in_args as isize;
+        let usage = usage.checked_add_signed(usage_delta).unwrap();
+        // let usage = compute_usage_flat(root, body);
         root[*parent_term] = DebruijnNode::Abstraction { body, usage }
     }
 }
@@ -678,22 +685,59 @@ fn get_usage_by_depth(root: &FlatRoot, arg: TermIndex, parent_chain: &[TermIndex
     fn _get_usage_by_depth(
         root: &FlatRoot,
         term: TermIndex,
+        // The usages of the parent chain. This is sorted such that the first element is higher in the tree
+        // eg: usages[0] is the root-most element. This is nonempty
         usages: &mut [usize],
-        depth: DebruijnDepth,
+        // Depth relative to root of the argument subtree
+        // This indicates whether or not a node is a free or bound variable
+        // ex: If depth == 0, then all variables are free
+        // If depth == 1, then nodes with DebruijnIndex = 1 are bound, the rest are free
+        // If depth == N, then nodes with DebruijnIndex <= N are bound, the rest are free.
+        depth_relative_to_arg: DebruijnDepth,
     ) {
         match root[term] {
             DebruijnNode::Index(index) => {
-                let level = depth - index;
-                if level < usages.len() {
-                    usages[level] += 1;
+                // We need to account for the fact that we may be inside an abstraction in the argument
+                // If we are, we should skip if this is a bound variable.
+                let is_bound = index <= depth_relative_to_arg;
+                if is_bound {
+                    return;
                 }
+
+                // We want to transform this into an index into the usages array,
+                // which is sorted by parent-chain depth.
+                // In other words, we need to convert from a debruijn index to a debruijn level.
+
+                // arg. For example, if we have index = 5 and parent chain = [a, b, c, d, e, f]
+                // but are two abstractions deep into the arg
+                // (so depth_relative_to_arg = 2), then this points to
+                // [a, b, c, d, e, f]
+                //           ^------- here!
+                // which is level 4 (actual index = 3) into the array.
+                // 6 - (5 - 2)
+
+                // SAFETY: subtraction is safe because we just checked that index <= depth_relative_to_arg
+                // and return in the case that this happens.
+                let index_relative_to_parent = index - depth_relative_to_arg;
+
+                // In the case of an open term - eg: λ (λ 1 1) 99)
+                // it is possible for an index to actually point to an implict parent which
+                // doesn't actually exist in the tree. In this case, we just do nothing.
+                if usages.len() < index_relative_to_parent {
+                    return;
+                }
+
+                // SAFETY: we just checked that usages.len() < index_relative_to_parent, and return
+                // in the case that this happens
+                let level = usages.len() - index_relative_to_parent;
+                usages[level] += 1;
             }
             DebruijnNode::Abstraction { body, .. } => {
-                _get_usage_by_depth(root, body, usages, depth + 1)
+                _get_usage_by_depth(root, body, usages, depth_relative_to_arg + 1)
             }
             DebruijnNode::Application { func, arg } => {
-                _get_usage_by_depth(root, func, usages, depth);
-                _get_usage_by_depth(root, arg, usages, depth);
+                _get_usage_by_depth(root, func, usages, depth_relative_to_arg);
+                _get_usage_by_depth(root, arg, usages, depth_relative_to_arg);
             }
         }
     }

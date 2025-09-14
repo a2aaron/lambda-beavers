@@ -139,10 +139,12 @@ mod test {
         let mut reducer = Reducer::new(&root, VisitOrder::LEFT_OUTERMOST);
         reducer.reduce_one();
         assert_usage(&reducer);
-        reducer.reduce_one();
-        assert_usage(&reducer);
-        reducer.reduce_one();
-        assert_usage(&reducer);
+    }
+
+    #[test]
+    fn parent_usage_open_terms() {
+        let root = Debruijn::from_str("λ (λ 1 1) 99").unwrap();
+        let mut reducer = Reducer::new(&root, VisitOrder::LEFT_OUTERMOST);
         reducer.reduce_one();
         assert_usage(&reducer);
     }
@@ -153,6 +155,12 @@ mod test {
             Debruijn::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
         let mut reducer = Reducer::new(&root, VisitOrder::LEFT_OUTERMOST);
 
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
         reducer.reduce_one();
         assert_usage(&reducer);
         reducer.reduce_one();

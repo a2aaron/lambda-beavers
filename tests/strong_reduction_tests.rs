@@ -31,15 +31,15 @@ macro_rules! make_test_batch {
             let from: usize = $from.parse().unwrap();
             let to: usize = $to.parse().unwrap();
             let mut tests = TESTS.split('\n').skip(from).take(1 + to - from);
-            for _ in from..=to {
+            for i in from..=to {
                 let test = tests.next().unwrap();
-                $invoke(test);
+                $invoke(test, i);
             }
         }
     }
 }
 
-fn assert_round_trip(test: &str) {
+fn assert_round_trip(test: &str, _: usize) {
     let (starting, _) = parse_line(test);
     let flat = FlatRoot::from(&starting);
     let roundtripped = Debruijn::from(&flat);
@@ -50,21 +50,19 @@ fn assert_round_trip(test: &str) {
     );
 }
 
-fn assert_usage(test: &str) {
-    fn _assert_usage(reducer: &Reducer) {
-        if let Err((failing_term, actual, expected)) = reducer.root.check_usage() {
-            panic!(
-                "Expected usage to be {expected} but got {actual} for node {failing_term} in {}",
-                reducer.root.to_graph()
-            );
-        }
-    }
+fn assert_usage(test: &str, test_i: usize) {
     let (starting, expected) = parse_line(test);
 
     let mut reducer = Reducer::new(&starting, VisitOrder::LEFT_OUTERMOST);
     loop {
         let result = reducer.reduce_one();
-        _assert_usage(&reducer);
+        if let Err((failing_term, actual, expected)) = reducer.root.check_usage() {
+            println!("Failed test case #{test_i} - {test}: ({starting} -> {expected})");
+            panic!(
+                "Expected usage to be {expected} but got {actual} for node {failing_term} in {}",
+                reducer.root.to_graph()
+            );
+        }
         match result {
             Some(ReductionResult::NormalForm(actual)) => {
                 assert_eq!(actual, expected);
