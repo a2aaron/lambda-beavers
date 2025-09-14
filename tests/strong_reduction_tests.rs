@@ -2,6 +2,8 @@
 #![cfg(test)]
 
 use lambda_beaver::{
+    debruijn::Debruijn,
+    debruijn_flat::FlatRoot,
     reduce::ReductionResult,
     term::Classic,
     treewalk::VisitOrder,
@@ -31,7 +33,29 @@ macro_rules! make_test {
                 assert_test(test, i);
             }
         }
+
+        #[test]
+        fn ${concat(srt_rounttrip_, $from, _to_, $to)}() {
+            let from: usize = $from.parse().unwrap();
+            let to: usize = $to.parse().unwrap();
+            let mut tests = TESTS.split('\n').skip(from).take(1 + to - from);
+            for _ in from..=to {
+                let test = tests.next().unwrap();
+                assert_round_trip(test);
+            }
+        }
     }
+}
+
+fn assert_round_trip(test: &str) {
+    let (starting, _) = parse_line(test);
+    let flat = FlatRoot::from(&starting);
+    let roundtripped = Debruijn::from(&flat);
+
+    assert_eq!(
+        starting, roundtripped,
+        "Expected {starting}, got {roundtripped}",
+    );
 }
 
 fn assert_test(test: &str, test_i: usize) {
@@ -65,6 +89,8 @@ fn assert_test(test: &str, test_i: usize) {
         }
     }
 }
+
+make_test!("0", "3465");
 
 make_test!("0");
 make_test!("1");
