@@ -24,16 +24,18 @@ impl Reducer {
     }
 
     pub fn reduce_one(&mut self) -> Option<ReductionResult> {
-        let result = self
-            .visit_order
-            .preorder_walk_mut_2(&mut self.root, |root, term| {
-                if let Some(redex) = debruijn_flat::RedexMut::try_get(root, term) {
-                    debruijn_flat::substitute_arg_into_body_mut(root, redex);
-                    ControlFlow::Break(())
-                } else {
-                    ControlFlow::Continue(())
-                }
-            });
+        let result =
+            self.visit_order
+                .preorder_walk_mut_2(&mut self.root, |root, term, parent_chain| {
+                    if let Some(redex) =
+                        debruijn_flat::RedexMut::try_get(root, term, parent_chain.clone())
+                    {
+                        debruijn_flat::substitute_arg_into_body_mut(root, redex);
+                        ControlFlow::Break(())
+                    } else {
+                        ControlFlow::Continue(())
+                    }
+                });
         match result {
             Some(()) => None,
             // This clone is fine, it occurs at the end of all reductions
@@ -125,10 +127,28 @@ mod test {
     fn assert_usage(reducer: &Reducer) {
         if let Err((failing_term, actual, expected)) = reducer.root.check_usage() {
             panic!(
-                "Expected usage to be {expected} but got {actual} for node {failing_term} in {:#?}",
-                reducer.root
+                "Expected usage to be {expected} but got {actual} for node {failing_term} in {}",
+                reducer.root.to_graph()
             );
         }
+    }
+
+    #[test]
+    fn parent_usage_simplest() {
+        let root = Debruijn::from_str("λ (λ 1 1) (1 1)").unwrap();
+        let mut reducer = Reducer::new(&root, VisitOrder::LEFT_OUTERMOST);
+        println!("init: {:#?}", reducer.root);
+
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+
+        println!("end: {:#?}", reducer.root);
     }
 
     #[test]

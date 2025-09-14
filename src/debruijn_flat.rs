@@ -11,77 +11,101 @@ impl VisitOrder {
     pub fn preorder_walk_2<T>(
         &self,
         root: &FlatRoot,
-        mut action: impl FnMut(&FlatRoot, TermWithParent) -> ControlFlow<T>,
+        mut action: impl FnMut(&FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>,
     ) -> Option<T> {
         fn _preorder_walk<T>(
             root: &FlatRoot,
-            term: TermWithParent,
-            action: &mut impl FnMut(&FlatRoot, TermWithParent) -> ControlFlow<T>,
+            term_with_parent: TermWithParent,
+            parent_chain: &mut ParentChain,
+            action: &mut impl FnMut(&FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>,
             reverse: bool,
         ) -> ControlFlow<T> {
-            action(root, term)?;
-
-            let term = term.term;
+            let term = term_with_parent.term;
             match root[term] {
-                DebruijnNode::Index(_) => (),
+                DebruijnNode::Index(_) => action(root, term_with_parent, &parent_chain)?,
                 DebruijnNode::Abstraction { body, .. } => {
+                    // TODO: Is it correct to push to parent chain first?
+                    parent_chain.push(term);
+                    action(root, term_with_parent, &parent_chain)?;
+
                     let body = TermWithParent::body(term, body);
-                    _preorder_walk(root, body, action, reverse)?
+                    _preorder_walk(root, body, parent_chain, action, reverse)?;
+                    parent_chain.pop();
                 }
                 DebruijnNode::Application { func, arg } => {
+                    action(root, term_with_parent, &parent_chain)?;
                     let arg = TermWithParent::arg(term, arg);
                     let func = TermWithParent::func(term, func);
                     if reverse {
-                        _preorder_walk(root, arg, action, reverse)?;
-                        _preorder_walk(root, func, action, reverse)?;
+                        _preorder_walk(root, arg, parent_chain, action, reverse)?;
+                        _preorder_walk(root, func, parent_chain, action, reverse)?;
                     } else {
-                        _preorder_walk(root, func, action, reverse)?;
-                        _preorder_walk(root, arg, action, reverse)?;
+                        _preorder_walk(root, func, parent_chain, action, reverse)?;
+                        _preorder_walk(root, arg, parent_chain, action, reverse)?;
                     }
                 }
             }
             ControlFlow::Continue(())
         }
 
-        _preorder_walk(root, TermWithParent::root(root), &mut action, self.reverse).break_value()
+        let mut parent_chain = vec![];
+        _preorder_walk(
+            root,
+            TermWithParent::root(root),
+            &mut parent_chain,
+            &mut action,
+            self.reverse,
+        )
+        .break_value()
     }
 
     pub fn preorder_walk_mut_2<T>(
         &self,
         root: &mut FlatRoot,
-        mut action: impl FnMut(&mut FlatRoot, TermWithParent) -> ControlFlow<T>,
+        mut action: impl FnMut(&mut FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>,
     ) -> Option<T> {
-        fn _preorder_walk<T>(
+        fn _preorder_wal_mut<T>(
             root: &mut FlatRoot,
             term: TermWithParent,
-            action: &mut impl FnMut(&mut FlatRoot, TermWithParent) -> ControlFlow<T>,
+            parent_chain: &mut ParentChain,
+            action: &mut impl FnMut(&mut FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>,
             reverse: bool,
         ) -> ControlFlow<T> {
-            action(root, term)?;
+            action(root, term, &parent_chain)?;
 
             let term = term.term;
             match root[term] {
                 DebruijnNode::Index(_) => (),
                 DebruijnNode::Abstraction { body, .. } => {
                     let body = TermWithParent::body(term, body);
-                    _preorder_walk(root, body, action, reverse)?
+                    parent_chain.push(term);
+                    _preorder_wal_mut(root, body, parent_chain, action, reverse)?;
+                    parent_chain.pop();
                 }
                 DebruijnNode::Application { func, arg } => {
                     let arg = TermWithParent::arg(term, arg);
                     let func = TermWithParent::func(term, func);
                     if reverse {
-                        _preorder_walk(root, arg, action, reverse)?;
-                        _preorder_walk(root, func, action, reverse)?;
+                        _preorder_wal_mut(root, arg, parent_chain, action, reverse)?;
+                        _preorder_wal_mut(root, func, parent_chain, action, reverse)?;
                     } else {
-                        _preorder_walk(root, func, action, reverse)?;
-                        _preorder_walk(root, arg, action, reverse)?;
+                        _preorder_wal_mut(root, func, parent_chain, action, reverse)?;
+                        _preorder_wal_mut(root, arg, parent_chain, action, reverse)?;
                     }
                 }
             }
             ControlFlow::Continue(())
         }
 
-        _preorder_walk(root, TermWithParent::root(root), &mut action, self.reverse).break_value()
+        let mut parent_chain = vec![];
+        _preorder_wal_mut(
+            root,
+            TermWithParent::root(root),
+            &mut parent_chain,
+            &mut action,
+            self.reverse,
+        )
+        .break_value()
     }
 }
 
@@ -111,8 +135,8 @@ impl FlatRoot {
     }
 
     pub fn is_bnf(&self) -> bool {
-        let result = VisitOrder::LEFT_OUTERMOST.preorder_walk_2(self, |root, term| {
-            if RedexMut::try_get(root, term).is_some() {
+        let result = VisitOrder::LEFT_OUTERMOST.preorder_walk_2(self, |root, term, _| {
+            if RedexMut::is_redex(root, term.term) {
                 ControlFlow::Break(false)
             } else {
                 ControlFlow::Continue(())
@@ -123,8 +147,8 @@ impl FlatRoot {
 
     pub fn get_redexes(&self, visit_order: VisitOrder) -> Vec<RedexMut> {
         let mut redexes = vec![];
-        visit_order.preorder_walk_2(self, |root, term| {
-            if let Some(redex) = RedexMut::try_get(root, term) {
+        visit_order.preorder_walk_2(self, |root, term, parent_chain| {
+            if let Some(redex) = RedexMut::try_get(root, term, parent_chain.clone()) {
                 redexes.push(redex);
             }
             ControlFlow::Continue::<()>(())
@@ -165,8 +189,8 @@ impl FlatRoot {
             match root[term] {
                 DebruijnNode::Abstraction { body, usage } => {
                     _check_usage(root, body)?;
-                    let actual = compute_usage_flat(root, body);
-                    let expected = usage;
+                    let expected = compute_usage_flat(root, body);
+                    let actual = usage;
                     if actual != expected {
                         Err((term, actual, expected))
                     } else {
@@ -182,6 +206,37 @@ impl FlatRoot {
             }
         }
         _check_usage(&self, self.root)
+    }
+
+    pub fn to_graph(&self) -> String {
+        fn to_node_label(term: DebruijnNode) -> String {
+            match term {
+                DebruijnNode::Index(index) => format!("idx_{index}"),
+                DebruijnNode::Abstraction { usage, .. } => format!("abs, usage = {usage}"),
+                DebruijnNode::Application { .. } => format!("app"),
+            }
+        }
+
+        let mut output = vec![];
+        output.push(format!("strict digraph G {{"));
+
+        let root = format!("{} [color = red];", self.root,);
+        output.push(root);
+
+        for (index, node) in self.backing.iter().enumerate() {
+            let node_text = format!("{} [label = \"{} @ {index}\"]", index, to_node_label(*node));
+            output.push(node_text);
+            match node {
+                DebruijnNode::Index(_) => output.push(format!("")),
+                DebruijnNode::Abstraction { body, .. } => output.push(format!("{index} -> {body}")),
+                DebruijnNode::Application { func, arg } => {
+                    output.push(format!("{index} -> {func}"));
+                    output.push(format!("{index} -> {arg}"));
+                }
+            }
+        }
+        output.push(format!("}}"));
+        output.join("\n")
     }
 }
 
@@ -289,7 +344,7 @@ impl From<&FlatRoot> for Debruijn {
 fn compute_usage(body: &Debruijn) -> Usage {
     fn _compute_usage(term: &Debruijn, depth: DebruijnDepth) -> Usage {
         match term {
-            Debruijn::Index(index) => (*index == depth) as usize,
+            Debruijn::Index(index) => (*index == depth) as Usage,
             Debruijn::Application { func, arg } => {
                 _compute_usage(&func, depth) + _compute_usage(&arg, depth)
             }
@@ -438,8 +493,13 @@ pub enum Parent {
     Arg(TermIndex),
 }
 
+// The sequence of outer abstractions a term is contained in.
+// Every element of this vector is an abstraction.
+pub type ParentChain = Vec<TermIndex>;
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RedexMut {
+    // The entire chain of abstractions for the parent, which will all need to get fixed up during substitution.
+    parent_chain: ParentChain,
     // Application term for the redex. If the parent for this is none,
     // then the Redex is actually the root (and therefore is pointed to by FlatRoot.root)
     app: TermWithParent,
@@ -454,7 +514,21 @@ pub struct RedexMut {
 }
 
 impl RedexMut {
-    pub fn try_get(root: &FlatRoot, app: TermWithParent) -> Option<RedexMut> {
+    pub fn is_redex(root: &FlatRoot, term: TermIndex) -> bool {
+        match root[term] {
+            DebruijnNode::Application { func, .. } => match root[func] {
+                DebruijnNode::Abstraction { .. } => true,
+                _ => false,
+            },
+            _ => false,
+        }
+    }
+
+    pub fn try_get(
+        root: &FlatRoot,
+        app: TermWithParent,
+        parent_chain: ParentChain,
+    ) -> Option<RedexMut> {
         match root[app.term] {
             DebruijnNode::Application { func, arg } => match root[func] {
                 DebruijnNode::Abstraction { body, usage } => {
@@ -465,6 +539,7 @@ impl RedexMut {
                         body,
                         arg,
                         body_usage: usage,
+                        parent_chain,
                     };
                     Some(redex)
                 }
@@ -532,7 +607,7 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
     // body usages change.
     // The parent-chain can have it's usage change, but fortunately this is easy to compute.
     // Suppose we have parent abstraction λx
-    // Let's say that the usage of args in the body is A
+    // Let's say that the usage of the body is A
     // and the usage of x in the args is B
     // then, when redex evaluation is done, args will be substituted into the body A times
     // Each time it is, we will get another copy of args containing B uses of x
@@ -561,6 +636,7 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
     } else {
         // Otherwise, perform substitution as usual
 
+        // Need to grab this out earlier since substitute_and_fix_body_mut eats the redex.
         let parent = redex.app.parent;
 
         // Perform the actual substition on body.
@@ -568,31 +644,81 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
         // in addition to performing substitutions.
         // This may end up causing abs's body to get repointed if the redex body consists of a
         // single leaf node that gets substituted.
-        let new_body = substitute_and_fix_body_mut(root, redex);
+        let new_body = substitute_and_fix_body_mut(root, &redex);
 
         // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
         repoint_node(root, parent, new_body);
     };
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
+
+    // Update parent usages.
+    update_parent_chain_usage(root, &redex.parent_chain, redex.body_usage, redex.arg);
+}
+
+fn update_parent_chain_usage(
+    root: &mut FlatRoot,
+    parent_chain: &[TermIndex],
+    // Number of times
+    body_usage: Usage,
+    arg: TermIndex,
+) {
+    // let usage_by_depth = get_usage_by_depth(root, arg, parent_chain);
+    for (depth, parent_term) in parent_chain.iter().enumerate() {
+        // let usage_of_parent_in_args = usage_by_depth[depth];
+        // let usage = usage + (body_usage - 1) * usage_of_parent_in_args;
+        let DebruijnNode::Abstraction { body, .. } = root[*parent_term] else {
+            unreachable!()
+        };
+        let usage = compute_usage_flat(root, body);
+        root[*parent_term] = DebruijnNode::Abstraction { body, usage }
+    }
+}
+
+fn get_usage_by_depth(root: &FlatRoot, arg: TermIndex, parent_chain: &[TermIndex]) -> Vec<Usage> {
+    fn _get_usage_by_depth(
+        root: &FlatRoot,
+        term: TermIndex,
+        usages: &mut [usize],
+        depth: DebruijnDepth,
+    ) {
+        match root[term] {
+            DebruijnNode::Index(index) => {
+                let level = depth - index;
+                if level < usages.len() {
+                    usages[level] += 1;
+                }
+            }
+            DebruijnNode::Abstraction { body, .. } => {
+                _get_usage_by_depth(root, body, usages, depth + 1)
+            }
+            DebruijnNode::Application { func, arg } => {
+                _get_usage_by_depth(root, func, usages, depth);
+                _get_usage_by_depth(root, arg, usages, depth);
+            }
+        }
+    }
+
+    let mut usages = vec![0; parent_chain.len()];
+    _get_usage_by_depth(root, arg, &mut usages, 0);
+
+    usages
 }
 
 /// Repoint the term at `child` so that it is the child of `parent`. This does not affect the
 /// existing parent (which means that the child should either be an orphan--eg: has no existing parent
 /// or is root).
 /// If `parent` is none, then the child is made the root node of `root`.
+/// This does NOT recompute the usage of the parent if the parent is an abstraction.
 fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
     match parent {
         Some(Parent::Body(parent)) => {
-            let DebruijnNode::Abstraction { .. } = root[parent] else {
+            let DebruijnNode::Abstraction { usage, .. } = root[parent] else {
                 unreachable!(
                     "Expected abstraction, got {:?} at {} in {:#?}",
                     root[parent], parent, root
                 )
             };
-            root[parent] = DebruijnNode::Abstraction {
-                body: child,
-                usage: compute_usage_flat(root, child),
-            }
+            root[parent] = DebruijnNode::Abstraction { body: child, usage }
         }
         Some(Parent::Func(parent)) => {
             let DebruijnNode::Application { arg, .. } = root[parent] else {
@@ -639,7 +765,7 @@ fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
 // (so it's parent node is the redex abs), then redex.abs gets repointed and the body is garbage now
 // Hence, to help with this, the return value of this method is the location of the redex.abs's body,
 // (which is either a newly allocated arg subtree or the existing body)
-fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: RedexMut) -> TermIndex {
+fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: &RedexMut) -> TermIndex {
     struct Context {
         // TermIndex for the redex argument.
         redex_arg: TermIndex,
@@ -932,7 +1058,7 @@ mod test {
     fn usage_zero() {
         let mut root = compile("(λ 2) (λ 50)");
 
-        let redex = RedexMut::try_get(&root, TermWithParent::root(&root)).unwrap();
+        let redex = RedexMut::try_get(&root, TermWithParent::root(&root), vec![]).unwrap();
         assert_eq!(redex.body_usage, 0);
 
         substitute_arg_into_body_mut(&mut root, redex);
@@ -948,7 +1074,7 @@ mod test {
     fn usage_one() {
         let mut root = compile("(λ 1) (λ 50)");
 
-        let redex = RedexMut::try_get(&root, TermWithParent::root(&root)).unwrap();
+        let redex = RedexMut::try_get(&root, TermWithParent::root(&root), vec![]).unwrap();
         assert_eq!(redex.body_usage, 1);
 
         substitute_arg_into_body_mut(&mut root, redex);
@@ -964,7 +1090,7 @@ mod test {
     fn body_is_leaf() {
         let mut root = compile("(λ 1) (1 2 3 4)");
 
-        let redex = RedexMut::try_get(&root, TermWithParent::root(&root)).unwrap();
+        let redex = RedexMut::try_get(&root, TermWithParent::root(&root), vec![]).unwrap();
         assert_eq!(redex.body_usage, 1);
 
         substitute_arg_into_body_mut(&mut root, redex);
@@ -980,7 +1106,7 @@ mod test {
     fn body_is_not_leaf() {
         let mut root = compile("(λ λ 2) (1 2 3 4)");
 
-        let redex = RedexMut::try_get(&root, TermWithParent::root(&root)).unwrap();
+        let redex = RedexMut::try_get(&root, TermWithParent::root(&root), vec![]).unwrap();
         assert_eq!(redex.body_usage, 1);
 
         substitute_arg_into_body_mut(&mut root, redex);
@@ -996,7 +1122,7 @@ mod test {
     fn usage_many() {
         let mut root = compile("(λ 1 λ 2 λ 3 λ 4) 100");
 
-        let redex = RedexMut::try_get(&root, TermWithParent::root(&root)).unwrap();
+        let redex = RedexMut::try_get(&root, TermWithParent::root(&root), vec![]).unwrap();
         assert_eq!(redex.body_usage, 4);
 
         substitute_arg_into_body_mut(&mut root, redex);
