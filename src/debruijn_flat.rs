@@ -7,106 +7,6 @@ use std::{
 
 use crate::{debruijn::Debruijn, treewalk::VisitOrder};
 
-impl VisitOrder {
-    pub fn preorder_walk_2<T>(
-        &self,
-        root: &FlatRoot,
-        mut action: impl FnMut(&FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>,
-    ) -> Option<T> {
-        fn _preorder_walk<T>(
-            root: &FlatRoot,
-            term: TermWithParent,
-            parent_chain: &mut ParentChain,
-            action: &mut impl FnMut(&FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>,
-            reverse: bool,
-        ) -> ControlFlow<T> {
-            action(root, term, &parent_chain)?;
-
-            let term = term.term;
-            match root[term] {
-                DebruijnNode::Index(_) => (),
-                DebruijnNode::Abstraction { body, .. } => {
-                    let body = TermWithParent::body(term, body);
-                    parent_chain.push(term);
-                    _preorder_walk(root, body, parent_chain, action, reverse)?;
-                    parent_chain.pop();
-                }
-                DebruijnNode::Application { func, arg } => {
-                    let arg = TermWithParent::arg(term, arg);
-                    let func = TermWithParent::func(term, func);
-                    if reverse {
-                        _preorder_walk(root, arg, parent_chain, action, reverse)?;
-                        _preorder_walk(root, func, parent_chain, action, reverse)?;
-                    } else {
-                        _preorder_walk(root, func, parent_chain, action, reverse)?;
-                        _preorder_walk(root, arg, parent_chain, action, reverse)?;
-                    }
-                }
-            }
-            ControlFlow::Continue(())
-        }
-
-        let mut parent_chain = vec![];
-        _preorder_walk(
-            root,
-            TermWithParent::root(root),
-            &mut parent_chain,
-            &mut action,
-            self.reverse,
-        )
-        .break_value()
-    }
-
-    pub fn preorder_walk_mut_2<T>(
-        &self,
-        root: &mut FlatRoot,
-        mut action: impl FnMut(&mut FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>,
-    ) -> Option<T> {
-        fn _preorder_wal_mut<T>(
-            root: &mut FlatRoot,
-            term: TermWithParent,
-            parent_chain: &mut ParentChain,
-            action: &mut impl FnMut(&mut FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>,
-            reverse: bool,
-        ) -> ControlFlow<T> {
-            action(root, term, &parent_chain)?;
-
-            let term = term.term;
-            match root[term] {
-                DebruijnNode::Index(_) => (),
-                DebruijnNode::Abstraction { body, .. } => {
-                    let body = TermWithParent::body(term, body);
-                    parent_chain.push(term);
-                    _preorder_wal_mut(root, body, parent_chain, action, reverse)?;
-                    parent_chain.pop();
-                }
-                DebruijnNode::Application { func, arg } => {
-                    let arg = TermWithParent::arg(term, arg);
-                    let func = TermWithParent::func(term, func);
-                    if reverse {
-                        _preorder_wal_mut(root, arg, parent_chain, action, reverse)?;
-                        _preorder_wal_mut(root, func, parent_chain, action, reverse)?;
-                    } else {
-                        _preorder_wal_mut(root, func, parent_chain, action, reverse)?;
-                        _preorder_wal_mut(root, arg, parent_chain, action, reverse)?;
-                    }
-                }
-            }
-            ControlFlow::Continue(())
-        }
-
-        let mut parent_chain = vec![];
-        _preorder_wal_mut(
-            root,
-            TermWithParent::root(root),
-            &mut parent_chain,
-            &mut action,
-            self.reverse,
-        )
-        .break_value()
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FlatRoot {
     pub backing: Vec<DebruijnNode>,
@@ -133,7 +33,7 @@ impl FlatRoot {
     }
 
     pub fn is_bnf(&self) -> bool {
-        let result = VisitOrder::LEFT_OUTERMOST.preorder_walk_2(self, |root, term, _| {
+        let result = VisitOrder::LEFT_OUTERMOST.preorder_walk(self, |root, term, _| {
             if RedexMut::is_redex(root, term.term) {
                 ControlFlow::Break(false)
             } else {
@@ -145,7 +45,7 @@ impl FlatRoot {
 
     pub fn get_redexes(&self, visit_order: VisitOrder) -> Vec<RedexMut> {
         let mut redexes = vec![];
-        visit_order.preorder_walk_2(self, |root, term, parent_chain| {
+        visit_order.preorder_walk(self, |root, term, parent_chain| {
             if let Some(redex) = RedexMut::try_get(root, term, parent_chain.clone()) {
                 redexes.push(redex);
             }
@@ -399,28 +299,28 @@ pub struct TermWithParent {
     parent: Option<Parent>,
 }
 impl TermWithParent {
-    fn body(abs: TermIndex, body: TermIndex) -> TermWithParent {
+    pub fn body(abs: TermIndex, body: TermIndex) -> TermWithParent {
         TermWithParent {
             term: body,
             parent: Some(Parent::Body(abs)),
         }
     }
 
-    fn func(app: TermIndex, func: TermIndex) -> TermWithParent {
+    pub fn func(app: TermIndex, func: TermIndex) -> TermWithParent {
         TermWithParent {
             term: func,
             parent: Some(Parent::Func(app)),
         }
     }
 
-    fn arg(app: TermIndex, arg: TermIndex) -> TermWithParent {
+    pub fn arg(app: TermIndex, arg: TermIndex) -> TermWithParent {
         TermWithParent {
             term: arg,
             parent: Some(Parent::Arg(app)),
         }
     }
 
-    fn root(root: &FlatRoot) -> TermWithParent {
+    pub fn root(root: &FlatRoot) -> TermWithParent {
         TermWithParent {
             term: root.root,
             parent: None,

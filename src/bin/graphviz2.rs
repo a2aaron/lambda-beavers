@@ -13,7 +13,7 @@ use lambda_beaver::{
 
 fn get_garbage_array(root: &FlatRoot) -> Vec<(bool, Option<TermIndex>)> {
     let mut is_garbage = vec![(true, None); root.backing.len()];
-    VisitOrder::LEFT_OUTERMOST.preorder_walk_2(root, |_, term, parent_chain| {
+    VisitOrder::LEFT_OUTERMOST.preorder_walk(root, |_, term, parent_chain| {
         let abs_bound = match root[term.term] {
             DebruijnNode::Index(index) => {
                 if index <= parent_chain.len() {

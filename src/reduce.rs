@@ -26,7 +26,7 @@ impl Reducer {
     pub fn reduce_one(&mut self) -> Option<ReductionResult> {
         let result =
             self.visit_order
-                .preorder_walk_mut_2(&mut self.root, |root, term, parent_chain| {
+                .preorder_walk_mut(&mut self.root, |root, term, parent_chain| {
                     if let Some(redex) =
                         debruijn_flat::RedexMut::try_get(root, term, parent_chain.clone())
                     {
