@@ -1,6 +1,8 @@
 
-see https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture15.pdf
-and also https://www.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture13.pdf
+see https:ww.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture15.pdf
+and also https:ww.cs.cornell.edu/courses/cs4110/2018fa/lectures/lecture13.pdf
+
+# Beta Reduction Algorithm
 
 (Note: assuming call by name semantics)
 Let's say we are beta reducing something like this (λu.λv.u x) (a b)
@@ -58,6 +60,9 @@ into. For example, in (λy.(λx.x λx.z) x) a, we had computed this substitution
 λy.(λx.x λx.z) x {y / a} = λy.(λx.x λx.z) a
 so our final term would just be λy.(λx.x λx.z) a (we drop the outer λy along with the a)
 
+
+## Beta Reduction for Debruijn Indicies 
+
 Alright. Cool, how do we translate this to Debruijn indicies?
 
 Recall that our notation is using 1-indexed values, so λx.x = λ 1, not λ 0
@@ -111,3 +116,47 @@ and extract it from the lambda--this will drop every index in the term down by o
 
 Hence, the final rule for beta reduction will look like:
 (λ t1) t2 = down_one(t1 {up_one(t) / 1})
+
+
+## Beta Reduction - Usage Changes
+Some notes on how usage changes
+First, defining usage: Usage is a property of abstractions. A given abstraction binds a particular
+variable to itself, which I will call the bound variable.
+The usage of an abstraction is the number of times the bound variable appears in the body of
+the abstraction. The usage is a natural number and can be zero.
+As an example, in λa.λb.b, there are two abstractions. The first one binds a (λa) and the second
+one binds b (λb). For the first one, it's usage is zero because a does not appear in the body
+of λa. For the second one, it's usage is one because b appears once in the body.
+We can also talk about the usage of an abstraction in a given subterm.
+Consider this: λa.(λb.a b) (λc.a a).
+The usage of a in λb is one, while the usage of a in λc is two.
+In addition, the usage of b in λc and the usage of c in λb are both zero.
+(We might say that, in the first paragraph, we were talking about "the usage of a in λa"
+or "the usage of b in λb")
+
+There are two things we care about that may change during substitution:
+- child abstractions in body (incl body itself)
+- parent abstractions in parent (incl parent itself)
+Notably, the usages for body and it's children do not change because we are substituting arg
+into body. arg cannot possibly capture
+aany variables in the body subtree, since arg isn't in said subtree. Therefore, none of the
+body usages change.
+The parent-chain can have it's usage change, but fortunately this is easy to compute.
+Suppose we have parent abstraction λx
+Let's say that the usage of the body is A
+and the usage of x in the args is B
+then, when redex evaluation is done, args will be substituted into the body A times
+Each time it is, we will get another copy of args containing B uses of x
+This results in A * B usages getting added
+Then, when we drop out the original args subtree, we lose B uses of x
+This results in a total change of A * B - B = (A - 1) * B uses of x.
+This explains the behavior of
+few different cases such as:
+1. If the usage of args in the body is 0, then the usage of x will decrease by B
+   because (0 - 1) * B = -B
+2. If the usage of args in the body is 1, then the usage of x remains constant
+   because (1 - 1) * B = 0 * B = 0
+3. If the usage of x in args is 0, then the usage of x remains constant
+   because (A - 1) * 0 = 0
+(Moreover, if the (total) usage of x is 0, then after evaluation, the usage of x remains
+zero.)

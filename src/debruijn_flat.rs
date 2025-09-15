@@ -583,51 +583,10 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
     // Note that we can actually avoid arg from becoming garbage if we re-use it's allocation (assuming
     // it is ever actually used in body). However this is not implemented at time of writing
 
-    // Some notes on how usage changes
-    // First, defining usage: Usage is a property of abstractions. A given abstraction binds a particular
-    // variable to itself, which I will call the bound variable.
-    // The usage of an abstraction is the number of times the bound variable appears in the body of
-    // the abstraction. The usage is a natural number and can be zero.
-    // As an example, in λa.λb.b, there are two abstractions. The first one binds a (λa) and the second
-    // one binds b (λb). For the first one, it's usage is zero because a does not appear in the body
-    // of λa. For the second one, it's usage is one because b appears once in the body.
-    //
-    // We can also talk about the usage of an abstraction in a given subterm.
-    // Consider this: λa.(λb.a b) (λc.a a).
-    // The usage of a in λb is one, while the usage of a in λc is two.
-    // In addition, the usage of b in λc and the usage of c in λb are both zero.
-    // (We might say that, in the first paragraph, we were talking about "the usage of a in λa"
-    // or "the usage of b in λb")
-
-    // There are two things we care about that may change during substitution:
-    // - child abstractions in body (incl body itself)
-    // - parent abstractions in parent (incl parent itself)
-    // Notably, the usages for body and it's children do not change because we are substituting arg
-    // into body. arg cannot possibly capture
-    // aany variables in the body subtree, since arg isn't in said subtree. Therefore, none of the
-    // body usages change.
-    // The parent-chain can have it's usage change, but fortunately this is easy to compute.
-    // Suppose we have parent abstraction λx
-    // Let's say that the usage of the body is A
-    // and the usage of x in the args is B
-    // then, when redex evaluation is done, args will be substituted into the body A times
-    // Each time it is, we will get another copy of args containing B uses of x
-    // This results in A * B usages getting added
-    // Then, when we drop out the original args subtree, we lose B uses of x
-    // This results in a total change of A * B - B = (A - 1) * B uses of x.
-    //
-    // This explains the behavior of
-    // few different cases such as:
-    // 1. If the usage of args in the body is 0, then the usage of x will decrease by B
-    //    because (0 - 1) * B = -B
-    // 2. If the usage of args in the body is 1, then the usage of x remains constant
-    //    because (1 - 1) * B = 0 * B = 0
-    // 3. If the usage of x in args is 0, then the usage of x remains constant
-    //    because (A - 1) * 0 = 0
-    // (Moreover, if the (total) usage of x is 0, then after evaluation, the usage of x remains
-    // zero.)
-
-    // Update parent usages.
+    // Update parent usages. This should happen before the tree is updated as we may end up with
+    // arg becoming garbage or modified (it would technically be fine to actually still do that,
+    // because the way arg is modified would not affect it's usage counts, but semantically this
+    // is easier to reason aboout, so we do it first.)
     update_parent_chain_usage(root, &redex.parent_chain, redex.body_usage, redex.arg);
 
     if redex.body_usage == 0 {
@@ -656,6 +615,8 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
 }
 
+// Updates the usages of the parent chain.
+// MEMORY: Modifies in place, does not allocate or make garbage.
 fn update_parent_chain_usage(
     root: &mut FlatRoot,
     parent_chain: &[TermIndex],
@@ -669,17 +630,30 @@ fn update_parent_chain_usage(
         return;
     }
 
-    let usage_by_depth = get_usage_by_depth(root, arg, parent_chain);
+    let usages_of_page_in_arg = get_usage_by_depth(root, arg, parent_chain);
     for (depth, parent_term) in parent_chain.iter().enumerate() {
         let Abstraction { body, usage } = root.get_abs(*parent_term);
 
-        let usage_of_parent_in_args = usage_by_depth[depth];
-        let usage_delta: isize = (body_usage as isize - 1) * usage_of_parent_in_args as isize;
+        let usage_of_parent_in_arg = usages_of_page_in_arg[depth];
+        let usage_delta: isize = (body_usage as isize - 1) * usage_of_parent_in_arg as isize;
         let usage = usage.checked_add_signed(usage_delta).unwrap();
         root[*parent_term] = DebruijnNode::Abstraction { body, usage }
     }
 }
 
+// Computes the usage of the parents in the parent chain in arg.
+// For example, Suppose we have λ λ <body> (λ 1 2 2 3 4).
+// The argument here is (λ 1 2 2 3 4)
+// In the argument, 1 is bound to the abstraction in the argument, while 2, 3, and 4 are all
+// free variables relative to arg. In particular, 2 and 3 are explicitly bound outside of the redex,
+// while 4 is unbound.
+// Let's write this as a classic term:
+// λa. λb. <body> (λc. c b b a <unbound>)
+// The parent chain for the redex is effectively [a, b]. In arg, the usage of a is one, and the
+// usage of b is two, so the returned usage vector is [1, 2]
+// Note that the unbound variable is not included (we could talk about it's usage, but since there's
+// no abstraction term to bind it to, we will ignore it), and we also ignore the arg-bound term of c
+// since that won't get updated.
 fn get_usage_by_depth(root: &FlatRoot, arg: TermIndex, parent_chain: &[TermIndex]) -> Vec<Usage> {
     fn _get_usage_by_depth(
         root: &FlatRoot,
@@ -719,7 +693,7 @@ fn get_usage_by_depth(root: &FlatRoot, arg: TermIndex, parent_chain: &[TermIndex
                 // and return in the case that this happens.
                 let index_relative_to_parent = index - depth_relative_to_arg;
 
-                // In the case of an open term - eg: λ (λ 1 1) 99)
+                // In the case of an open term - eg: λ (λ 1 1) 99
                 // it is possible for an index to actually point to an implict parent which
                 // doesn't actually exist in the tree. In this case, we just do nothing.
                 if usages.len() < index_relative_to_parent {
@@ -752,6 +726,7 @@ fn get_usage_by_depth(root: &FlatRoot, arg: TermIndex, parent_chain: &[TermIndex
 /// or is root).
 /// If `parent` is none, then the child is made the root node of `root`.
 /// This does NOT recompute the usage of the parent if the parent is an abstraction.
+/// MEMORY: Child becomes garbage after repointing.
 fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
     match parent {
         Some(Parent::Body(parent)) => {
@@ -793,6 +768,10 @@ fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
 // (so it's parent node is the redex abs), then redex.abs gets repointed and the body is garbage now
 // Hence, to help with this, the return value of this method is the location of the redex.abs's body,
 // (which is either a newly allocated arg subtree or the existing body)
+// MEMORY: Upon substitution, the existing index node becomes garbage.
+// Allocates copies of redex.arg
+// Potentially invalidates redex.arg
+// Potentially alters redex.parent pointer
 fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: &RedexMut) -> TermIndex {
     struct Context {
         // TermIndex for the redex argument.
@@ -902,7 +881,8 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: &RedexMut) -> TermInd
 
 /// Clone the given subtree and fix up each free variable by up_by. This effectively fuses the
 /// up_by and clone steps together for substitute_mut, eliminating a second tree walk.
-/// The returned value points to the newly allocated subtree.
+///
+/// MEMORY: Allocates new subtree, returned value is the newly allocated tree
 fn clone_subtree_and_fix_up(
     root: &mut FlatRoot,
     term: TermIndex,
@@ -939,6 +919,7 @@ fn clone_subtree_and_fix_up(
     _clone_subtree_and_fix_up(root, term, up_by, 1)
 }
 
+/// MEMORY: Modifies in place, does not allocate or create garbage.
 fn up_by_mut(root: &mut FlatRoot, term: TermIndex, up_by: DebruijnDepth) {
     shift_cutoff_mut(root, term, up_by as isize, 1)
 }
@@ -948,12 +929,15 @@ fn up_by_mut(root: &mut FlatRoot, term: TermIndex, up_by: DebruijnDepth) {
 // ↑ λ t = λ (↑ t) where up_by -> up_by and cutoff -> cutoff + 1
 // ↑ (t1 t2) = (↑ t1) (↑ t2)
 
+/// MEMORY: Modifies in place, does not allocate or create garbage.
 fn down_one_mut(root: &mut FlatRoot, term: TermIndex) {
     shift_cutoff_mut(root, term, -1, 1)
 }
 
 /// Shift the indicies for all terms up by an amount. Indicies below the cutoff are not modified
 /// This is useful during beta reduction because we need to "drop out" an abstraction.
+///
+/// MEMORY: Modifies in place, does not allocate or create garbage.
 fn shift_cutoff_mut(root: &mut FlatRoot, term: TermIndex, up_by: isize, depth: DebruijnDepth) {
     match root[term] {
         DebruijnNode::Index(term_index) => {
