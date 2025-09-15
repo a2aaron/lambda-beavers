@@ -660,7 +660,7 @@ fn get_usage_by_depth(root: &FlatRoot, arg: TermIndex, parent_chain: &[TermIndex
         term: TermIndex,
         // The usages of the parent chain. This is sorted such that the first element is higher in the tree
         // eg: usages[0] is the root-most element. This is nonempty
-        usages: &mut [usize],
+        usages: &mut [Usage],
         // Depth relative to root of the argument subtree
         // This indicates whether or not a node is a free or bound variable
         // ex: If depth == 0, then all variables are free
