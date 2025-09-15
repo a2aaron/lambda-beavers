@@ -397,6 +397,7 @@ pub enum Parent {
 // The sequence of outer abstractions a term is contained in.
 // Every element of this vector is an abstraction.
 pub type ParentChain = Vec<TermIndex>;
+
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RedexMut {
     // The entire chain of abstractions for the parent, which will all need to get fixed up during substitution.
@@ -489,37 +490,18 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
     // is easier to reason aboout, so we do it first.)
     update_parent_chain_usage(root, &redex.parent_chain, redex.body_usage, redex.arg);
 
-    if redex.body_usage == 0 {
-        // Fix up the indicies in it to account for the fact that we are still dropping out the abstraction that the body is in.
-        down_one_mut(root, redex.body.term);
-        // No need to do anything with the argument because it is never used in the body
-        // Instead, just point the term to the body.
-        repoint_node(root, redex.app.parent, redex.body.term);
-        // Since the argument is not used, the entire arg subtree is garbage now.
-    } else {
-        // Otherwise, perform substitution as usual
+    let body = substitute(root, &redex);
 
-        // Need to grab this out earlier since substitute_and_fix_body_mut eats the redex.
-        let parent = redex.app.parent;
-
-        // Perform the actual substition on body.
-        // This method actually fuses the fixing down/up that needs to happen for the whole body
-        // in addition to performing substitutions.
-        // This may end up causing abs's body to get repointed if the redex body consists of a
-        // single leaf node that gets substituted.
-        let new_body = substitute_and_fix_body_mut(root, &redex);
-
-        // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
-        repoint_node(root, parent, new_body);
-    };
+    // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
+    repoint_node(root, redex.app.parent, body);
 }
 
 // Updates the usages of the parent chain.
 // MEMORY: Modifies in place, does not allocate or make garbage.
 fn update_parent_chain_usage(
     root: &mut FlatRoot,
-    parent_chain: &[TermIndex],
+    parent_chain: &ParentChain,
     // Number of times body is used
     body_usage: Usage,
     arg: TermIndex,
@@ -554,7 +536,7 @@ fn update_parent_chain_usage(
 // Note that the unbound variable is not included (we could talk about it's usage, but since there's
 // no abstraction term to bind it to, we will ignore it), and we also ignore the arg-bound term of c
 // since that won't get updated.
-fn get_usage_by_depth(root: &FlatRoot, arg: TermIndex, parent_chain: &[TermIndex]) -> Vec<Usage> {
+fn get_usage_by_depth(root: &FlatRoot, arg: TermIndex, parent_chain: &ParentChain) -> Vec<Usage> {
     fn _get_usage_by_depth(
         root: &FlatRoot,
         term: TermIndex,
@@ -668,11 +650,35 @@ fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
 // (so it's parent node is the redex abs), then redex.abs gets repointed and the body is garbage now
 // Hence, to help with this, the return value of this method is the location of the redex.abs's body,
 // (which is either a newly allocated arg subtree or the existing body)
-// MEMORY: Upon substitution, the existing index node becomes garbage.
-// Allocates copies of redex.arg
-// Potentially invalidates redex.arg
-// Potentially alters redex.parent pointer
-fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: &RedexMut) -> TermIndex {
+// MEMORY:
+// - Upon substitution, the existing index node becomes garbage.
+// - Allocates copies of redex.arg
+// - Potentially invalidates redex.body (may repoint redex.abs's body in the case that body consists of a single leaf node that gets substituted)
+// - Potentially invalidates redex.arg (becomes garbage in the zero usage case, may be altered in non-zero usage case)
+// - Potentially alters redex.parent pointer
+fn substitute(root: &mut FlatRoot, redex: &RedexMut) -> TermIndex {
+    if redex.body_usage == 0 {
+        // No need to do anything with the argument because it is never used in the body
+        // (Since the argument is not used, the entire arg subtree is garbage now.)
+        down_one_mut(root, redex.body.term);
+        // Fix up the indicies in it to account for the fact that we are still dropping out the abstraction that the body is in.
+        redex.body.term
+    } else {
+        // Otherwise, perform substitution as usual
+
+        // Perform the actual substition on body.
+        // This method actually fuses the fixing down/up that needs to happen for the whole body
+        // in addition to performing substitutions.
+        substitute_and_fix_body(root, redex);
+
+        // The body of abs may get repointed if the redex body consists of a single leaf node that gets substituted.
+        // Hence, we need to check for this and get the actually new body.
+        let Abstraction { body, .. } = root.get_abs(redex.abs);
+        body
+    }
+}
+
+fn substitute_and_fix_body(root: &mut FlatRoot, redex: &RedexMut) {
     struct Context {
         // TermIndex for the redex argument.
         redex_arg: TermIndex,
@@ -774,9 +780,6 @@ fn substitute_and_fix_body_mut(root: &mut FlatRoot, redex: &RedexMut) -> TermInd
         ctx.substitution_i, ctx.usage,
         "Expected substitution count to equal usage!"
     );
-
-    let Abstraction { body, .. } = root.get_abs(redex.abs);
-    body
 }
 
 /// Clone the given subtree and fix up each free variable by up_by. This effectively fuses the
