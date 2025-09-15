@@ -128,7 +128,7 @@ mod test {
         if let Err((failing_term, actual, expected)) = reducer.root.check_usage() {
             panic!(
                 "Expected usage to be {expected} but got {actual} for node {failing_term} in {}",
-                reducer.root.to_graph()
+                reducer.root
             );
         }
     }

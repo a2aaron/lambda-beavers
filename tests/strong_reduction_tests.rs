@@ -60,7 +60,7 @@ fn assert_usage(test: &str, test_i: usize) {
             println!("Failed test case #{test_i} - {test}: ({starting} -> {expected})");
             panic!(
                 "Expected usage to be {expected} but got {actual} for node {failing_term} in {}",
-                reducer.root.to_graph()
+                reducer.root
             );
         }
         match result {
