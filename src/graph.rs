@@ -1,7 +1,7 @@
 use std::{collections::HashMap, fmt::Display};
 
 use crate::{
-    debruijn_flat::{FlatRoot, RedexMut, substitute_arg_into_body_mut},
+    debruijn_flat::{FlatRoot, RedexMut, beta_reduce},
     treewalk::VisitOrder,
 };
 
@@ -26,7 +26,7 @@ impl ReductionNode {
         self.unevaluated_redexes.remove(redex_index.unwrap());
 
         let mut root = self.root.clone();
-        substitute_arg_into_body_mut(&mut root, redex);
+        beta_reduce(&mut root, redex);
         root.normalized()
     }
 

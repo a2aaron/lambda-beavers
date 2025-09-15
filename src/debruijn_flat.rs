@@ -452,7 +452,7 @@ impl RedexMut {
     }
 }
 
-pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
+pub fn beta_reduce(root: &mut FlatRoot, redex: RedexMut) {
     // Before this, we have the following shape of tree:
     //   parent
     //     |
@@ -490,7 +490,7 @@ pub fn substitute_arg_into_body_mut(root: &mut FlatRoot, redex: RedexMut) {
     // is easier to reason aboout, so we do it first.)
     update_parent_chain_usage(root, &redex.parent_chain, redex.body_usage, redex.arg);
 
-    let body = substitute_shift_fused(root, &redex);
+    let body = substitute_and_shift_fused(root, &redex);
 
     // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
@@ -656,11 +656,11 @@ fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
 // - Potentially invalidates redex.body (may repoint redex.abs's body in the case that body consists of a single leaf node that gets substituted)
 // - Potentially invalidates redex.arg (becomes garbage in the zero usage case, may be altered in non-zero usage case)
 // - Potentially alters redex.parent pointer
-fn substitute_shift_fused(root: &mut FlatRoot, redex: &RedexMut) -> TermIndex {
+fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &RedexMut) -> TermIndex {
     if redex.body_usage == 0 {
         // No need to do anything with the argument because it is never used in the body
         // (Since the argument is not used, the entire arg subtree is garbage now.)
-        down_one_mut(root, redex.body.term);
+        down_one(root, redex.body.term);
         // Fix up the indicies in it to account for the fact that we are still dropping out the abstraction that the body is in.
         redex.body.term
     } else {
@@ -736,10 +736,10 @@ fn _substitute_shift_fused(
                     // calling this method. However, we also fix down the entire body by one after
                     // calling the method. Both of these fixups cancel out, so we still only just
                     // fix up by `depth`
-                    up_by_mut(root, ctx.redex_arg, ctx.depth);
+                    up_by(root, ctx.redex_arg, ctx.depth);
                     ctx.redex_arg
                 } else {
-                    clone_subtree_and_fix_up(root, ctx.redex_arg, ctx.depth)
+                    clone_subtree_and_fix_up_fused(root, ctx.redex_arg, ctx.depth)
                 };
 
                 repoint_node(root, term.parent, new_arg);
@@ -782,15 +782,15 @@ fn _substitute_shift_fused(
 }
 
 /// Clone the given subtree and fix up each free variable by up_by. This effectively fuses the
-/// up_by and clone steps together for substitute_mut, eliminating a second tree walk.
+/// up_by and clone steps together for substitution, eliminating a second tree walk.
 ///
 /// MEMORY: Allocates new subtree, returned value is the newly allocated tree
-fn clone_subtree_and_fix_up(
+fn clone_subtree_and_fix_up_fused(
     root: &mut FlatRoot,
     term: TermIndex,
     up_by: DebruijnDepth,
 ) -> TermIndex {
-    fn _clone_subtree_and_fix_up(
+    fn _clone_subtree_and_fix_up_fused(
         root: &mut FlatRoot,
         term: TermIndex,
         up_by: DebruijnDepth,
@@ -803,14 +803,14 @@ fn clone_subtree_and_fix_up(
             }
             DebruijnNode::Abstraction { body, usage } => {
                 let abs = root.alloc_one(None);
-                let body = _clone_subtree_and_fix_up(root, body, up_by, depth + 1);
+                let body = _clone_subtree_and_fix_up_fused(root, body, up_by, depth + 1);
                 root[abs] = DebruijnNode::Abstraction { body, usage };
                 abs
             }
             DebruijnNode::Application { func, arg } => {
                 let app = root.alloc_one(None);
-                let func = _clone_subtree_and_fix_up(root, func, up_by, depth);
-                let arg = _clone_subtree_and_fix_up(root, arg, up_by, depth);
+                let func = _clone_subtree_and_fix_up_fused(root, func, up_by, depth);
+                let arg = _clone_subtree_and_fix_up_fused(root, arg, up_by, depth);
 
                 root[app] = DebruijnNode::Application { func, arg };
                 app
@@ -818,12 +818,12 @@ fn clone_subtree_and_fix_up(
         }
     }
 
-    _clone_subtree_and_fix_up(root, term, up_by, 1)
+    _clone_subtree_and_fix_up_fused(root, term, up_by, 1)
 }
 
 /// MEMORY: Modifies in place, does not allocate or create garbage.
-fn up_by_mut(root: &mut FlatRoot, term: TermIndex, up_by: DebruijnDepth) {
-    shift_cutoff_mut(root, term, up_by as isize, 1)
+fn up_by(root: &mut FlatRoot, term: TermIndex, up_by: DebruijnDepth) {
+    shift_cutoff(root, term, up_by as isize, 1)
 }
 
 // ↑ n = n         if n < cutoff
@@ -832,15 +832,15 @@ fn up_by_mut(root: &mut FlatRoot, term: TermIndex, up_by: DebruijnDepth) {
 // ↑ (t1 t2) = (↑ t1) (↑ t2)
 
 /// MEMORY: Modifies in place, does not allocate or create garbage.
-fn down_one_mut(root: &mut FlatRoot, term: TermIndex) {
-    shift_cutoff_mut(root, term, -1, 1)
+fn down_one(root: &mut FlatRoot, term: TermIndex) {
+    shift_cutoff(root, term, -1, 1)
 }
 
 /// Shift the indicies for all terms up by an amount. Indicies below the cutoff are not modified
 /// This is useful during beta reduction because we need to "drop out" an abstraction.
 ///
 /// MEMORY: Modifies in place, does not allocate or create garbage.
-fn shift_cutoff_mut(root: &mut FlatRoot, term: TermIndex, up_by: isize, depth: DebruijnDepth) {
+fn shift_cutoff(root: &mut FlatRoot, term: TermIndex, up_by: isize, depth: DebruijnDepth) {
     match root[term] {
         DebruijnNode::Index(term_index) => {
             // Recall that an index starts at 1, so if cutoff is set to 1, then this branch will always be taken.
@@ -850,14 +850,14 @@ fn shift_cutoff_mut(root: &mut FlatRoot, term: TermIndex, up_by: isize, depth: D
             }
         }
         DebruijnNode::Application { func, arg } => {
-            shift_cutoff_mut(root, func, up_by, depth);
-            shift_cutoff_mut(root, arg, up_by, depth);
+            shift_cutoff(root, func, up_by, depth);
+            shift_cutoff(root, arg, up_by, depth);
         }
         DebruijnNode::Abstraction { body, .. } => {
             // We add one to the cutoff here because we don't want to modify bound variables
             // For example, if we're at the outer-most lambda, then any Index(1)s in the lambda body
             // are referring to that lambda's bound variable and we don't modify it.
-            shift_cutoff_mut(root, body, up_by, depth + 1);
+            shift_cutoff(root, body, up_by, depth + 1);
         }
     }
 }
@@ -964,7 +964,7 @@ mod test {
         let redex = RedexMut::try_get(&root, TermWithParent::root(&root), vec![]).unwrap();
         assert_eq!(redex.body_usage, 0);
 
-        substitute_arg_into_body_mut(&mut root, redex);
+        beta_reduce(&mut root, redex);
 
         let expected = compile("1");
 
@@ -980,7 +980,7 @@ mod test {
         let redex = RedexMut::try_get(&root, TermWithParent::root(&root), vec![]).unwrap();
         assert_eq!(redex.body_usage, 1);
 
-        substitute_arg_into_body_mut(&mut root, redex);
+        beta_reduce(&mut root, redex);
 
         let expected = compile("λ 50");
 
@@ -996,7 +996,7 @@ mod test {
         let redex = RedexMut::try_get(&root, TermWithParent::root(&root), vec![]).unwrap();
         assert_eq!(redex.body_usage, 1);
 
-        substitute_arg_into_body_mut(&mut root, redex);
+        beta_reduce(&mut root, redex);
 
         let expected = compile("1 2 3 4");
 
@@ -1012,7 +1012,7 @@ mod test {
         let redex = RedexMut::try_get(&root, TermWithParent::root(&root), vec![]).unwrap();
         assert_eq!(redex.body_usage, 1);
 
-        substitute_arg_into_body_mut(&mut root, redex);
+        beta_reduce(&mut root, redex);
 
         let expected = compile("λ 2 3 4 5");
 
@@ -1028,7 +1028,7 @@ mod test {
         let redex = RedexMut::try_get(&root, TermWithParent::root(&root), vec![]).unwrap();
         assert_eq!(redex.body_usage, 4);
 
-        substitute_arg_into_body_mut(&mut root, redex);
+        beta_reduce(&mut root, redex);
 
         let expected = compile("100 λ 101 λ 102 λ 103");
 

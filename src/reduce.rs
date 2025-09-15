@@ -30,7 +30,7 @@ impl Reducer {
                     if let Some(redex) =
                         debruijn_flat::RedexMut::try_get(root, term, parent_chain.clone())
                     {
-                        debruijn_flat::substitute_arg_into_body_mut(root, redex);
+                        debruijn_flat::beta_reduce(root, redex);
                         ControlFlow::Break(())
                     } else {
                         ControlFlow::Continue(())
