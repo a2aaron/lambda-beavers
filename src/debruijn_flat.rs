@@ -250,24 +250,25 @@ fn compute_usage(body: &Debruijn) -> Usage {
 /// ter the body of an abstraction
 /// eg: in λ 1 λ 2 λ 3, we have that 1, 2, and 3 all refer to the same variable, so the usage is 3
 fn compute_usage_flat(root: &FlatRoot, body: TermIndex) -> Usage {
-    fn _compute_usage(root: &FlatRoot, term_i: TermIndex, depth: DebruijnDepth) -> Usage {
+    fn _compute_usage_flat(root: &FlatRoot, term_i: TermIndex, depth: DebruijnDepth) -> Usage {
         match root[term_i] {
             DebruijnNode::Index(index) => (index == depth) as usize,
             DebruijnNode::Application { func, arg } => {
-                _compute_usage(root, func, depth) + _compute_usage(root, arg, depth)
+                _compute_usage_flat(root, func, depth) + _compute_usage_flat(root, arg, depth)
             }
-            DebruijnNode::Abstraction { body, .. } => _compute_usage(root, body, depth + 1),
+            DebruijnNode::Abstraction { body, .. } => _compute_usage_flat(root, body, depth + 1),
         }
     }
     // Because this is the body of an abstraction, we actually are starting at depth 1
     // (so Index(1) refers to the input variable). If we had started at top-level (or had
     // the abstraction itself as input rather than it's body), then this would be 0.
-    _compute_usage(root, body, 1)
+    _compute_usage_flat(root, body, 1)
 }
 
 // The depth relative to some term. This is used to determine if a variable is free within a term
 // If a given Index node has a DebruijnIndex >= DebruijnDepth, then that Index node is a free variable
-// with respect to that )
+// with respect to that subtree)
+// Zero indicates that there are no abstractions between the two terms, one indicates one abstraction, etc
 type DebruijnDepth = usize;
 
 // The index for the DebruijnNode::Index variant. This is an index for the actual lambda term and works
@@ -798,7 +799,8 @@ fn clone_subtree_and_fix_up_fused(
     ) -> TermIndex {
         match root[term] {
             DebruijnNode::Index(index) => {
-                let index = if index >= depth { index + up_by } else { index };
+                let is_free = index >= depth;
+                let index = if is_free { index + up_by } else { index };
                 root.alloc_one(Some(DebruijnNode::Index(index)))
             }
             DebruijnNode::Abstraction { body, usage } => {
@@ -843,8 +845,9 @@ fn down_one(root: &mut FlatRoot, term: TermIndex) {
 fn shift_cutoff(root: &mut FlatRoot, term: TermIndex, up_by: isize, depth: DebruijnDepth) {
     match root[term] {
         DebruijnNode::Index(term_index) => {
-            // Recall that an index starts at 1, so if cutoff is set to 1, then this branch will always be taken.
-            if term_index >= depth {
+            // Recall that an index starts at 1, so if depth is set to 1, then this branch will always be taken.
+            let is_free = term_index >= depth;
+            if is_free {
                 let new_index = term_index.checked_add_signed(up_by).unwrap();
                 root[term] = DebruijnNode::Index(new_index);
             }
