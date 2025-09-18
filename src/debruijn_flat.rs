@@ -61,18 +61,18 @@ impl FlatRoot {
                     let idx = DebruijnNode::Index(idx);
                     new_root.alloc_one(Some(idx))
                 }
-                DebruijnNode::Abstraction { body, usage } => {
-                    let abs = new_root.alloc_one(None);
-                    let body = _clone(old_root, new_root, body);
-                    new_root[abs] = DebruijnNode::Abstraction { body, usage };
-                    abs
+                DebruijnNode::Abstraction(abs) => {
+                    let new_abs = new_root.alloc_one(None);
+                    let body = _clone(old_root, new_root, abs.body);
+                    new_root[new_abs] = DebruijnNode::abs(body, abs.usage);
+                    new_abs
                 }
-                DebruijnNode::Application { func, arg } => {
-                    let app = new_root.alloc_one(None);
-                    let func = _clone(old_root, new_root, func);
-                    let arg = _clone(old_root, new_root, arg);
-                    new_root[app] = DebruijnNode::Application { func, arg };
-                    app
+                DebruijnNode::Application(app) => {
+                    let new_app = new_root.alloc_one(None);
+                    let func = _clone(old_root, new_root, app.func);
+                    let arg = _clone(old_root, new_root, app.arg);
+                    new_root[new_app] = DebruijnNode::app(func, arg);
+                    new_app
                 }
             }
         }
@@ -85,10 +85,10 @@ impl FlatRoot {
     pub fn check_usage(&self) -> Result<(), (TermIndex, Usage, Usage)> {
         fn _check_usage(root: &FlatRoot, term: TermIndex) -> Result<(), (TermIndex, Usage, Usage)> {
             match root[term] {
-                DebruijnNode::Abstraction { body, usage } => {
-                    _check_usage(root, body)?;
-                    let expected = compute_usage_flat(root, body);
-                    let actual = usage;
+                DebruijnNode::Abstraction(abs) => {
+                    _check_usage(root, abs.body)?;
+                    let expected = compute_usage_flat(root, abs.body);
+                    let actual = abs.usage;
                     if actual != expected {
                         Err((term, actual, expected))
                     } else {
@@ -96,9 +96,9 @@ impl FlatRoot {
                     }
                 }
                 DebruijnNode::Index(_) => Ok(()),
-                DebruijnNode::Application { func, arg } => {
-                    _check_usage(root, func)?;
-                    _check_usage(root, arg)?;
+                DebruijnNode::Application(app) => {
+                    _check_usage(root, app.func)?;
+                    _check_usage(root, app.arg)?;
                     Ok(())
                 }
             }
@@ -108,7 +108,7 @@ impl FlatRoot {
 
     fn get_abs(&self, term: TermIndex) -> Abstraction {
         match self[term] {
-            DebruijnNode::Abstraction { body, usage } => Abstraction { body, usage },
+            DebruijnNode::Abstraction(abs) => abs,
             _ => panic!(
                 "Expected abstraction for term @ {term}, got {:?}",
                 self[term]
@@ -118,7 +118,7 @@ impl FlatRoot {
 
     fn get_app(&self, term: TermIndex) -> Application {
         match self[term] {
-            DebruijnNode::Application { func, arg } => Application { func, arg },
+            DebruijnNode::Application(app) => app,
             _ => panic!(
                 "Expected abstraction for term @ {term}, got {:?}",
                 self[term]
@@ -185,14 +185,14 @@ impl From<&Debruijn> for FlatRoot {
                     let usage = compute_usage(&body);
                     let abs = root.alloc_one(None);
                     let body = flatten(root, body);
-                    root[abs] = DebruijnNode::Abstraction { body, usage };
+                    root[abs] = DebruijnNode::abs(body, usage);
                     abs
                 }
                 Debruijn::Application { func, arg } => {
                     let app = root.alloc_one(None);
                     let func = flatten(root, func);
                     let arg = flatten(root, arg);
-                    root[app] = DebruijnNode::Application { func, arg };
+                    root[app] = DebruijnNode::app(func, arg);
                     app
                 }
             }
@@ -209,12 +209,12 @@ impl From<&FlatRoot> for Debruijn {
         fn _from(root: &FlatRoot, term: TermIndex) -> Debruijn {
             match root[term] {
                 DebruijnNode::Index(index) => Debruijn::Index(index),
-                DebruijnNode::Abstraction { body, .. } => Debruijn::Abstraction {
-                    body: Box::new(_from(root, body)),
+                DebruijnNode::Abstraction(abs) => Debruijn::Abstraction {
+                    body: Box::new(_from(root, abs.body)),
                 },
-                DebruijnNode::Application { func, arg } => Debruijn::Application {
-                    func: Box::new(_from(root, func)),
-                    arg: Box::new(_from(root, arg)),
+                DebruijnNode::Application(app) => Debruijn::Application {
+                    func: Box::new(_from(root, app.func)),
+                    arg: Box::new(_from(root, app.arg)),
                 },
             }
         }
@@ -253,10 +253,11 @@ fn compute_usage_flat(root: &FlatRoot, body: TermIndex) -> Usage {
     fn _compute_usage_flat(root: &FlatRoot, term_i: TermIndex, depth: DebruijnDepth) -> Usage {
         match root[term_i] {
             DebruijnNode::Index(index) => (index == depth) as usize,
-            DebruijnNode::Application { func, arg } => {
-                _compute_usage_flat(root, func, depth) + _compute_usage_flat(root, arg, depth)
+            DebruijnNode::Application(app) => {
+                _compute_usage_flat(root, app.func, depth)
+                    + _compute_usage_flat(root, app.arg, depth)
             }
-            DebruijnNode::Abstraction { body, .. } => _compute_usage_flat(root, body, depth + 1),
+            DebruijnNode::Abstraction(abs) => _compute_usage_flat(root, abs.body, depth + 1),
         }
     }
     // Because this is the body of an abstraction, we actually are starting at depth 1
@@ -300,27 +301,6 @@ pub struct TermWithParent {
     parent: Option<Parent>,
 }
 impl TermWithParent {
-    pub fn body(abs: TermIndex, body: TermIndex) -> TermWithParent {
-        TermWithParent {
-            term: body,
-            parent: Some(Parent::Body(abs)),
-        }
-    }
-
-    pub fn func(app: TermIndex, func: TermIndex) -> TermWithParent {
-        TermWithParent {
-            term: func,
-            parent: Some(Parent::Func(app)),
-        }
-    }
-
-    pub fn arg(app: TermIndex, arg: TermIndex) -> TermWithParent {
-        TermWithParent {
-            term: arg,
-            parent: Some(Parent::Arg(app)),
-        }
-    }
-
     pub fn root(root: &FlatRoot) -> TermWithParent {
         TermWithParent {
             term: root.root,
@@ -329,46 +309,82 @@ impl TermWithParent {
     }
 }
 
-struct Abstraction {
-    body: TermIndex,
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Abstraction {
+    pub body: TermIndex,
     /// Number of times the input argument is used in the body
     /// If this is zero, then when doing argument substitution, the algorithm can just
     /// return the body and throw away the argument!
     /// This value is constant over the lifetime of the Abstraction (this will become not true if
     /// we do "partial" substition where not all usages of the input argument are substituted)
-    usage: Usage,
+    pub usage: Usage,
 }
-struct Application {
-    func: TermIndex,
-    arg: TermIndex,
+
+impl Abstraction {
+    pub fn body(&self, abs_index: TermIndex) -> TermWithParent {
+        TermWithParent {
+            term: self.body,
+            parent: Some(Parent::Body(abs_index)),
+        }
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Application {
+    pub func: TermIndex,
+    pub arg: TermIndex,
+}
+
+impl Application {
+    pub fn func(&self, app_index: TermIndex) -> TermWithParent {
+        TermWithParent {
+            term: self.func,
+            parent: Some(Parent::Func(app_index)),
+        }
+    }
+
+    pub fn arg(&self, app_index: TermIndex) -> TermWithParent {
+        TermWithParent {
+            term: self.arg,
+            parent: Some(Parent::Arg(app_index)),
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DebruijnNode {
     Index(DebruijnIndex),
-    Abstraction {
-        body: TermIndex,
-        /// Number of times the input argument is used in the body
-        /// If this is zero, then when doing argument substitution, the algorithm can just
-        /// return the body and throw away the argument!
-        /// This value is constant over the lifetime of the Abstraction (this will become not true if
-        /// we do "partial" substition where not all usages of the input argument are substituted)
-        usage: Usage,
-    },
-    Application {
-        func: TermIndex,
-        arg: TermIndex,
-    },
+    Abstraction(Abstraction),
+    Application(Application),
+}
+impl DebruijnNode {
+    pub fn abs(body: TermIndex, usage: usize) -> DebruijnNode {
+        DebruijnNode::Abstraction(Abstraction { body, usage })
+    }
+
+    pub fn app(func: TermIndex, arg: TermIndex) -> DebruijnNode {
+        DebruijnNode::Application(Application { func, arg })
+    }
+}
+
+impl From<Abstraction> for DebruijnNode {
+    fn from(abs: Abstraction) -> Self {
+        DebruijnNode::Abstraction(abs)
+    }
+}
+
+impl From<Application> for DebruijnNode {
+    fn from(app: Application) -> Self {
+        DebruijnNode::Application(app)
+    }
 }
 
 impl std::fmt::Debug for DebruijnNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Index(index) => write!(f, "idx@{}", *index),
-            Self::Abstraction { body, usage } => {
-                write!(f, "abs: body -> {} (usage={})", *body, *usage)
-            }
-            Self::Application { func, arg } => write!(f, "app: func -> {}, arg -> {}", *func, *arg),
+            Self::Abstraction(abs) => write!(f, "abs: body -> {} (usage={})", abs.body, abs.usage),
+            Self::Application(app) => write!(f, "app: func -> {}, arg -> {}", app.func, app.arg),
         }
     }
 }
@@ -419,7 +435,7 @@ pub struct RedexMut {
 impl RedexMut {
     pub fn is_redex(root: &FlatRoot, term: TermIndex) -> bool {
         match root[term] {
-            DebruijnNode::Application { func, .. } => match root[func] {
+            DebruijnNode::Application(app) => match root[app.func] {
                 DebruijnNode::Abstraction { .. } => true,
                 _ => false,
             },
@@ -429,19 +445,19 @@ impl RedexMut {
 
     pub fn try_get(
         root: &FlatRoot,
-        app: TermWithParent,
+        term: TermWithParent,
         parent_chain: ParentChain,
     ) -> Option<RedexMut> {
-        match root[app.term] {
-            DebruijnNode::Application { func, arg } => match root[func] {
-                DebruijnNode::Abstraction { body, usage } => {
-                    let body = TermWithParent::body(func, body);
+        match root[term.term] {
+            DebruijnNode::Application(app) => match root[app.func] {
+                DebruijnNode::Abstraction(abs) => {
+                    let body = abs.body(app.func);
                     let redex = RedexMut {
-                        app,
-                        abs: func,
+                        app: term,
+                        abs: app.func,
                         body,
-                        arg,
-                        body_usage: usage,
+                        arg: app.arg,
+                        body_usage: abs.usage,
                         parent_chain,
                     };
                     Some(redex)
@@ -515,12 +531,12 @@ fn update_parent_chain_usage(
 
     let usages_of_page_in_arg = get_usage_by_depth(root, arg, parent_chain);
     for (depth, parent_term) in parent_chain.iter().enumerate() {
-        let Abstraction { body, usage } = root.get_abs(*parent_term);
+        let abs = root.get_abs(*parent_term);
 
         let usage_of_parent_in_arg = usages_of_page_in_arg[depth];
         let usage_delta: isize = (body_usage as isize - 1) * usage_of_parent_in_arg as isize;
-        let usage = usage.checked_add_signed(usage_delta).unwrap();
-        root[*parent_term] = DebruijnNode::Abstraction { body, usage }
+        let usage = abs.usage.checked_add_signed(usage_delta).unwrap();
+        root[*parent_term] = DebruijnNode::abs(abs.body, usage)
     }
 }
 
@@ -588,12 +604,12 @@ fn get_usage_by_depth(root: &FlatRoot, arg: TermIndex, parent_chain: &ParentChai
                 let level = usages.len() - index_relative_to_parent;
                 usages[level] += 1;
             }
-            DebruijnNode::Abstraction { body, .. } => {
-                _get_usage_by_depth(root, body, usages, depth_relative_to_arg + 1)
+            DebruijnNode::Abstraction(abs) => {
+                _get_usage_by_depth(root, abs.body, usages, depth_relative_to_arg + 1)
             }
-            DebruijnNode::Application { func, arg } => {
-                _get_usage_by_depth(root, func, usages, depth_relative_to_arg);
-                _get_usage_by_depth(root, arg, usages, depth_relative_to_arg);
+            DebruijnNode::Application(app) => {
+                _get_usage_by_depth(root, app.func, usages, depth_relative_to_arg);
+                _get_usage_by_depth(root, app.arg, usages, depth_relative_to_arg);
             }
         }
     }
@@ -613,16 +629,16 @@ fn get_usage_by_depth(root: &FlatRoot, arg: TermIndex, parent_chain: &ParentChai
 fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
     match parent {
         Some(Parent::Body(parent)) => {
-            let Abstraction { usage, .. } = root.get_abs(parent);
-            root[parent] = DebruijnNode::Abstraction { body: child, usage }
+            let abs = root.get_abs(parent);
+            root[parent] = DebruijnNode::abs(child, abs.usage)
         }
         Some(Parent::Func(parent)) => {
-            let Application { arg, .. } = root.get_app(parent);
-            root[parent] = DebruijnNode::Application { func: child, arg };
+            let app = root.get_app(parent);
+            root[parent] = DebruijnNode::app(child, app.arg);
         }
         Some(Parent::Arg(parent)) => {
-            let Application { func, .. } = root.get_app(parent);
-            root[parent] = DebruijnNode::Application { func, arg: child }
+            let app = root.get_app(parent);
+            root[parent] = DebruijnNode::app(app.func, child)
         }
         // Root
         None => {
@@ -686,8 +702,7 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &RedexMut) -> TermInde
 
         // The body of abs may get repointed if the redex body consists of a single leaf node that gets substituted.
         // Hence, we need to check for this and get the actually new body.
-        let Abstraction { body, .. } = root.get_abs(redex.abs);
-        body
+        root.get_abs(redex.abs).body
     }
 }
 struct Context {
@@ -757,23 +772,23 @@ fn _substitute_shift_fused(
                 (false, None)
             }
         }
-        DebruijnNode::Abstraction { body, usage } => {
-            let body = TermWithParent::body(term.term, body);
-
+        DebruijnNode::Abstraction(mut abs) => {
+            let body = abs.body(term.term);
             ctx.depth += 1;
             let (did_sub_body, new_body) = _substitute_shift_fused(ctx, root, body);
             ctx.depth -= 1;
 
-            // Compute usage due to substitution
-            if did_sub_body {
-                let body = new_body.unwrap_or(body.term);
-                root[term.term] = DebruijnNode::Abstraction { body, usage };
+            // If the body consists of a single leaf node, then the body will now point elsewhere.
+            // If this is the case, we need to re-point abs to the new body.
+            if did_sub_body && let Some(new_body) = new_body {
+                abs.body = new_body;
+                root[term.term] = abs.into();
             }
             (did_sub_body, None)
         }
-        DebruijnNode::Application { func, arg } => {
-            let func = TermWithParent::func(term.term, func);
-            let arg = TermWithParent::arg(term.term, arg);
+        DebruijnNode::Application(app) => {
+            let func = app.func(term.term);
+            let arg = app.arg(term.term);
 
             let (did_sub_func, _) = _substitute_shift_fused(ctx, root, func);
             let (did_sub_arg, _) = _substitute_shift_fused(ctx, root, arg);
@@ -803,19 +818,19 @@ fn clone_subtree_and_fix_up_fused(
                 let index = if is_free { index + up_by } else { index };
                 root.alloc_one(Some(DebruijnNode::Index(index)))
             }
-            DebruijnNode::Abstraction { body, usage } => {
-                let abs = root.alloc_one(None);
-                let body = _clone_subtree_and_fix_up_fused(root, body, up_by, depth + 1);
-                root[abs] = DebruijnNode::Abstraction { body, usage };
-                abs
+            DebruijnNode::Abstraction(abs) => {
+                let new_abs = root.alloc_one(None);
+                let body = _clone_subtree_and_fix_up_fused(root, abs.body, up_by, depth + 1);
+                root[new_abs] = DebruijnNode::abs(body, abs.usage);
+                new_abs
             }
-            DebruijnNode::Application { func, arg } => {
-                let app = root.alloc_one(None);
-                let func = _clone_subtree_and_fix_up_fused(root, func, up_by, depth);
-                let arg = _clone_subtree_and_fix_up_fused(root, arg, up_by, depth);
+            DebruijnNode::Application(app) => {
+                let new_app = root.alloc_one(None);
+                let func = _clone_subtree_and_fix_up_fused(root, app.func, up_by, depth);
+                let arg = _clone_subtree_and_fix_up_fused(root, app.arg, up_by, depth);
 
-                root[app] = DebruijnNode::Application { func, arg };
-                app
+                root[new_app] = DebruijnNode::app(func, arg);
+                new_app
             }
         }
     }
@@ -852,15 +867,15 @@ fn shift_cutoff(root: &mut FlatRoot, term: TermIndex, up_by: isize, depth: Debru
                 root[term] = DebruijnNode::Index(new_index);
             }
         }
-        DebruijnNode::Application { func, arg } => {
-            shift_cutoff(root, func, up_by, depth);
-            shift_cutoff(root, arg, up_by, depth);
+        DebruijnNode::Application(app) => {
+            shift_cutoff(root, app.func, up_by, depth);
+            shift_cutoff(root, app.arg, up_by, depth);
         }
-        DebruijnNode::Abstraction { body, .. } => {
+        DebruijnNode::Abstraction(abs) => {
             // We add one to the cutoff here because we don't want to modify bound variables
             // For example, if we're at the outer-most lambda, then any Index(1)s in the lambda body
             // are referring to that lambda's bound variable and we don't modify it.
-            shift_cutoff(root, body, up_by, depth + 1);
+            shift_cutoff(root, abs.body, up_by, depth + 1);
         }
     }
 }
@@ -887,17 +902,11 @@ mod test {
     }
 
     fn abs(body: impl Into<TermIndex>, usage: Usage) -> DebruijnNode {
-        DebruijnNode::Abstraction {
-            body: body.into(),
-            usage,
-        }
+        DebruijnNode::abs(body.into(), usage)
     }
 
     fn app(func: impl Into<TermIndex>, arg: impl Into<TermIndex>) -> DebruijnNode {
-        DebruijnNode::Application {
-            func: func.into(),
-            arg: arg.into(),
-        }
+        DebruijnNode::app(func.into(), arg.into())
     }
 
     #[test]

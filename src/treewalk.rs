@@ -28,15 +28,15 @@ impl VisitOrder {
             let term = term.term;
             match root[term] {
                 DebruijnNode::Index(_) => (),
-                DebruijnNode::Abstraction { body, .. } => {
-                    let body = TermWithParent::body(term, body);
+                DebruijnNode::Abstraction(abs) => {
+                    let body = abs.body(term);
                     parent_chain.push(term);
                     _preorder_walk(root, body, parent_chain, action, reverse)?;
                     parent_chain.pop();
                 }
-                DebruijnNode::Application { func, arg } => {
-                    let arg = TermWithParent::arg(term, arg);
-                    let func = TermWithParent::func(term, func);
+                DebruijnNode::Application(app) => {
+                    let arg = app.arg(term);
+                    let func = app.func(term);
                     if reverse {
                         _preorder_walk(root, arg, parent_chain, action, reverse)?;
                         _preorder_walk(root, func, parent_chain, action, reverse)?;
@@ -77,15 +77,15 @@ impl VisitOrder {
             let term = term.term;
             match root[term] {
                 DebruijnNode::Index(_) => (),
-                DebruijnNode::Abstraction { body, .. } => {
-                    let body = TermWithParent::body(term, body);
+                DebruijnNode::Abstraction(abs) => {
+                    let body = abs.body(term);
                     parent_chain.push(term);
                     _preorder_walk_mut(root, body, parent_chain, action, reverse)?;
                     parent_chain.pop();
                 }
-                DebruijnNode::Application { func, arg } => {
-                    let arg = TermWithParent::arg(term, arg);
-                    let func = TermWithParent::func(term, func);
+                DebruijnNode::Application(app) => {
+                    let arg = app.arg(term);
+                    let func = app.func(term);
                     if reverse {
                         _preorder_walk_mut(root, arg, parent_chain, action, reverse)?;
                         _preorder_walk_mut(root, func, parent_chain, action, reverse)?;
@@ -125,17 +125,11 @@ mod test {
     }
 
     fn def(body: usize) -> DebruijnNode {
-        DebruijnNode::Abstraction {
-            body: TermIndex(body),
-            usage: 0,
-        }
+        DebruijnNode::abs(TermIndex(body), 0)
     }
 
     fn call(func: usize, arg: usize) -> DebruijnNode {
-        DebruijnNode::Application {
-            func: TermIndex(func),
-            arg: TermIndex(arg),
-        }
+        DebruijnNode::app(TermIndex(func), TermIndex(arg))
     }
 
     type NodeToName = HashMap<TermIndex, String>;

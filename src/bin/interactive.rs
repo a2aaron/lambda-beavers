@@ -28,13 +28,13 @@ fn print_highlighted<'a>(root: &'a FlatRoot, highlighted: TermIndex) -> String {
     ) -> PrintableTerm {
         match root[term] {
             DebruijnNode::Index(i) => PrintableTerm::Leaf(format!("{i}")),
-            DebruijnNode::Abstraction { body, .. } => PrintableTerm::Abstraction {
+            DebruijnNode::Abstraction(abs) => PrintableTerm::Abstraction {
                 body_head: "λ ".to_string(),
-                body: Box::new(get_printable_terms(root, body, highlighted)),
+                body: Box::new(get_printable_terms(root, abs.body, highlighted)),
             },
-            DebruijnNode::Application { func, arg } => {
-                let func = get_printable_terms(root, func, highlighted);
-                let arg = get_printable_terms(root, arg, highlighted);
+            DebruijnNode::Application(app) => {
+                let func = get_printable_terms(root, app.func, highlighted);
+                let arg = get_printable_terms(root, app.arg, highlighted);
                 let highlight = term == highlighted;
 
                 PrintableTerm::Application {

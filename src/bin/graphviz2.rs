@@ -35,7 +35,7 @@ fn get_garbage_array(root: &FlatRoot) -> Vec<(bool, Option<TermIndex>)> {
 fn to_node_label(term: DebruijnNode) -> String {
     match term {
         DebruijnNode::Index(index) => format!("idx: {index}"),
-        DebruijnNode::Abstraction { usage, .. } => format!("abs\nusage = {usage}"),
+        DebruijnNode::Abstraction(abs) => format!("abs\nusage = {}", abs.usage),
         DebruijnNode::Application { .. } => format!("app"),
     }
 }
@@ -87,10 +87,13 @@ pub fn to_graph(root: &FlatRoot) -> String {
                     ))
                 }
             }
-            DebruijnNode::Abstraction { body, .. } => {
+            DebruijnNode::Abstraction(abs) => {
+                let body = abs.body;
                 output.push(format!("{index} -> {body} [{edge_attribs}]"))
             }
-            DebruijnNode::Application { func, arg } => {
+            DebruijnNode::Application(app) => {
+                let func = app.func;
+                let arg = app.arg;
                 output.push(format!("{index} -> {func} [{edge_attribs}]"));
                 output.push(format!(
                     "{index} -> {arg} [{edge_attribs} arrowhead=onormal]"
