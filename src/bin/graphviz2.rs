@@ -70,7 +70,7 @@ impl Attributes {
 
 type Edge = (usize, usize, Attributes);
 
-pub fn to_graph(root: &FlatRoot) -> String {
+pub fn to_graph(root: &FlatRoot, args: &Args) -> String {
     let is_garbage = get_garbage_array(root);
 
     let mut output = vec![];
@@ -78,26 +78,28 @@ pub fn to_graph(root: &FlatRoot) -> String {
     output.push("node [shape=box]".to_string());
     for (index, node) in root.backing.iter().enumerate() {
         let (is_garbage, index_bound) = is_garbage[index];
-        let node_color = if is_garbage {
-            GARBAGE_COLOR.to_string()
-        } else {
-            NORMAL_COLOR.to_string()
-        };
 
-        let bg_color = if let DebruijnNode::Abstraction(_) = node {
-            get_random_color(index, 0.5)
-        } else {
-            "white".to_string()
-        };
+        if is_garbage && args.no_garbage {
+            continue;
+        }
 
         let mut attribs = Attributes::new();
         attribs
             .set("label", to_node_label(*node))
             .set("xlabel", index)
-            .set("color", node_color.clone())
-            .set("fillcolor", bg_color)
-            .set("style", "filled")
-            .set("fontcolor", node_color);
+            .set("color", NORMAL_COLOR)
+            .set("fontcolor", NORMAL_COLOR);
+
+        if is_garbage {
+            attribs
+                .set("color", GARBAGE_COLOR)
+                .set("fontcolor", GARBAGE_COLOR);
+        } else if let DebruijnNode::Abstraction(_) = node
+            && !args.no_color_abs
+        {
+            let bg_color = get_random_color(index, 0.5);
+            attribs.set("fillcolor", bg_color).set("style", "filled");
+        }
 
         if index == root.root.0 {
             attribs.set("penwidth", 2.0);
@@ -119,7 +121,9 @@ pub fn to_graph(root: &FlatRoot) -> String {
         let mut edges: Vec<Edge> = vec![];
         match node {
             DebruijnNode::Index(_) => {
-                if let Some(abs_bound) = index_bound {
+                if let Some(abs_bound) = index_bound
+                    && !args.no_color_abs
+                {
                     let color = get_random_color(abs_bound.0, 1.0);
                     let edge_attribs = edge_attribs
                         .set("color", color)
@@ -152,13 +156,13 @@ pub fn to_graph(root: &FlatRoot) -> String {
 }
 
 fn get_random_color(term: usize, saturation: f32) -> String {
-    let hue = f32::sin(term as f32).abs();
+    let hue = f32::sin(term as f32 * 0.98).abs();
     format!("{hue} {saturation} 1.0")
 }
 
 #[derive(Parser, Debug)]
 #[command(about, long_about = None)]
-struct Args {
+pub struct Args {
     /// Term to parse. This can be a classic or Debruijn term
     term: String,
 
@@ -171,11 +175,17 @@ struct Args {
 
     #[arg(short, long, default_value = "false")]
     normalized: bool,
+
+    #[arg(short, long, default_value = "false")]
+    no_garbage: bool,
+
+    #[arg(short, long, default_value = "false")]
+    no_color_abs: bool,
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
 
-    let term = args.term;
+    let term = args.term.clone();
     let term = match Debruijn::from_str(&term) {
         Ok(term) => term,
         Err(err) => match parse::binary::from_str(&term) {
@@ -197,6 +207,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         reducer.root
     };
 
-    std::fs::write(args.output, to_graph(&root))?;
+    std::fs::write(args.output.clone(), to_graph(&root, &args))?;
     Ok(())
 }
