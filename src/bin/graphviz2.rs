@@ -41,8 +41,10 @@ fn to_node_label(term: DebruijnNode) -> String {
 }
 
 const GARBAGE_COLOR: &str = "lightgrey";
-const ROOT_COLOR: &str = "red";
 const NORMAL_COLOR: &str = "black";
+
+type Attributes = Vec<(&'static str, String)>;
+type Edge = (usize, usize, Attributes);
 
 pub fn to_graph(root: &FlatRoot) -> String {
     let is_garbage = get_garbage_array(root);
@@ -53,19 +55,29 @@ pub fn to_graph(root: &FlatRoot) -> String {
     for (index, node) in root.backing.iter().enumerate() {
         let (is_garbage, index_bound) = is_garbage[index];
         let node_color = if is_garbage {
-            GARBAGE_COLOR
-        } else if index == root.root.0 {
-            ROOT_COLOR
+            GARBAGE_COLOR.to_string()
         } else {
-            NORMAL_COLOR
+            NORMAL_COLOR.to_string()
         };
 
-        let attribs = vec![
+        let bg_color = if let DebruijnNode::Abstraction(_) = node {
+            get_random_color(index, 0.5)
+        } else {
+            "white".to_string()
+        };
+
+        let mut attribs: Attributes = vec![
             ("label", to_node_label(*node)),
             ("xlabel", index.to_string()),
             ("color", node_color.to_string()),
+            ("fillcolor", bg_color.to_string()),
+            ("style", "filled".to_string()),
             ("fontcolor", node_color.to_string()),
         ];
+
+        if index == root.root.0 {
+            attribs.push(("penwidth", "2.0".to_string()));
+        }
 
         let attribs = bake_attribs(&attribs);
 
@@ -78,34 +90,51 @@ pub fn to_graph(root: &FlatRoot) -> String {
             NORMAL_COLOR
         };
 
-        let edge_attribs = format!("color={edge_color}");
+        let mut edges: Vec<Edge> = vec![];
         match node {
             DebruijnNode::Index(_) => {
                 if let Some(abs_bound) = index_bound {
-                    output.push(format!(
-                        "{index} -> {abs_bound} [color=cyan, style=dashed, constraint=false]"
-                    ))
+                    let color = get_random_color(abs_bound.0, 1.0);
+                    let edge_attribs: Attributes = vec![
+                        ("color", color),
+                        ("style", "dashed".to_string()),
+                        ("constraint", "false".to_string()),
+                    ];
+                    edges.push((index, abs_bound.0, edge_attribs));
                 }
             }
             DebruijnNode::Abstraction(abs) => {
-                let body = abs.body;
-                output.push(format!("{index} -> {body} [{edge_attribs}]"))
+                let edge_attribs: Attributes = vec![("color", edge_color.to_string())];
+                let body = abs.body.0;
+                edges.push((index, body, edge_attribs));
             }
             DebruijnNode::Application(app) => {
-                let func = app.func;
-                let arg = app.arg;
-                output.push(format!("{index} -> {func} [{edge_attribs}]"));
-                output.push(format!(
-                    "{index} -> {arg} [{edge_attribs} arrowhead=onormal]"
-                ));
+                let mut edge_attribs: Attributes = vec![("color", edge_color.to_string())];
+
+                let func = app.func.0;
+                let arg = app.arg.0;
+                edges.push((index, func, edge_attribs.clone()));
+
+                edge_attribs.push(("arrowhead", "onormal".to_string()));
+                edges.push((index, arg, edge_attribs));
             }
         };
+
+        for (head, tail, attribs) in edges {
+            let attribs = bake_attribs(&attribs);
+            output.push(format!("{head} -> {tail} [{attribs}]"));
+        }
     }
     output.push(format!("}}"));
     output.join("\n")
 }
 
-fn bake_attribs(attribs: &[(&str, String)]) -> String {
+fn get_random_color(term: usize, saturation: f32) -> String {
+    let hue = f32::sin(term as f32).abs();
+    format!("{hue} {saturation} 1.0")
+}
+
+fn bake_attribs(attribs: &Attributes) -> String {
     attribs
         .iter()
         .map(|(name, value)| format!("{name}=\"{}\"", value))
