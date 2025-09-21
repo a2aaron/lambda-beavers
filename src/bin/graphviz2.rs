@@ -1,6 +1,6 @@
 #![feature(iter_intersperse)]
 
-use std::{ops::ControlFlow, str::FromStr};
+use std::{collections::HashMap, ops::ControlFlow, str::FromStr};
 
 use clap::Parser;
 use lambda_beaver::{
@@ -43,7 +43,31 @@ fn to_node_label(term: DebruijnNode) -> String {
 const GARBAGE_COLOR: &str = "lightgrey";
 const NORMAL_COLOR: &str = "black";
 
-type Attributes = Vec<(&'static str, String)>;
+#[derive(Debug, Clone, PartialEq, Eq, Default)]
+struct Attributes {
+    attributes: HashMap<String, String>,
+}
+impl Attributes {
+    fn new() -> Attributes {
+        Attributes {
+            ..Default::default()
+        }
+    }
+
+    fn set(&mut self, value: impl ToString, key: impl ToString) -> &mut Attributes {
+        self.attributes.insert(value.to_string(), key.to_string());
+        self
+    }
+
+    fn bake(&self) -> String {
+        self.attributes
+            .iter()
+            .map(|(name, value)| format!("{name}=\"{}\"", value))
+            .intersperse(" ".to_string())
+            .collect()
+    }
+}
+
 type Edge = (usize, usize, Attributes);
 
 pub fn to_graph(root: &FlatRoot) -> String {
@@ -66,21 +90,20 @@ pub fn to_graph(root: &FlatRoot) -> String {
             "white".to_string()
         };
 
-        let mut attribs: Attributes = vec![
-            ("label", to_node_label(*node)),
-            ("xlabel", index.to_string()),
-            ("color", node_color.to_string()),
-            ("fillcolor", bg_color.to_string()),
-            ("style", "filled".to_string()),
-            ("fontcolor", node_color.to_string()),
-        ];
+        let mut attribs = Attributes::new();
+        attribs
+            .set("label", to_node_label(*node))
+            .set("xlabel", index)
+            .set("color", node_color.clone())
+            .set("fillcolor", bg_color)
+            .set("style", "filled")
+            .set("fontcolor", node_color);
 
         if index == root.root.0 {
-            attribs.push(("penwidth", "2.0".to_string()));
+            attribs.set("penwidth", 2.0);
         }
 
-        let attribs = bake_attribs(&attribs);
-
+        let attribs = attribs.bake();
         let node_text = format!("{index} [{attribs}]");
         output.push(node_text);
 
@@ -90,38 +113,37 @@ pub fn to_graph(root: &FlatRoot) -> String {
             NORMAL_COLOR
         };
 
+        let mut edge_attribs = Attributes::new();
+        edge_attribs.set("color", edge_color);
+
         let mut edges: Vec<Edge> = vec![];
         match node {
             DebruijnNode::Index(_) => {
                 if let Some(abs_bound) = index_bound {
                     let color = get_random_color(abs_bound.0, 1.0);
-                    let edge_attribs: Attributes = vec![
-                        ("color", color),
-                        ("style", "dashed".to_string()),
-                        ("constraint", "false".to_string()),
-                    ];
-                    edges.push((index, abs_bound.0, edge_attribs));
+                    let edge_attribs = edge_attribs
+                        .set("color", color)
+                        .set("style", "dashed")
+                        .set("constraint", "false");
+                    edges.push((index, abs_bound.0, edge_attribs.clone()));
                 }
             }
             DebruijnNode::Abstraction(abs) => {
-                let edge_attribs: Attributes = vec![("color", edge_color.to_string())];
                 let body = abs.body.0;
-                edges.push((index, body, edge_attribs));
+                edges.push((index, body, edge_attribs.clone()));
             }
             DebruijnNode::Application(app) => {
-                let mut edge_attribs: Attributes = vec![("color", edge_color.to_string())];
-
                 let func = app.func.0;
                 let arg = app.arg.0;
                 edges.push((index, func, edge_attribs.clone()));
 
-                edge_attribs.push(("arrowhead", "onormal".to_string()));
-                edges.push((index, arg, edge_attribs));
+                let edge_attribs = edge_attribs.set("arrowhead", "onormal");
+                edges.push((index, arg, edge_attribs.clone()));
             }
         };
 
         for (head, tail, attribs) in edges {
-            let attribs = bake_attribs(&attribs);
+            let attribs = &attribs.bake();
             output.push(format!("{head} -> {tail} [{attribs}]"));
         }
     }
@@ -132,14 +154,6 @@ pub fn to_graph(root: &FlatRoot) -> String {
 fn get_random_color(term: usize, saturation: f32) -> String {
     let hue = f32::sin(term as f32).abs();
     format!("{hue} {saturation} 1.0")
-}
-
-fn bake_attribs(attribs: &Attributes) -> String {
-    attribs
-        .iter()
-        .map(|(name, value)| format!("{name}=\"{}\"", value))
-        .intersperse(" ".to_string())
-        .collect()
 }
 
 #[derive(Parser, Debug)]
