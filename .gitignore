@@ -5,3 +5,5 @@
 out.txt
 *.trace
 *.csv
+out/*
+out/

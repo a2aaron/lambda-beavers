@@ -421,13 +421,13 @@ pub struct RedexMut {
     parent_chain: ParentChain,
     // Application term for the redex. If the parent for this is none,
     // then the Redex is actually the root (and therefore is pointed to by FlatRoot.root)
-    app: TermWithParent,
+    pub app: TermWithParent,
     // The Abstraction containing the body. This must be an Abstraction
     pub abs: TermIndex,
     // The body of the Abstraction. This must be pointed to by `abs`
     body: TermWithParent,
     // The argument of the Application. This must be pointed to by `app.arg`
-    arg: TermIndex,
+    pub arg: TermIndex,
     // The usage of the `body`. Provided for convinence
     body_usage: Usage,
 }

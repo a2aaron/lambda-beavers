@@ -1,18 +1,58 @@
 #![feature(iter_intersperse)]
+#![feature(more_float_constants)]
 
+use core::f32;
 use std::{collections::HashMap, ops::ControlFlow, str::FromStr};
 
 use clap::Parser;
 use lambda_beaver::{
     debruijn::Debruijn,
-    debruijn_flat::{DebruijnNode, FlatRoot, TermIndex},
+    debruijn_flat::{DebruijnNode, FlatRoot, RedexMut, TermIndex},
     parse,
     reduce::Reducer,
     treewalk::VisitOrder,
 };
 
-fn get_garbage_array(root: &FlatRoot) -> Vec<(bool, Option<TermIndex>)> {
-    let mut is_garbage = vec![(true, None); root.backing.len()];
+#[derive(Debug, Clone, Copy)]
+struct NodeInfo {
+    is_root: bool,
+    index: TermIndex,
+    // If true, the this DebruijNode is garbage
+    is_garbage: bool,
+    // If not None, then this DebruijNode is a non-garbage Index node
+    // and the value of this field is equal to the non-garbage Abstraction node that this
+    // Index node binds to.
+    // Note that a DebruijnNode can be an Index node without this field being set (which happens if
+    // the Index node is garbage or if the Index node is unbound within the whole term)
+    abs_binding: Option<TermIndex>,
+    // If not None, then this DebruijnNode is an non-garbage Application and is also a Redex
+    redex_info: Option<RedexInfo>,
+}
+
+impl NodeInfo {
+    fn garbage(index: TermIndex) -> NodeInfo {
+        NodeInfo {
+            index,
+            is_root: false,
+            is_garbage: true,
+            abs_binding: None,
+            redex_info: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+struct RedexInfo {
+    // The function of the application in the redex, which will be an Abstraction
+    abs: TermIndex,
+    // The argument of the application in the redex
+    arg: TermIndex,
+}
+
+fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
+    let mut info_vec: Vec<NodeInfo> = (0..root.backing.len())
+        .map(|index| NodeInfo::garbage(TermIndex(index)))
+        .collect();
     VisitOrder::LEFT_OUTERMOST.preorder_walk(root, |_, term, parent_chain| {
         let abs_bound = match root[term.term] {
             DebruijnNode::Index(index) => {
@@ -25,11 +65,24 @@ fn get_garbage_array(root: &FlatRoot) -> Vec<(bool, Option<TermIndex>)> {
             _ => None,
         };
 
-        is_garbage[term.term.0] = (false, abs_bound);
+        let redex_info = match RedexMut::try_get(root, term, parent_chain.clone()) {
+            Some(redex) => Some(RedexInfo {
+                abs: redex.abs,
+                arg: redex.arg,
+            }),
+            None => None,
+        };
+
+        let is_root = root.root == term.term;
+
+        info_vec[term.term.0].is_root = is_root;
+        info_vec[term.term.0].is_garbage = false;
+        info_vec[term.term.0].abs_binding = abs_bound;
+        info_vec[term.term.0].redex_info = redex_info;
         ControlFlow::Continue::<()>(())
     });
 
-    is_garbage
+    info_vec
 }
 
 fn to_node_label(term: DebruijnNode) -> String {
@@ -68,95 +121,162 @@ impl Attributes {
     }
 }
 
-type Edge = (usize, usize, Attributes);
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
+struct Graph {
+    name: String,
+    nodes: Vec<Node>,
+    edges: Vec<Edge>,
+    subgraphs: Vec<Graph>,
+}
 
-pub fn to_graph(root: &FlatRoot, args: &Args) -> String {
-    let is_garbage = get_garbage_array(root);
+impl Graph {
+    fn to_string(&self) -> String {
+        self.print_graph("digraph")
+    }
+    fn print_graph(&self, keyword: &str) -> String {
+        let mut output = vec![];
+        output.push(format!("{keyword} {} {{", self.name));
+        output.push("node [shape=box]".to_string());
 
-    let mut output = vec![];
-    output.push(format!("digraph G {{"));
-    output.push("node [shape=box]".to_string());
-    for (index, node) in root.backing.iter().enumerate() {
-        let (is_garbage, index_bound) = is_garbage[index];
-
-        if is_garbage && args.no_garbage {
-            continue;
+        for node in &self.nodes {
+            output.push(format!("{} [{}]", node.name, node.attribs.bake()))
         }
 
-        let mut attribs = Attributes::new();
-        attribs
-            .set("label", to_node_label(*node))
-            .set("xlabel", index)
-            .set("color", NORMAL_COLOR)
-            .set("fontcolor", NORMAL_COLOR);
-
-        if is_garbage {
-            attribs
-                .set("color", GARBAGE_COLOR)
-                .set("fontcolor", GARBAGE_COLOR);
-        } else if let DebruijnNode::Abstraction(_) = node
-            && !args.no_color_abs
-        {
-            let bg_color = get_random_color(index, 0.5);
-            attribs.set("fillcolor", bg_color).set("style", "filled");
-        }
-
-        if index == root.root.0 {
-            attribs.set("penwidth", 2.0);
-        }
-
-        let attribs = attribs.bake();
-        let node_text = format!("{index} [{attribs}]");
-        output.push(node_text);
-
-        let edge_color = if is_garbage {
-            GARBAGE_COLOR
-        } else {
-            NORMAL_COLOR
-        };
-
-        let mut edge_attribs = Attributes::new();
-        edge_attribs.set("color", edge_color);
-
-        let mut edges: Vec<Edge> = vec![];
-        match node {
-            DebruijnNode::Index(_) => {
-                if let Some(abs_bound) = index_bound
-                    && !args.no_color_abs
-                {
-                    let color = get_random_color(abs_bound.0, 1.0);
-                    let edge_attribs = edge_attribs
-                        .set("color", color)
-                        .set("style", "dashed")
-                        .set("constraint", "false");
-                    edges.push((index, abs_bound.0, edge_attribs.clone()));
-                }
-            }
-            DebruijnNode::Abstraction(abs) => {
-                let body = abs.body.0;
-                edges.push((index, body, edge_attribs.clone()));
-            }
-            DebruijnNode::Application(app) => {
-                let func = app.func.0;
-                let arg = app.arg.0;
-                edges.push((index, func, edge_attribs.clone()));
-
-                let edge_attribs = edge_attribs.set("arrowhead", "onormal");
-                edges.push((index, arg, edge_attribs.clone()));
-            }
-        };
-
-        for (head, tail, attribs) in edges {
+        for Edge(head, tail, attribs) in &self.edges {
             let attribs = &attribs.bake();
             output.push(format!("{head} -> {tail} [{attribs}]"));
         }
+
+        output.push(format!("}}"));
+        output.join("\n")
     }
-    output.push(format!("}}"));
-    output.join("\n")
+}
+
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
+struct Node {
+    name: String,
+    attribs: Attributes,
+}
+impl Node {
+    fn new(name: impl ToString, attributes: &Attributes) -> Node {
+        Node {
+            name: name.to_string(),
+            attribs: attributes.clone(),
+        }
+    }
+}
+
+#[derive(Debug, Default, PartialEq, Eq, Clone)]
+struct Edge(String, String, Attributes);
+impl Edge {
+    fn new(head: impl ToString, tail: impl ToString, attributes: &Attributes) -> Edge {
+        Edge(head.to_string(), tail.to_string(), attributes.clone())
+    }
+}
+
+fn to_graph(root: &FlatRoot, args: &Args) -> Graph {
+    let mut graph = Graph::default();
+    let info_vec = get_info_array(root);
+
+    for (index, node) in root.backing.iter().enumerate() {
+        let node_info = info_vec[index];
+
+        if node_info.is_garbage && args.no_garbage {
+            continue;
+        }
+
+        let graph_node = make_node(args, node, node_info);
+        let mut edges = get_edges(args, node, node_info);
+
+        graph.nodes.push(graph_node);
+        graph.edges.append(&mut edges);
+    }
+    graph
+}
+
+fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<Edge> {
+    let mut edges = vec![];
+    let mut edge_attribs = Attributes::new();
+    edge_attribs.set(
+        "color",
+        if node_info.is_garbage {
+            GARBAGE_COLOR
+        } else {
+            NORMAL_COLOR
+        },
+    );
+    match node {
+        DebruijnNode::Index(_) => {
+            if let Some(abs_bound) = node_info.abs_binding
+                && !args.no_color_abs
+            {
+                let color = get_random_color(abs_bound.0, 1.0);
+                edge_attribs
+                    .set("color", color)
+                    .set("style", "dashed")
+                    .set("constraint", "false");
+                edges.push(Edge::new(node_info.index, abs_bound.0, &edge_attribs));
+            }
+        }
+        DebruijnNode::Abstraction(abs) => {
+            let body = abs.body.0;
+            edges.push(Edge::new(node_info.index, body, &edge_attribs));
+        }
+        DebruijnNode::Application(app) => {
+            let func = app.func.0;
+            let arg = app.arg.0;
+            edges.push(Edge::new(node_info.index, func, &edge_attribs));
+
+            edge_attribs.set("arrowhead", "onormal");
+            edges.push(Edge::new(node_info.index, arg, &edge_attribs));
+        }
+    };
+    edges
+}
+
+fn make_node(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Node {
+    let mut attribs = Attributes::new();
+    attribs
+        .set("label", to_node_label(*node))
+        .set("xlabel", node_info.index)
+        .set("color", NORMAL_COLOR)
+        .set("fontcolor", NORMAL_COLOR);
+
+    if node_info.is_garbage {
+        attribs
+            .set("color", GARBAGE_COLOR)
+            .set("fontcolor", GARBAGE_COLOR);
+    }
+
+    let is_abstraction = matches!(node, DebruijnNode::Abstraction(_));
+    if is_abstraction && !args.no_color_abs {
+        let bg_color = get_random_color(node_info.index.0, 0.5);
+        attribs.set("fillcolor", bg_color).set("style", "filled");
+    }
+
+    if let Some(info) = node_info.redex_info
+        && !args.no_color_redex
+    {
+        let color1 = get_random_color(info.abs.0, 0.5);
+        let color2 = get_random_color(info.arg.0, 0.5);
+        let bg_color = format!("{};0.5:{}", color1, color2);
+        attribs
+            .set("shape", "diamond")
+            .set("fillcolor", bg_color)
+            .set("style", "filled");
+    }
+
+    if node_info.is_root {
+        attribs.set("penwidth", 2.0);
+    }
+
+    let graph_node = Node::new(node_info.index, &attribs);
+    graph_node
 }
 
 fn get_random_color(term: usize, saturation: f32) -> String {
-    let hue = f32::sin(term as f32 * 0.98).abs();
+    // Divide by phi here to get reasonably 'random' colors
+    let hue = (term as f32 / f32::consts::PHI).fract();
     format!("{hue} {saturation} 1.0")
 }
 
@@ -181,6 +301,9 @@ pub struct Args {
 
     #[arg(short, long, default_value = "false")]
     no_color_abs: bool,
+
+    #[arg(short, long, default_value = "false")]
+    no_color_redex: bool,
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
@@ -207,6 +330,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         reducer.root
     };
 
-    std::fs::write(args.output.clone(), to_graph(&root, &args))?;
+    let graph = to_graph(&root, &args);
+    std::fs::write(args.output.clone(), graph.to_string())?;
     Ok(())
 }
