@@ -3,13 +3,10 @@ use std::ops::ControlFlow;
 use crate::debruijn_flat::{DebruijnNode, FlatRoot, ParentChain, TermWithParent};
 
 #[derive(Debug, Clone, Copy)]
-pub struct VisitOrder {
-    pub(crate) reverse: bool,
-}
+pub struct VisitOrder;
 
 impl VisitOrder {
-    pub const LEFT_OUTERMOST: VisitOrder = VisitOrder { reverse: false };
-    pub const RIGHT_OUTERMOST: VisitOrder = VisitOrder { reverse: true };
+    pub const LEFT_OUTERMOST: VisitOrder = VisitOrder;
 
     pub fn preorder_walk<T>(
         &self,
@@ -21,7 +18,6 @@ impl VisitOrder {
             term: TermWithParent,
             parent_chain: &mut ParentChain,
             action: &mut impl FnMut(&FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>,
-            reverse: bool,
         ) -> ControlFlow<T> {
             action(root, term, &parent_chain)?;
 
@@ -31,19 +27,15 @@ impl VisitOrder {
                 DebruijnNode::Abstraction(abs) => {
                     let body = abs.body(term);
                     parent_chain.push(term);
-                    _preorder_walk(root, body, parent_chain, action, reverse)?;
+                    _preorder_walk(root, body, parent_chain, action)?;
                     parent_chain.pop();
                 }
                 DebruijnNode::Application(app) => {
                     let arg = app.arg(term);
                     let func = app.func(term);
-                    if reverse {
-                        _preorder_walk(root, arg, parent_chain, action, reverse)?;
-                        _preorder_walk(root, func, parent_chain, action, reverse)?;
-                    } else {
-                        _preorder_walk(root, func, parent_chain, action, reverse)?;
-                        _preorder_walk(root, arg, parent_chain, action, reverse)?;
-                    }
+
+                    _preorder_walk(root, func, parent_chain, action)?;
+                    _preorder_walk(root, arg, parent_chain, action)?;
                 }
             }
             ControlFlow::Continue(())
@@ -55,7 +47,6 @@ impl VisitOrder {
             TermWithParent::root(root),
             &mut parent_chain,
             &mut action,
-            self.reverse,
         )
         .break_value()
     }
@@ -70,7 +61,6 @@ impl VisitOrder {
             term: TermWithParent,
             parent_chain: &mut ParentChain,
             action: &mut impl FnMut(&mut FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>,
-            reverse: bool,
         ) -> ControlFlow<T> {
             action(root, term, &parent_chain)?;
 
@@ -80,19 +70,15 @@ impl VisitOrder {
                 DebruijnNode::Abstraction(abs) => {
                     let body = abs.body(term);
                     parent_chain.push(term);
-                    _preorder_walk_mut(root, body, parent_chain, action, reverse)?;
+                    _preorder_walk_mut(root, body, parent_chain, action)?;
                     parent_chain.pop();
                 }
                 DebruijnNode::Application(app) => {
                     let arg = app.arg(term);
                     let func = app.func(term);
-                    if reverse {
-                        _preorder_walk_mut(root, arg, parent_chain, action, reverse)?;
-                        _preorder_walk_mut(root, func, parent_chain, action, reverse)?;
-                    } else {
-                        _preorder_walk_mut(root, func, parent_chain, action, reverse)?;
-                        _preorder_walk_mut(root, arg, parent_chain, action, reverse)?;
-                    }
+
+                    _preorder_walk_mut(root, func, parent_chain, action)?;
+                    _preorder_walk_mut(root, arg, parent_chain, action)?;
                 }
             }
             ControlFlow::Continue(())
@@ -104,7 +90,6 @@ impl VisitOrder {
             TermWithParent::root(root),
             &mut parent_chain,
             &mut action,
-            self.reverse,
         )
         .break_value()
     }
@@ -233,12 +218,5 @@ mod test {
         let test_data = TestData::new();
         let expected = "f, b, a, d, c, e, g, i, h";
         assert_ordering(test_data, expected, VisitOrder::LEFT_OUTERMOST);
-    }
-
-    #[test]
-    fn test_preorder_reverse_nrl() {
-        let test_data = TestData::new();
-        let expected = "f, g, i, h, b, d, e, c, a";
-        assert_ordering(test_data, expected, VisitOrder::RIGHT_OUTERMOST);
     }
 }
