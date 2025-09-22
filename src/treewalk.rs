@@ -5,19 +5,18 @@ use crate::debruijn_flat::{DebruijnNode, FlatRoot, ParentChain, TermWithParent};
 #[derive(Debug, Clone, Copy)]
 pub struct VisitOrder;
 
+pub trait ActionMut<T> = FnMut(&mut FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>;
+pub trait Action<T> = FnMut(&FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>;
+
 impl VisitOrder {
     pub const LEFT_OUTERMOST: VisitOrder = VisitOrder;
 
-    pub fn preorder_walk<T>(
-        &self,
-        root: &FlatRoot,
-        mut action: impl FnMut(&FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>,
-    ) -> Option<T> {
+    pub fn preorder_walk<T>(&self, root: &FlatRoot, mut action: impl Action<T>) -> Option<T> {
         fn _preorder_walk<T>(
             root: &FlatRoot,
             term: TermWithParent,
             parent_chain: &mut ParentChain,
-            action: &mut impl FnMut(&FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>,
+            action: &mut impl Action<T>,
         ) -> ControlFlow<T> {
             action(root, term, &parent_chain)?;
 
@@ -54,13 +53,13 @@ impl VisitOrder {
     pub fn preorder_walk_mut<T>(
         &self,
         root: &mut FlatRoot,
-        mut action: impl FnMut(&mut FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>,
+        mut action: impl ActionMut<T>,
     ) -> Option<T> {
         fn _preorder_walk_mut<T>(
             root: &mut FlatRoot,
             term: TermWithParent,
             parent_chain: &mut ParentChain,
-            action: &mut impl FnMut(&mut FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>,
+            action: &mut impl ActionMut<T>,
         ) -> ControlFlow<T> {
             action(root, term, &parent_chain)?;
 

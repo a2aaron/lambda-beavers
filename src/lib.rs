@@ -1,6 +1,7 @@
 #![feature(iter_intersperse)]
 #![feature(macro_metavar_expr_concat)]
 #![feature(never_type)]
+#![feature(trait_alias)]
 
 pub mod common_terms;
 pub mod debruijn;
