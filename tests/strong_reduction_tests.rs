@@ -6,7 +6,6 @@ use lambda_beaver::{
     debruijn_flat::FlatRoot,
     reduce::{Reducer, ReductionResult},
     term::Classic,
-    treewalk::VisitOrder,
     utils::strong_reduction_test::{parse_line, reduce_with_timeout},
 };
 
@@ -53,7 +52,7 @@ fn assert_round_trip(test: &str, _: usize) {
 fn assert_usage(test: &str, test_i: usize) {
     let (starting, expected) = parse_line(test);
 
-    let mut reducer = Reducer::new(&starting, VisitOrder::LEFT_OUTERMOST);
+    let mut reducer = Reducer::new(&starting);
     loop {
         let result = reducer.reduce_one();
         if let Err((failing_term, actual, expected)) = reducer.root.check_usage() {
@@ -77,11 +76,10 @@ fn assert_usage(test: &str, test_i: usize) {
 // note: this is used by the strong-only tests.
 #[allow(dead_code)]
 fn assert_test(test: &str, test_i: usize) {
-    let visit_order = VisitOrder::LEFT_OUTERMOST;
     let timeout = None; // Some(Duration::from_secs(5));
 
     let (starting, expected) = parse_line(test);
-    let (reduction_result, _) = reduce_with_timeout(&starting, visit_order, timeout);
+    let (reduction_result, _) = reduce_with_timeout(&starting, timeout);
 
     let starting_classic = Classic::from(&starting);
     let expected_classic = Classic::from(&expected);

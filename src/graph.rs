@@ -1,9 +1,6 @@
 use std::{collections::HashMap, fmt::Display};
 
-use crate::{
-    debruijn_flat::{FlatRoot, RedexMut, beta_reduce},
-    treewalk::VisitOrder,
-};
+use crate::debruijn_flat::{FlatRoot, RedexMut, beta_reduce};
 
 #[derive(Debug)]
 pub struct ReductionNode {
@@ -12,8 +9,8 @@ pub struct ReductionNode {
 }
 
 impl ReductionNode {
-    fn from_root(root: FlatRoot, visit_order: VisitOrder) -> ReductionNode {
-        let unevaluated_redexes = root.get_redexes(visit_order);
+    fn from_root(root: FlatRoot) -> ReductionNode {
+        let unevaluated_redexes = root.get_redexes();
         ReductionNode {
             root,
             unevaluated_redexes,
@@ -52,7 +49,6 @@ pub struct ReductionGraph {
     edges: Vec<(NodeIndex, NodeIndex)>,
     beta_normal_form: Option<NodeIndex>,
     root: Option<NodeIndex>,
-    visit_order: VisitOrder,
 }
 
 pub struct GraphUpdate {
@@ -62,7 +58,7 @@ pub struct GraphUpdate {
 }
 
 impl ReductionGraph {
-    fn new(visit_order: VisitOrder) -> ReductionGraph {
+    fn new() -> ReductionGraph {
         ReductionGraph {
             nodes: vec![],
             term_to_node: HashMap::new(),
@@ -70,12 +66,11 @@ impl ReductionGraph {
             edges: vec![],
             beta_normal_form: None,
             root: None,
-            visit_order,
         }
     }
 
-    pub fn with_root(root: FlatRoot, visit_order: VisitOrder) -> ReductionGraph {
-        let mut graph = ReductionGraph::new(visit_order);
+    pub fn with_root(root: FlatRoot) -> ReductionGraph {
+        let mut graph = ReductionGraph::new();
         let root_index = graph.add_node_from_root(root).0;
         graph.root = Some(root_index);
         graph
@@ -87,7 +82,7 @@ impl ReductionGraph {
             Some(index) => (index, false),
             None => {
                 // Rc clone is cheap
-                let reduction_node = ReductionNode::from_root(root.clone(), self.visit_order);
+                let reduction_node = ReductionNode::from_root(root.clone());
                 let index = NodeIndex(self.nodes.len());
                 self.term_to_node.insert(root, index);
                 if reduction_node.has_unevaled_redexes() {
@@ -206,7 +201,6 @@ mod test {
     use crate::{
         debruijn_flat::FlatRoot,
         graph::{NodeIndex, ReductionGraph, ReductionNode},
-        treewalk::VisitOrder,
     };
 
     impl ReductionGraph {
@@ -234,15 +228,14 @@ mod test {
 
     #[test]
     fn bnf_check() {
-        let visit_order = VisitOrder::LEFT_OUTERMOST;
         let term = "(λ 1) λ λ 1";
         let root = FlatRoot::from_str(term).unwrap();
-        let node = ReductionNode::from_root(root.clone(), visit_order);
+        let node = ReductionNode::from_root(root.clone());
         assert!(
             !node.root.is_bnf(),
             "Expected {} to be BNF. Redex: {:?}",
             node.root,
-            root.get_redexes(visit_order)
+            root.get_redexes()
         );
     }
 
@@ -250,7 +243,7 @@ mod test {
     fn graph_and_true_false() {
         let root = "(((λ (λ ((2 1) 2))) (λ (λ 2))) (λ (λ 1)))";
         let root = FlatRoot::from_str(root).unwrap().into();
-        let mut graph = ReductionGraph::with_root(root, VisitOrder::LEFT_OUTERMOST);
+        let mut graph = ReductionGraph::with_root(root);
 
         while graph.any_reducible() {
             let node_idx = graph.incomplete_nodes[0];

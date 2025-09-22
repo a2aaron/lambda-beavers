@@ -6,7 +6,6 @@ use lambda_beaver::{
     parse,
     reduce::{self, ReductionResult},
     term::Classic,
-    treewalk::VisitOrder,
     utils::{self},
 };
 
@@ -58,7 +57,6 @@ fn main() {
     let min_bitlength = args.min_bitlength;
     let max_bitlength = args.max_bitlength;
     let max_reductions = args.max_reductions;
-    let visit_order = VisitOrder::LEFT_OUTERMOST;
 
     let mut histogram_lengths = Histogram::new();
     let mut histogram_time = Histogram::new();
@@ -71,7 +69,7 @@ fn main() {
         for term in terms {
             let term_binary = format!("{term:b}");
             let term_classic = Classic::from(&term);
-            let (result, reductions_used) = reduce::reduce(&term, visit_order, max_reductions);
+            let (result, reductions_used) = reduce::reduce(&term, max_reductions);
             match result {
                 ReductionResult::NormalForm(bnf) => {
                     let bnf_classic = Classic::from(&bnf);

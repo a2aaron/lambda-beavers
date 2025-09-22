@@ -6,36 +6,30 @@ use crate::{
     debruijn::Debruijn,
     debruijn_flat::{self, FlatRoot},
     graph::{NodeIndex, ReductionGraph},
-    treewalk::VisitOrder,
     utils::Rng,
 };
 
 pub struct Reducer {
     pub root: FlatRoot,
-    visit_order: VisitOrder,
 }
 
 impl Reducer {
-    pub fn new(root: &Debruijn, visit_order: VisitOrder) -> Self {
+    pub fn new(root: &Debruijn) -> Self {
         Self {
             root: FlatRoot::from(root),
-            visit_order,
         }
     }
 
     pub fn reduce_one(&mut self) -> Option<ReductionResult> {
-        let result =
-            self.visit_order
-                .preorder_walk_mut(&mut self.root, |root, term, parent_chain| {
-                    if let Some(redex) =
-                        debruijn_flat::RedexMut::try_get(root, term, parent_chain.clone())
-                    {
-                        debruijn_flat::beta_reduce(root, redex);
-                        ControlFlow::Break(())
-                    } else {
-                        ControlFlow::Continue(())
-                    }
-                });
+        let result = self.root.preorder_walk_mut(|root, term, parent_chain| {
+            if let Some(redex) = debruijn_flat::RedexMut::try_get(root, term, parent_chain.clone())
+            {
+                debruijn_flat::beta_reduce(root, redex);
+                ControlFlow::Break(())
+            } else {
+                ControlFlow::Continue(())
+            }
+        });
         match result {
             Some(()) => None,
             // This clone is fine, it occurs at the end of all reductions
@@ -60,12 +54,8 @@ impl Display for ReductionResult {
     }
 }
 
-pub fn reduce(
-    root: &Debruijn,
-    visit_order: VisitOrder,
-    max_reductions: usize,
-) -> (ReductionResult, usize) {
-    let mut reducer = Reducer::new(root, visit_order);
+pub fn reduce(root: &Debruijn, max_reductions: usize) -> (ReductionResult, usize) {
+    let mut reducer = Reducer::new(root);
     for i in 0..max_reductions {
         if let Some(value) = reducer.reduce_one() {
             return (value, i);
@@ -122,7 +112,7 @@ impl From<ReductionStrategyKind> for ReductionStrategy {
 mod test {
     use std::str::FromStr;
 
-    use crate::{debruijn::Debruijn, reduce::Reducer, treewalk::VisitOrder};
+    use crate::{debruijn::Debruijn, reduce::Reducer};
 
     fn assert_usage(reducer: &Reducer) {
         if let Err((failing_term, actual, expected)) = reducer.root.check_usage() {
@@ -136,7 +126,7 @@ mod test {
     #[test]
     fn parent_usage_simplest() {
         let root = Debruijn::from_str("λ (λ 1 1) (1 1)").unwrap();
-        let mut reducer = Reducer::new(&root, VisitOrder::LEFT_OUTERMOST);
+        let mut reducer = Reducer::new(&root);
         reducer.reduce_one();
         assert_usage(&reducer);
     }
@@ -144,7 +134,7 @@ mod test {
     #[test]
     fn parent_usage_open_terms() {
         let root = Debruijn::from_str("λ (λ 1 1) 99").unwrap();
-        let mut reducer = Reducer::new(&root, VisitOrder::LEFT_OUTERMOST);
+        let mut reducer = Reducer::new(&root);
         reducer.reduce_one();
         assert_usage(&reducer);
     }
@@ -153,7 +143,7 @@ mod test {
     fn parent_usage() {
         let root =
             Debruijn::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
-        let mut reducer = Reducer::new(&root, VisitOrder::LEFT_OUTERMOST);
+        let mut reducer = Reducer::new(&root);
 
         reducer.reduce_one();
         assert_usage(&reducer);

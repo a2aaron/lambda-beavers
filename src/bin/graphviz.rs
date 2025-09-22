@@ -5,7 +5,6 @@ use lambda_beaver::{debruijn_flat::FlatRoot, print::NodeLabelType};
 
 use lambda_beaver::parse;
 use lambda_beaver::reduce::{ReductionStrategy, ReductionStrategyKind};
-use lambda_beaver::treewalk::VisitOrder;
 use lambda_beaver::{debruijn::Debruijn, graph::ReductionGraph};
 
 pub fn to_graphviz(graph: &ReductionGraph, node_label: NodeLabelType) -> String {
@@ -129,9 +128,8 @@ fn main() {
     let max_reductions = args.max_reductions;
     let strategy = ReductionStrategy::from(args.strategy);
     let node_label = args.node_label;
-    let visit_order = VisitOrder::LEFT_OUTERMOST;
     let stop_on_bnf = args.stop_on_bnf;
-    let mut graph = ReductionGraph::with_root(term, visit_order);
+    let mut graph = ReductionGraph::with_root(term);
 
     reduce_with_stats(&mut graph, strategy, max_reductions, stop_on_bnf);
     let graphviz = to_graphviz(&graph, node_label);

@@ -60,7 +60,6 @@ pub mod strong_reduction_test {
         debruijn::Debruijn,
         parse,
         reduce::{Reducer, ReductionResult},
-        treewalk::VisitOrder,
     };
 
     pub fn parse_line(line: &str) -> (Debruijn, Debruijn) {
@@ -78,10 +77,9 @@ pub mod strong_reduction_test {
 
     pub fn reduce_with_timeout(
         term: &Debruijn,
-        visit_order: VisitOrder,
         timeout: Option<Duration>,
     ) -> (Option<ReductionResult>, Duration) {
-        let mut reducer = Reducer::new(term, visit_order);
+        let mut reducer = Reducer::new(term);
         let now = Instant::now();
         loop {
             if let Some(value) = reducer.reduce_one() {

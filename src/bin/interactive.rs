@@ -7,7 +7,6 @@ use lambda_beaver::{
     debruijn_flat::{DebruijnNode, FlatRoot, TermIndex, beta_reduce},
     parse,
     print::{NodeLabelType, PrintableTerm},
-    treewalk::VisitOrder,
 };
 
 #[derive(Parser, Debug)]
@@ -85,7 +84,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let mut history = vec![];
 
     loop {
-        let redexes = current_term.get_redexes(VisitOrder::LEFT_OUTERMOST);
+        let redexes = current_term.get_redexes();
         let reductions: Vec<_> = redexes
             .iter()
             .enumerate()

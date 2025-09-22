@@ -10,7 +10,6 @@ use lambda_beaver::{
     debruijn_flat::{DebruijnNode, FlatRoot, RedexMut, TermIndex},
     parse,
     reduce::Reducer,
-    treewalk::VisitOrder,
 };
 
 #[derive(Debug, Clone, Copy)]
@@ -53,7 +52,7 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
     let mut info_vec: Vec<NodeInfo> = (0..root.backing.len())
         .map(|index| NodeInfo::garbage(index))
         .collect();
-    VisitOrder::LEFT_OUTERMOST.preorder_walk(root, |_, term, parent_chain| {
+    root.preorder_walk(|_, term, parent_chain| {
         let abs_bound = match root[term.term] {
             DebruijnNode::Index(index) => {
                 if index <= parent_chain.len() {
@@ -320,7 +319,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
     };
-    let mut reducer = Reducer::new(&term, VisitOrder::LEFT_OUTERMOST);
+    let mut reducer = Reducer::new(&term);
     for _ in 0..args.reductions {
         reducer.reduce_one();
     }

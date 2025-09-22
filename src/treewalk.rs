@@ -2,35 +2,26 @@ use std::ops::ControlFlow;
 
 use crate::debruijn_flat::{DebruijnNode, FlatRoot, ParentChain, TermWithParent};
 
-#[derive(Debug, Clone, Copy)]
-pub struct VisitOrder;
-
 pub trait ActionMut<T> = FnMut(&mut FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>;
 pub trait Action<T> = FnMut(&FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>;
 
-impl VisitOrder {
-    pub const LEFT_OUTERMOST: VisitOrder = VisitOrder;
-
-    pub fn preorder_walk<T>(&self, root: &FlatRoot, mut action: impl Action<T>) -> Option<T> {
+impl FlatRoot {
+    pub fn preorder_walk<T>(&self, mut action: impl Action<T>) -> Option<T> {
         let mut parent_chain = vec![];
         preorder_walk(
-            root,
-            TermWithParent::root(root),
+            self,
+            TermWithParent::root(self),
             &mut parent_chain,
             &mut action,
         )
         .break_value()
     }
 
-    pub fn preorder_walk_mut<T>(
-        &self,
-        root: &mut FlatRoot,
-        mut action: impl ActionMut<T>,
-    ) -> Option<T> {
+    pub fn preorder_walk_mut<T>(&mut self, mut action: impl ActionMut<T>) -> Option<T> {
         let mut parent_chain = vec![];
         preorder_walk_mut(
-            root,
-            TermWithParent::root(root),
+            self,
+            TermWithParent::root(self),
             &mut parent_chain,
             &mut action,
         )
@@ -99,10 +90,7 @@ fn preorder_walk_mut<T>(
 mod test {
     use std::{collections::HashMap, ops::ControlFlow};
 
-    use crate::{
-        debruijn_flat::{DebruijnNode, FlatRoot, TermIndex},
-        treewalk::VisitOrder,
-    };
+    use crate::debruijn_flat::{DebruijnNode, FlatRoot, TermIndex};
 
     fn term_idx(i: usize) -> TermIndex {
         TermIndex::new(i)
@@ -196,11 +184,11 @@ mod test {
         }
     }
 
-    fn assert_ordering(test_data: TestData, expected_pretty: &str, visit_order: VisitOrder) {
+    fn assert_ordering(test_data: TestData, expected_pretty: &str) {
         let expected = test_data.from_string(&expected_pretty);
 
         let mut actual = vec![];
-        visit_order.preorder_walk(&test_data.root, |_, term, _| {
+        test_data.root.preorder_walk(|_, term, _| {
             actual.push(term.term);
             ControlFlow::Continue::<()>(())
         });
@@ -216,6 +204,6 @@ mod test {
     fn test_preorder_nlr() {
         let test_data = TestData::new();
         let expected = "f, b, a, d, c, e, g, i, h";
-        assert_ordering(test_data, expected, VisitOrder::LEFT_OUTERMOST);
+        assert_ordering(test_data, expected);
     }
 }

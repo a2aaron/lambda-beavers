@@ -5,7 +5,7 @@ use std::{
     str::FromStr,
 };
 
-use crate::{debruijn::Debruijn, treewalk::VisitOrder};
+use crate::debruijn::Debruijn;
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FlatRoot {
@@ -36,7 +36,7 @@ impl FlatRoot {
     }
 
     pub fn is_bnf(&self) -> bool {
-        let result = VisitOrder::LEFT_OUTERMOST.preorder_walk(self, |root, term, _| {
+        let result = self.preorder_walk(|root, term, _| {
             if RedexMut::is_redex(root, term.term) {
                 ControlFlow::Break(false)
             } else {
@@ -46,9 +46,9 @@ impl FlatRoot {
         result.unwrap_or(true)
     }
 
-    pub fn get_redexes(&self, visit_order: VisitOrder) -> Vec<RedexMut> {
+    pub fn get_redexes(&self) -> Vec<RedexMut> {
         let mut redexes = vec![];
-        visit_order.preorder_walk(self, |root, term, parent_chain| {
+        self.preorder_walk(|root, term, parent_chain| {
             if let Some(redex) = RedexMut::try_get(root, term, parent_chain.clone()) {
                 redexes.push(redex);
             }
