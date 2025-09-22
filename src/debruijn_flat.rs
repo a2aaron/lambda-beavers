@@ -90,7 +90,7 @@ impl FlatRoot {
             match root[term] {
                 DebruijnNode::Abstraction(abs) => {
                     _check_usage(root, abs.body)?;
-                    let expected = compute_usage_flat(root, abs.body);
+                    let expected = compute_usage_flat(root, abs.body(term));
                     let actual = abs.usage;
                     if actual != expected {
                         Err((term, actual, expected))
@@ -252,21 +252,22 @@ fn compute_usage(body: &Debruijn) -> Usage {
 /// `body` must be the body of the abstraction!
 /// ter the body of an abstraction
 /// eg: in λ 1 λ 2 λ 3, we have that 1, 2, and 3 all refer to the same variable, so the usage is 3
-fn compute_usage_flat(root: &FlatRoot, body: TermIndex) -> Usage {
-    fn _compute_usage_flat(root: &FlatRoot, term_i: TermIndex, depth: DebruijnDepth) -> Usage {
-        match root[term_i] {
-            DebruijnNode::Index(index) => (index == depth) as usize,
-            DebruijnNode::Application(app) => {
-                _compute_usage_flat(root, app.func, depth)
-                    + _compute_usage_flat(root, app.arg, depth)
+fn compute_usage_flat(root: &FlatRoot, body: TermWithParent) -> Usage {
+    let mut usage = 0;
+    root.preorder_walk_at(body, |root, term, parent_chain| {
+        // Because this is the body of an abstraction, we actually are starting at depth 1
+        // (so Index(1) refers to the input variable). If we had started at top-level (or had
+        // the abstraction itself as input rather than it's body), then this would be 0.
+        let depth = parent_chain.len() + 1;
+        if let DebruijnNode::Index(index) = root[term.term] {
+            if index == depth {
+                usage += 1;
             }
-            DebruijnNode::Abstraction(abs) => _compute_usage_flat(root, abs.body, depth + 1),
         }
-    }
-    // Because this is the body of an abstraction, we actually are starting at depth 1
-    // (so Index(1) refers to the input variable). If we had started at top-level (or had
-    // the abstraction itself as input rather than it's body), then this would be 0.
-    _compute_usage_flat(root, body, 1)
+        ControlFlow::Continue::<()>(())
+    });
+
+    usage
 }
 
 // The depth relative to some term. This is used to determine if a variable is free within a term
