@@ -16,7 +16,10 @@ impl FlatRoot {
     fn new() -> FlatRoot {
         FlatRoot {
             backing: vec![],
-            root: TermIndex(0),
+            root: TermIndex {
+                index: 0,
+                adjust: 0,
+            },
         }
     }
 
@@ -27,7 +30,7 @@ impl FlatRoot {
     fn alloc_one(&mut self, term: Option<DebruijnNode>) -> TermIndex {
         // If none, then alloc a dummy node, this should be fixed up afterwards
         let term = term.unwrap_or(DebruijnNode::Index(DebruijnIndex::MAX));
-        let term_index = TermIndex(self.backing.len());
+        let term_index = TermIndex::new(self.backing.len());
         self.backing.push(term);
         term_index
     }
@@ -151,13 +154,13 @@ impl Index<TermIndex> for FlatRoot {
     type Output = DebruijnNode;
 
     fn index(&self, index: TermIndex) -> &Self::Output {
-        &self.backing[index.0]
+        &self.backing[index.index]
     }
 }
 
 impl IndexMut<TermIndex> for FlatRoot {
     fn index_mut(&mut self, index: TermIndex) -> &mut Self::Output {
-        &mut self.backing[index.0]
+        &mut self.backing[index.index]
     }
 }
 
@@ -165,7 +168,7 @@ impl From<Vec<DebruijnNode>> for FlatRoot {
     fn from(backing: Vec<DebruijnNode>) -> Self {
         FlatRoot {
             backing,
-            root: TermIndex(0),
+            root: TermIndex::new(0),
         }
     }
 }
@@ -279,19 +282,35 @@ type DebruijnIndex = usize;
 // The number of times a variable is used in an abstraction.
 type Usage = usize;
 
-// The index for a given DebruijnNode when inside of a FlatRoot
+/// A pointer to a given DebruijnNode within a FlatRoot
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct TermIndex(pub usize);
+pub struct TermIndex {
+    /// An index into the backing vector of a FlatRoot.
+    pub index: usize,
+    /// An "adjustment" value. All DebruijnNode::Index nodes are implictly increased or decreased by
+    /// this amount. Note that this is cumulative.
+    adjust: isize,
+}
+impl TermIndex {
+    /// Create a new TermIndex with adjustment zero.
+    pub fn new(index: usize) -> Self {
+        Self { index, adjust: 0 }
+    }
+}
 
 impl Display for TermIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
+        if self.adjust == 0 {
+            write!(f, "{}", self.index)
+        } else {
+            write!(f, "{} (adjust={})", self.index, self.adjust)
+        }
     }
 }
 
 impl From<usize> for TermIndex {
-    fn from(value: usize) -> Self {
-        TermIndex(value)
+    fn from(index: usize) -> Self {
+        TermIndex { index, adjust: 0 }
     }
 }
 

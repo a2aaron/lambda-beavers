@@ -120,16 +120,20 @@ mod test {
         treewalk::VisitOrder,
     };
 
+    fn term_idx(i: usize) -> TermIndex {
+        TermIndex::new(i)
+    }
+
     fn idx(a: usize) -> DebruijnNode {
         DebruijnNode::Index(a)
     }
 
     fn def(body: usize) -> DebruijnNode {
-        DebruijnNode::abs(TermIndex(body), 0)
+        DebruijnNode::abs(TermIndex::new(body), 0)
     }
 
     fn call(func: usize, arg: usize) -> DebruijnNode {
-        DebruijnNode::app(TermIndex(func), TermIndex(arg))
+        DebruijnNode::app(TermIndex::new(func), TermIndex::new(arg))
     }
 
     type NodeToName = HashMap<TermIndex, String>;
@@ -163,15 +167,15 @@ mod test {
             ]);
 
             let nodes = [
-                ("f", TermIndex(0)),
-                ("b", TermIndex(1)),
-                ("a", TermIndex(2)),
-                ("d", TermIndex(3)),
-                ("c", TermIndex(4)),
-                ("e", TermIndex(5)),
-                ("g", TermIndex(6)),
-                ("i", TermIndex(7)),
-                ("h", TermIndex(8)),
+                ("f", term_idx(0)),
+                ("b", term_idx(1)),
+                ("a", term_idx(2)),
+                ("d", term_idx(3)),
+                ("c", term_idx(4)),
+                ("e", term_idx(5)),
+                ("g", term_idx(6)),
+                ("i", term_idx(7)),
+                ("h", term_idx(8)),
             ];
 
             let name_to_node = nodes

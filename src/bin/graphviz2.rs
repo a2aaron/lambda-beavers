@@ -16,7 +16,7 @@ use lambda_beaver::{
 #[derive(Debug, Clone, Copy)]
 struct NodeInfo {
     is_root: bool,
-    index: TermIndex,
+    index: usize,
     // If true, the this DebruijNode is garbage
     is_garbage: bool,
     // If not None, then this DebruijNode is a non-garbage Index node
@@ -30,7 +30,7 @@ struct NodeInfo {
 }
 
 impl NodeInfo {
-    fn garbage(index: TermIndex) -> NodeInfo {
+    fn garbage(index: usize) -> NodeInfo {
         NodeInfo {
             index,
             is_root: false,
@@ -51,7 +51,7 @@ struct RedexInfo {
 
 fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
     let mut info_vec: Vec<NodeInfo> = (0..root.backing.len())
-        .map(|index| NodeInfo::garbage(TermIndex(index)))
+        .map(|index| NodeInfo::garbage(index))
         .collect();
     VisitOrder::LEFT_OUTERMOST.preorder_walk(root, |_, term, parent_chain| {
         let abs_bound = match root[term.term] {
@@ -75,10 +75,11 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
 
         let is_root = root.root == term.term;
 
-        info_vec[term.term.0].is_root = is_root;
-        info_vec[term.term.0].is_garbage = false;
-        info_vec[term.term.0].abs_binding = abs_bound;
-        info_vec[term.term.0].redex_info = redex_info;
+        let index = term.term.index;
+        info_vec[index].is_root = is_root;
+        info_vec[index].is_garbage = false;
+        info_vec[index].abs_binding = abs_bound;
+        info_vec[index].redex_info = redex_info;
         ControlFlow::Continue::<()>(())
     });
 
@@ -158,7 +159,7 @@ struct Node {
     attribs: Attributes,
 }
 impl Node {
-    fn new(name: impl ToString, attributes: &Attributes) -> Node {
+    fn new(name: usize, attributes: &Attributes) -> Node {
         Node {
             name: name.to_string(),
             attribs: attributes.clone(),
@@ -169,7 +170,7 @@ impl Node {
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
 struct Edge(String, String, Attributes);
 impl Edge {
-    fn new(head: impl ToString, tail: impl ToString, attributes: &Attributes) -> Edge {
+    fn new(head: usize, tail: usize, attributes: &Attributes) -> Edge {
         Edge(head.to_string(), tail.to_string(), attributes.clone())
     }
 }
@@ -210,21 +211,21 @@ fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<Edge>
             if let Some(abs_bound) = node_info.abs_binding
                 && !args.no_color_abs
             {
-                let color = get_random_color(abs_bound.0, 1.0);
+                let color = get_random_color(abs_bound.index, 1.0);
                 edge_attribs
                     .set("color", color)
                     .set("style", "dashed")
                     .set("constraint", "false");
-                edges.push(Edge::new(node_info.index, abs_bound.0, &edge_attribs));
+                edges.push(Edge::new(node_info.index, abs_bound.index, &edge_attribs));
             }
         }
         DebruijnNode::Abstraction(abs) => {
-            let body = abs.body.0;
+            let body = abs.body.index;
             edges.push(Edge::new(node_info.index, body, &edge_attribs));
         }
         DebruijnNode::Application(app) => {
-            let func = app.func.0;
-            let arg = app.arg.0;
+            let func = app.func.index;
+            let arg = app.arg.index;
             edges.push(Edge::new(node_info.index, func, &edge_attribs));
 
             edge_attribs.set("arrowhead", "onormal");
@@ -250,15 +251,15 @@ fn make_node(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Node {
 
     let is_abstraction = matches!(node, DebruijnNode::Abstraction(_));
     if is_abstraction && !args.no_color_abs {
-        let bg_color = get_random_color(node_info.index.0, 0.5);
+        let bg_color = get_random_color(node_info.index, 0.5);
         attribs.set("fillcolor", bg_color).set("style", "filled");
     }
 
     if let Some(info) = node_info.redex_info
         && !args.no_color_redex
     {
-        let color1 = get_random_color(info.abs.0, 0.5);
-        let color2 = get_random_color(info.arg.0, 0.5);
+        let color1 = get_random_color(info.abs.index, 0.5);
+        let color2 = get_random_color(info.arg.index, 0.5);
         let bg_color = format!("{};0.5:{}", color1, color2);
         attribs
             .set("shape", "diamond")
