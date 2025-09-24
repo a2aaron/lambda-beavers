@@ -164,6 +164,20 @@ impl IndexMut<TermIndex> for FlatRoot {
     }
 }
 
+impl Index<TermWithParent> for FlatRoot {
+    type Output = DebruijnNode;
+
+    fn index(&self, index: TermWithParent) -> &Self::Output {
+        &self[index.term]
+    }
+}
+
+impl IndexMut<TermWithParent> for FlatRoot {
+    fn index_mut(&mut self, index: TermWithParent) -> &mut Self::Output {
+        &mut self[index.term]
+    }
+}
+
 impl From<Vec<DebruijnNode>> for FlatRoot {
     fn from(backing: Vec<DebruijnNode>) -> Self {
         FlatRoot {
@@ -259,7 +273,7 @@ fn compute_usage_flat(root: &FlatRoot, body: TermWithParent) -> Usage {
         // (so Index(1) refers to the input variable). If we had started at top-level (or had
         // the abstraction itself as input rather than it's body), then this would be 0.
         let depth = parent_chain.len() + 1;
-        if let DebruijnNode::Index(index) = root[term.term] {
+        if let DebruijnNode::Index(index) = root[term] {
             if index == depth {
                 usage += 1;
             }
@@ -468,7 +482,7 @@ impl RedexMut {
         term: TermWithParent,
         parent_chain: ParentAbstractionChain,
     ) -> Option<RedexMut> {
-        match root[term.term] {
+        match root[term] {
             DebruijnNode::Application(app) => match root[app.func] {
                 DebruijnNode::Abstraction(abs) => {
                     let body = abs.body(app.func);
@@ -773,7 +787,7 @@ fn _substitute_shift_fused(
     root: &mut FlatRoot,
     term: TermWithParent,
 ) -> (bool, Option<TermIndex>) {
-    match root[term.term] {
+    match root[term] {
         DebruijnNode::Index(debruijn_index) => {
             if ctx.is_substituting(debruijn_index) {
                 let new_arg = if ctx.last_arg_allocation() {
@@ -797,7 +811,7 @@ fn _substitute_shift_fused(
                 // Remember that the body of the term is getting dropped out of the abstraction
                 // Because of this, we need to reduce the term_index by one, since there's one
                 // less abstraction to jump over for the index.
-                root[term.term] = DebruijnNode::Index(debruijn_index - 1);
+                root[term] = DebruijnNode::Index(debruijn_index - 1);
                 (false, None)
             } else {
                 (false, None)
@@ -813,7 +827,7 @@ fn _substitute_shift_fused(
             // If this is the case, we need to re-point abs to the new body.
             if did_sub_body && let Some(new_body) = new_body {
                 abs.body = new_body;
-                root[term.term] = abs.into();
+                root[term] = abs.into();
             }
             (did_sub_body, None)
         }
