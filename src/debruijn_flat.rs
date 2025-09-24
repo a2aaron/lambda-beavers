@@ -433,12 +433,12 @@ pub enum Parent {
 
 // The sequence of outer abstractions a term is contained in.
 // Every element of this vector is an abstraction.
-pub type ParentChain = Vec<TermIndex>;
+pub type ParentAbstractionChain = Vec<TermIndex>;
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RedexMut {
     // The entire chain of abstractions for the parent, which will all need to get fixed up during substitution.
-    parent_chain: ParentChain,
+    parent_chain: ParentAbstractionChain,
     // Application term for the redex. If the parent for this is none,
     // then the Redex is actually the root (and therefore is pointed to by FlatRoot.root)
     pub app: TermWithParent,
@@ -466,7 +466,7 @@ impl RedexMut {
     pub fn try_get(
         root: &FlatRoot,
         term: TermWithParent,
-        parent_chain: ParentChain,
+        parent_chain: ParentAbstractionChain,
     ) -> Option<RedexMut> {
         match root[term.term] {
             DebruijnNode::Application(app) => match root[app.func] {
@@ -538,7 +538,7 @@ pub fn beta_reduce(root: &mut FlatRoot, redex: RedexMut) {
 // MEMORY: Modifies in place, does not allocate or make garbage.
 fn update_parent_chain_usage(
     root: &mut FlatRoot,
-    parent_chain: &ParentChain,
+    parent_chain: &ParentAbstractionChain,
     // Number of times body is used
     body_usage: Usage,
     arg: TermIndex,
@@ -573,7 +573,11 @@ fn update_parent_chain_usage(
 // Note that the unbound variable is not included (we could talk about it's usage, but since there's
 // no abstraction term to bind it to, we will ignore it), and we also ignore the arg-bound term of c
 // since that won't get updated.
-fn get_usage_by_depth(root: &FlatRoot, arg: TermIndex, parent_chain: &ParentChain) -> Vec<Usage> {
+fn get_usage_by_depth(
+    root: &FlatRoot,
+    arg: TermIndex,
+    parent_chain: &ParentAbstractionChain,
+) -> Vec<Usage> {
     fn _get_usage_by_depth(
         root: &FlatRoot,
         term: TermIndex,

@@ -1,9 +1,10 @@
 use std::ops::ControlFlow;
 
-use crate::debruijn_flat::{DebruijnNode, FlatRoot, ParentChain, TermWithParent};
+use crate::debruijn_flat::{DebruijnNode, FlatRoot, ParentAbstractionChain, TermWithParent};
 
-pub trait ActionMut<T> = FnMut(&mut FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>;
-pub trait Action<T> = FnMut(&FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>;
+pub trait ActionMut<T> =
+    FnMut(&mut FlatRoot, TermWithParent, &ParentAbstractionChain) -> ControlFlow<T>;
+pub trait Action<T> = FnMut(&FlatRoot, TermWithParent, &ParentAbstractionChain) -> ControlFlow<T>;
 
 impl FlatRoot {
     pub fn preorder_walk<T>(&self, mut action: impl Action<T>) -> Option<T> {
@@ -33,7 +34,7 @@ impl FlatRoot {
 pub fn preorder_walk<T>(
     root: &FlatRoot,
     term: TermWithParent,
-    parent_chain: &mut ParentChain,
+    parent_chain: &mut ParentAbstractionChain,
     action: &mut impl Action<T>,
 ) -> ControlFlow<T> {
     action(root, term, &parent_chain)?;
@@ -61,7 +62,7 @@ pub fn preorder_walk<T>(
 pub fn preorder_walk_mut<T>(
     root: &mut FlatRoot,
     term: TermWithParent,
-    parent_chain: &mut ParentChain,
+    parent_chain: &mut ParentAbstractionChain,
     action: &mut impl ActionMut<T>,
 ) -> ControlFlow<T> {
     action(root, term, &parent_chain)?;
