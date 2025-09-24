@@ -272,7 +272,7 @@ fn compute_usage_flat(root: &FlatRoot, body: TermWithParent) -> Usage {
         // Because this is the body of an abstraction, we actually are starting at depth 1
         // (so Index(1) refers to the input variable). If we had started at top-level (or had
         // the abstraction itself as input rather than it's body), then this would be 0.
-        let depth = parent_chain.len() + 1;
+        let depth = parent_chain.depth() + 1;
         if let DebruijnNode::Index(index) = root[term] {
             if index == depth {
                 usage += 1;
@@ -447,7 +447,42 @@ pub enum Parent {
 
 // The sequence of outer abstractions a term is contained in.
 // Every element of this vector is an abstraction.
-pub type ParentAbstractionChain = Vec<TermIndex>;
+#[derive(Debug, PartialEq, Eq, Clone, Default)]
+pub struct ParentAbstractionChain(Vec<TermIndex>);
+
+impl ParentAbstractionChain {
+    pub fn new() -> ParentAbstractionChain {
+        ParentAbstractionChain::default()
+    }
+    pub fn push(&mut self, abs: TermIndex) {
+        self.0.push(abs)
+    }
+    pub fn pop(&mut self) {
+        self.0.pop();
+    }
+
+    pub fn depth(&self) -> DebruijnDepth {
+        self.0.len()
+    }
+
+    fn iter(&self) -> std::slice::Iter<'_, TermIndex> {
+        self.0.iter()
+    }
+}
+
+impl Index<DebruijnDepth> for ParentAbstractionChain {
+    type Output = TermIndex;
+
+    fn index(&self, index: DebruijnDepth) -> &Self::Output {
+        &self.0[index]
+    }
+}
+
+impl IndexMut<DebruijnDepth> for ParentAbstractionChain {
+    fn index_mut(&mut self, index: DebruijnDepth) -> &mut Self::Output {
+        &mut self.0[index]
+    }
+}
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RedexMut {
@@ -566,7 +601,7 @@ fn update_parent_chain_usage(
 ) {
     // If there are no parents to update (which happens if the redex is the root)
     // or otherwise has no abstractions in it's parent path, then do nothing.
-    if parent_chain.is_empty() {
+    if parent_chain.depth() == 0 {
         return;
     }
 
@@ -659,7 +694,7 @@ fn get_usage_by_depth(
         }
     }
 
-    let mut usages = vec![0; parent_chain.len()];
+    let mut usages = vec![0; parent_chain.depth()];
     _get_usage_by_depth(root, arg, &mut usages, 0);
 
     usages
@@ -907,7 +942,7 @@ fn shift_cutoff(root: &mut FlatRoot, term: TermWithParent, up_by: isize, depth: 
         let term = term.term;
         match root[term] {
             DebruijnNode::Index(term_index) => {
-                let depth = chain.len() + depth;
+                let depth = chain.depth() + depth;
                 // Recall that an index starts at 1, so if depth is set to 1, then this branch will always be taken.
                 let is_free = term_index >= depth;
                 if is_free {
@@ -949,6 +984,15 @@ mod test {
 
     fn app(func: impl Into<TermIndex>, arg: impl Into<TermIndex>) -> DebruijnNode {
         DebruijnNode::app(func.into(), arg.into())
+    }
+
+    fn redex_from_root(root: &FlatRoot) -> RedexMut {
+        RedexMut::try_get(
+            root,
+            TermWithParent::root(root),
+            ParentAbstractionChain::new(),
+        )
+        .unwrap()
     }
 
     #[test]
@@ -1015,7 +1059,7 @@ mod test {
     fn usage_zero() {
         let mut root = compile("(λ 2) (λ 50)");
 
-        let redex = RedexMut::try_get(&root, TermWithParent::root(&root), vec![]).unwrap();
+        let redex = redex_from_root(&root);
         assert_eq!(redex.body_usage, 0);
 
         beta_reduce(&mut root, redex);
@@ -1031,7 +1075,7 @@ mod test {
     fn usage_one() {
         let mut root = compile("(λ 1) (λ 50)");
 
-        let redex = RedexMut::try_get(&root, TermWithParent::root(&root), vec![]).unwrap();
+        let redex = redex_from_root(&root);
         assert_eq!(redex.body_usage, 1);
 
         beta_reduce(&mut root, redex);
@@ -1047,7 +1091,7 @@ mod test {
     fn body_is_leaf() {
         let mut root = compile("(λ 1) (1 2 3 4)");
 
-        let redex = RedexMut::try_get(&root, TermWithParent::root(&root), vec![]).unwrap();
+        let redex = redex_from_root(&root);
         assert_eq!(redex.body_usage, 1);
 
         beta_reduce(&mut root, redex);
@@ -1063,7 +1107,7 @@ mod test {
     fn body_is_not_leaf() {
         let mut root = compile("(λ λ 2) (1 2 3 4)");
 
-        let redex = RedexMut::try_get(&root, TermWithParent::root(&root), vec![]).unwrap();
+        let redex = redex_from_root(&root);
         assert_eq!(redex.body_usage, 1);
 
         beta_reduce(&mut root, redex);
@@ -1079,7 +1123,7 @@ mod test {
     fn usage_many() {
         let mut root = compile("(λ 1 λ 2 λ 3 λ 4) 100");
 
-        let redex = RedexMut::try_get(&root, TermWithParent::root(&root), vec![]).unwrap();
+        let redex = redex_from_root(&root);
         assert_eq!(redex.body_usage, 4);
 
         beta_reduce(&mut root, redex);

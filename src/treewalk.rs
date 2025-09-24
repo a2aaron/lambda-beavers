@@ -16,11 +16,17 @@ impl FlatRoot {
         term: TermWithParent,
         mut action: impl Action<T>,
     ) -> Option<T> {
-        preorder_walk(self, term, &mut vec![], &mut action).break_value()
+        preorder_walk(self, term, &mut ParentAbstractionChain::new(), &mut action).break_value()
     }
 
     pub fn preorder_walk_mut<T>(&mut self, mut action: impl ActionMut<T>) -> Option<T> {
-        preorder_walk_mut(self, TermWithParent::root(self), &mut vec![], &mut action).break_value()
+        preorder_walk_mut(
+            self,
+            TermWithParent::root(self),
+            &mut ParentAbstractionChain::new(),
+            &mut action,
+        )
+        .break_value()
     }
 
     pub fn preorder_walk_at_mut<T>(
@@ -28,7 +34,7 @@ impl FlatRoot {
         term: TermWithParent,
         mut action: impl ActionMut<T>,
     ) -> Option<T> {
-        preorder_walk_mut(self, term, &mut vec![], &mut action).break_value()
+        preorder_walk_mut(self, term, &mut ParentAbstractionChain::new(), &mut action).break_value()
     }
 }
 
