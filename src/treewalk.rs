@@ -20,14 +20,15 @@ impl FlatRoot {
     }
 
     pub fn preorder_walk_mut<T>(&mut self, mut action: impl ActionMut<T>) -> Option<T> {
-        let mut parent_chain = vec![];
-        preorder_walk_mut(
-            self,
-            TermWithParent::root(self),
-            &mut parent_chain,
-            &mut action,
-        )
-        .break_value()
+        preorder_walk_mut(self, TermWithParent::root(self), &mut vec![], &mut action).break_value()
+    }
+
+    pub fn preorder_walk_at_mut<T>(
+        &mut self,
+        term: TermWithParent,
+        mut action: impl ActionMut<T>,
+    ) -> Option<T> {
+        preorder_walk_mut(self, term, &mut vec![], &mut action).break_value()
     }
 }
 

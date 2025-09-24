@@ -487,6 +487,13 @@ impl RedexMut {
             _ => None,
         }
     }
+
+    fn arg(&self) -> TermWithParent {
+        TermWithParent {
+            term: self.arg,
+            parent: Some(Parent::Arg(self.app.term)),
+        }
+    }
 }
 
 pub fn beta_reduce(root: &mut FlatRoot, redex: RedexMut) {
@@ -701,7 +708,7 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &RedexMut) -> TermInde
     if redex.body_usage == 0 {
         // No need to do anything with the argument because it is never used in the body
         // (Since the argument is not used, the entire arg subtree is garbage now.)
-        down_one(root, redex.body.term);
+        down_one(root, redex.body);
         // Fix up the indicies in it to account for the fact that we are still dropping out the abstraction that the body is in.
         redex.body.term
     } else {
@@ -712,7 +719,7 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &RedexMut) -> TermInde
         // in addition to performing substitutions.
         let mut ctx = {
             Context {
-                redex_arg: redex.arg,
+                redex_arg: redex.arg(),
                 depth: 0,
                 usage: redex.body_usage,
                 substitution_i: 0,
@@ -730,8 +737,8 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &RedexMut) -> TermInde
     }
 }
 struct Context {
-    // TermIndex for the redex argument.
-    redex_arg: TermIndex,
+    // TermWithParent for the redex argument.
+    redex_arg: TermWithParent,
     // Depth relative to the root
     depth: DebruijnDepth,
     // Usage of redex body
@@ -777,9 +784,9 @@ fn _substitute_shift_fused(
                     // calling the method. Both of these fixups cancel out, so we still only just
                     // fix up by `depth`
                     up_by(root, ctx.redex_arg, ctx.depth);
-                    ctx.redex_arg
+                    ctx.redex_arg.term
                 } else {
-                    clone_subtree_and_fix_up_fused(root, ctx.redex_arg, ctx.depth)
+                    clone_subtree_and_fix_up_fused(root, ctx.redex_arg.term, ctx.depth)
                 };
 
                 repoint_node(root, term.parent, new_arg);
@@ -863,7 +870,7 @@ fn clone_subtree_and_fix_up_fused(
 }
 
 /// MEMORY: Modifies in place, does not allocate or create garbage.
-fn up_by(root: &mut FlatRoot, term: TermIndex, up_by: DebruijnDepth) {
+fn up_by(root: &mut FlatRoot, term: TermWithParent, up_by: DebruijnDepth) {
     shift_cutoff(root, term, up_by as isize, 1)
 }
 
@@ -873,7 +880,7 @@ fn up_by(root: &mut FlatRoot, term: TermIndex, up_by: DebruijnDepth) {
 // ↑ (t1 t2) = (↑ t1) (↑ t2)
 
 /// MEMORY: Modifies in place, does not allocate or create garbage.
-fn down_one(root: &mut FlatRoot, term: TermIndex) {
+fn down_one(root: &mut FlatRoot, term: TermWithParent) {
     shift_cutoff(root, term, -1, 1)
 }
 
@@ -881,27 +888,24 @@ fn down_one(root: &mut FlatRoot, term: TermIndex) {
 /// This is useful during beta reduction because we need to "drop out" an abstraction.
 ///
 /// MEMORY: Modifies in place, does not allocate or create garbage.
-fn shift_cutoff(root: &mut FlatRoot, term: TermIndex, up_by: isize, depth: DebruijnDepth) {
-    match root[term] {
-        DebruijnNode::Index(term_index) => {
-            // Recall that an index starts at 1, so if depth is set to 1, then this branch will always be taken.
-            let is_free = term_index >= depth;
-            if is_free {
-                let new_index = term_index.checked_add_signed(up_by).unwrap();
-                root[term] = DebruijnNode::Index(new_index);
+fn shift_cutoff(root: &mut FlatRoot, term: TermWithParent, up_by: isize, depth: DebruijnDepth) {
+    root.preorder_walk_at_mut(term, |root, term, chain| {
+        let term = term.term;
+        match root[term] {
+            DebruijnNode::Index(term_index) => {
+                let depth = chain.len() + depth;
+                // Recall that an index starts at 1, so if depth is set to 1, then this branch will always be taken.
+                let is_free = term_index >= depth;
+                if is_free {
+                    let new_index = term_index.checked_add_signed(up_by).unwrap();
+                    root[term] = DebruijnNode::Index(new_index);
+                }
             }
-        }
-        DebruijnNode::Application(app) => {
-            shift_cutoff(root, app.func, up_by, depth);
-            shift_cutoff(root, app.arg, up_by, depth);
-        }
-        DebruijnNode::Abstraction(abs) => {
-            // We add one to the cutoff here because we don't want to modify bound variables
-            // For example, if we're at the outer-most lambda, then any Index(1)s in the lambda body
-            // are referring to that lambda's bound variable and we don't modify it.
-            shift_cutoff(root, abs.body, up_by, depth + 1);
-        }
-    }
+            DebruijnNode::Abstraction(_) => (),
+            DebruijnNode::Application(_) => (),
+        };
+        ControlFlow::Continue::<()>(())
+    });
 }
 
 #[cfg(test)]
