@@ -127,6 +127,7 @@ struct Graph {
     nodes: Vec<Node>,
     edges: Vec<Edge>,
     subgraphs: Vec<Graph>,
+    attribs: Attributes,
 }
 
 impl Graph {
@@ -136,6 +137,9 @@ impl Graph {
     fn print_graph(&self, keyword: &str) -> String {
         let mut output = vec![];
         output.push(format!("{keyword} {} {{", self.name));
+        for (key, value) in self.attribs.attributes.iter() {
+            output.push(format!("{key} = \"{value}\";"));
+        }
         output.push("node [shape=box]".to_string());
 
         for node in &self.nodes {
@@ -145,6 +149,10 @@ impl Graph {
         for Edge(head, tail, attribs) in &self.edges {
             let attribs = &attribs.bake();
             output.push(format!("{head} -> {tail} [{attribs}]"));
+        }
+
+        for graph in &self.subgraphs {
+            output.push(graph.print_graph(""));
         }
 
         output.push(format!("}}"));
@@ -187,6 +195,19 @@ fn to_graph(root: &FlatRoot, args: &Args) -> Graph {
 
         let graph_node = make_node(args, node, node_info);
         let mut edges = get_edges(args, node, node_info);
+
+        if let DebruijnNode::Application(app) = node
+            && !node_info.is_garbage
+        {
+            let mut edge_attribs = Attributes::new();
+            edge_attribs.set("style", "invis");
+            let edge = Edge::new(app.func.index, app.arg.index, &edge_attribs);
+            let mut same_rank = Graph::default();
+            same_rank.edges.push(edge);
+            same_rank.attribs.set("rank", "same");
+            same_rank.attribs.set("rankdir", "LR");
+            graph.subgraphs.push(same_rank);
+        }
 
         graph.nodes.push(graph_node);
         graph.edges.append(&mut edges);
