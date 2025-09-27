@@ -38,7 +38,7 @@ pub fn tokenize(term: &str) -> ParseResult<Vec<Token>> {
     let mut string = String::new();
     for char in term.chars() {
         let (cut_string, push_token) = match char {
-            'λ' => (true, Some(Token::Lambda)),
+            'λ' | 'y' | '\\' => (true, Some(Token::Lambda)),
             '(' => (true, Some(Token::LeftParen)),
             ')' => (true, Some(Token::RightParen)),
             c if c.is_whitespace() => (true, None),
