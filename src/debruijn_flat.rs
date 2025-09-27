@@ -772,7 +772,7 @@ fn _substitute_shift_fused(root: &mut FlatRoot, redex: &RedexMut) {
                     up_by(root, redex.arg(), depth);
                     redex.arg
                 } else {
-                    clone_subtree_and_fix_up_fused(root, redex.arg, depth)
+                    clone_subtree_and_fix_up_fused(root, redex.arg(), depth)
                 };
 
                 repoint_node(root, term.parent, new_arg);
@@ -799,39 +799,31 @@ fn _substitute_shift_fused(root: &mut FlatRoot, redex: &RedexMut) {
 /// MEMORY: Allocates new subtree, returned value is the newly allocated tree
 fn clone_subtree_and_fix_up_fused(
     root: &mut FlatRoot,
-    term: TermIndex,
+    term: TermWithParent,
     up_by: DebruijnDepth,
 ) -> TermIndex {
-    fn _clone_subtree_and_fix_up_fused(
-        root: &mut FlatRoot,
-        term: TermIndex,
-        up_by: DebruijnDepth,
-        depth: DebruijnDepth,
-    ) -> TermIndex {
-        match root[term] {
-            DebruijnNode::Index(index) => {
-                let is_free = index >= depth;
-                let index = if is_free { index + up_by } else { index };
-                root.alloc_one(Some(DebruijnNode::Index(index)))
-            }
-            DebruijnNode::Abstraction(abs) => {
-                let new_abs = root.alloc_one(None);
-                let body = _clone_subtree_and_fix_up_fused(root, abs.body, up_by, depth + 1);
-                root[new_abs] = DebruijnNode::abs(body, abs.usage);
-                new_abs
-            }
-            DebruijnNode::Application(app) => {
-                let new_app = root.alloc_one(None);
-                let func = _clone_subtree_and_fix_up_fused(root, app.func, up_by, depth);
-                let arg = _clone_subtree_and_fix_up_fused(root, app.arg, up_by, depth);
-
-                root[new_app] = DebruijnNode::app(func, arg);
-                new_app
-            }
+    root.postorder_walk_at_mut(term, |root, _term, chain, result| match result {
+        ChildResults::Index(index) => {
+            let depth = chain.depth() + 1;
+            let is_free = index >= depth;
+            let index = if is_free { index + up_by } else { index };
+            root.alloc_one(Some(DebruijnNode::Index(index)))
         }
-    }
-
-    _clone_subtree_and_fix_up_fused(root, term, up_by, 1)
+        ChildResults::Abstraction { abs, body_result } => {
+            let new_abs = root.alloc_one(None);
+            root[new_abs] = DebruijnNode::abs(body_result, abs.usage);
+            new_abs
+        }
+        ChildResults::Application {
+            func_result,
+            arg_result,
+            ..
+        } => {
+            let new_app = root.alloc_one(None);
+            root[new_app] = DebruijnNode::app(func_result, arg_result);
+            new_app
+        }
+    })
 }
 
 /// MEMORY: Modifies in place, does not allocate or create garbage.
