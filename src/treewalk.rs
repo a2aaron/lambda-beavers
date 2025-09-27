@@ -1,6 +1,9 @@
 use std::ops::ControlFlow;
 
-use crate::debruijn_flat::{DebruijnNode, FlatRoot, ParentAbstractionChain, TermWithParent};
+use crate::debruijn_flat::{
+    Abstraction, Application, DebruijnIndex, DebruijnNode, FlatRoot, ParentAbstractionChain,
+    TermWithParent,
+};
 
 pub trait ActionMut<T> =
     FnMut(&mut FlatRoot, TermWithParent, &ParentAbstractionChain) -> ControlFlow<T>;
@@ -35,6 +38,62 @@ impl FlatRoot {
         mut action: impl ActionMut<T>,
     ) -> Option<T> {
         preorder_walk_mut(self, term, &mut ParentAbstractionChain::new(), &mut action).break_value()
+    }
+
+    pub fn postorder_walk<T>(&self, mut action: impl PostOrderAction<T>) -> T {
+        postorder_walk(
+            self,
+            TermWithParent::root(self),
+            &mut ParentAbstractionChain::new(),
+            &mut action,
+        )
+    }
+}
+
+pub trait PostOrderAction<T> =
+    FnMut(&FlatRoot, TermWithParent, &ParentAbstractionChain, ChildResults<T>) -> T;
+pub enum ChildResults<T> {
+    Index(DebruijnIndex),
+    Abstraction {
+        abs: Abstraction,
+        body_result: T,
+    },
+    Application {
+        app: Application,
+        func_result: T,
+        arg_result: T,
+    },
+}
+pub fn postorder_walk<T>(
+    root: &FlatRoot,
+    term: TermWithParent,
+    parent_chain: &mut ParentAbstractionChain,
+    action: &mut impl PostOrderAction<T>,
+) -> T {
+    match root[term] {
+        DebruijnNode::Index(idx) => action(root, term, &parent_chain, ChildResults::Index(idx)),
+        DebruijnNode::Abstraction(abs) => {
+            let body = abs.body(term.term);
+            parent_chain.push(term.term);
+            let body_result = postorder_walk(root, body, parent_chain, action);
+            parent_chain.pop();
+
+            let child_results = ChildResults::Abstraction { abs, body_result };
+            action(root, term, &parent_chain, child_results)
+        }
+        DebruijnNode::Application(app) => {
+            let arg = app.arg(term.term);
+            let func = app.func(term.term);
+
+            let func_result = postorder_walk(root, func, parent_chain, action);
+            let arg_result = postorder_walk(root, arg, parent_chain, action);
+            let child_results = ChildResults::Application {
+                app,
+                func_result,
+                arg_result,
+            };
+            action(root, term, &parent_chain, child_results)
+        }
     }
 }
 

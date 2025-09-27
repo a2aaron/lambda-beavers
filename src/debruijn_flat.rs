@@ -5,7 +5,7 @@ use std::{
     str::FromStr,
 };
 
-use crate::debruijn::Debruijn;
+use crate::{debruijn::Debruijn, treewalk::ChildResults};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FlatRoot {
@@ -216,20 +216,20 @@ impl From<&Debruijn> for FlatRoot {
 
 impl From<&FlatRoot> for Debruijn {
     fn from(root: &FlatRoot) -> Self {
-        fn _from(root: &FlatRoot, term: TermIndex) -> Debruijn {
-            match root[term] {
-                DebruijnNode::Index(index) => Debruijn::Index(index),
-                DebruijnNode::Abstraction(abs) => Debruijn::Abstraction {
-                    body: Box::new(_from(root, abs.body)),
-                },
-                DebruijnNode::Application(app) => Debruijn::Application {
-                    func: Box::new(_from(root, app.func)),
-                    arg: Box::new(_from(root, app.arg)),
-                },
-            }
-        }
-
-        _from(root, root.root)
+        root.postorder_walk(|_root, _term, _chain, child_results| match child_results {
+            ChildResults::Index(idx) => Debruijn::Index(idx),
+            ChildResults::Abstraction { body_result, .. } => Debruijn::Abstraction {
+                body: Box::new(body_result),
+            },
+            ChildResults::Application {
+                func_result,
+                arg_result,
+                ..
+            } => Debruijn::Application {
+                func: Box::new(func_result),
+                arg: Box::new(arg_result),
+            },
+        })
     }
 }
 
@@ -285,7 +285,7 @@ type DebruijnDepth = usize;
 
 // The index for the DebruijnNode::Index variant. This is an index for the actual lambda term and works
 // just like how Debruijn::Index works.
-type DebruijnIndex = usize;
+pub type DebruijnIndex = usize;
 
 // The number of times a variable is used in an abstraction.
 type Usage = usize;
