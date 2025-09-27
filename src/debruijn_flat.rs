@@ -86,27 +86,20 @@ impl FlatRoot {
     }
 
     pub fn check_usage(&self) -> Result<(), (TermIndex, Usage, Usage)> {
-        fn _check_usage(root: &FlatRoot, term: TermIndex) -> Result<(), (TermIndex, Usage, Usage)> {
-            match root[term] {
-                DebruijnNode::Abstraction(abs) => {
-                    _check_usage(root, abs.body)?;
-                    let expected = compute_usage_flat(root, abs.body(term));
-                    let actual = abs.usage;
-                    if actual != expected {
-                        Err((term, actual, expected))
-                    } else {
-                        Ok(())
-                    }
+        let result = self.preorder_walk(|root, term, _chain| {
+            if let DebruijnNode::Abstraction(abs) = root[term] {
+                let expected = compute_usage_flat(root, abs.body(term.term));
+                let actual = abs.usage;
+                if actual != expected {
+                    return ControlFlow::Break((term.term, actual, expected));
                 }
-                DebruijnNode::Index(_) => Ok(()),
-                DebruijnNode::Application(app) => {
-                    _check_usage(root, app.func)?;
-                    _check_usage(root, app.arg)?;
-                    Ok(())
-                }
-            }
+            };
+            ControlFlow::Continue(())
+        });
+        match result {
+            Some(bad) => Err(bad),
+            None => Ok(()),
         }
-        _check_usage(&self, self.root)
     }
 
     fn get_abs(&self, term: TermIndex) -> Abstraction {
