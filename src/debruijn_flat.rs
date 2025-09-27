@@ -580,7 +580,7 @@ pub fn beta_reduce(root: &mut FlatRoot, redex: RedexMut) {
     // arg becoming garbage or modified (it would technically be fine to actually still do that,
     // because the way arg is modified would not affect it's usage counts, but semantically this
     // is easier to reason aboout, so we do it first.)
-    update_parent_chain_usage(root, &redex.parent_chain, redex.body_usage, redex.arg);
+    update_parent_chain_usage(root, &redex.parent_chain, redex.body_usage, redex.arg());
 
     let body = substitute_and_shift_fused(root, &redex);
 
@@ -596,7 +596,7 @@ fn update_parent_chain_usage(
     parent_chain: &ParentAbstractionChain,
     // Number of times body is used
     body_usage: Usage,
-    arg: TermIndex,
+    arg: TermWithParent,
 ) {
     // If there are no parents to update (which happens if the redex is the root)
     // or otherwise has no abstractions in it's parent path, then do nothing.
@@ -630,72 +630,50 @@ fn update_parent_chain_usage(
 // since that won't get updated.
 fn get_usage_by_depth(
     root: &FlatRoot,
-    arg: TermIndex,
+    arg: TermWithParent,
     parent_chain: &ParentAbstractionChain,
 ) -> Vec<Usage> {
-    fn _get_usage_by_depth(
-        root: &FlatRoot,
-        term: TermIndex,
-        // The usages of the parent chain. This is sorted such that the first element is higher in the tree
-        // eg: usages[0] is the root-most element. This is nonempty
-        usages: &mut [Usage],
-        // Depth relative to root of the argument subtree
-        // This indicates whether or not a node is a free or bound variable
-        // ex: If depth == 0, then all variables are free
-        // If depth == 1, then nodes with DebruijnIndex = 1 are bound, the rest are free
-        // If depth == N, then nodes with DebruijnIndex <= N are bound, the rest are free.
-        depth_relative_to_arg: DebruijnDepth,
-    ) {
-        match root[term] {
-            DebruijnNode::Index(index) => {
-                // We need to account for the fact that we may be inside an abstraction in the argument
-                // If we are, we should skip if this is a bound variable.
-                let is_bound = index <= depth_relative_to_arg;
-                if is_bound {
-                    return;
-                }
-
-                // We want to transform this into an index into the usages array,
-                // which is sorted by parent-chain depth.
-                // In other words, we need to convert from a debruijn index to a debruijn level.
-
-                // arg. For example, if we have index = 5 and parent chain = [a, b, c, d, e, f]
-                // but are two abstractions deep into the arg
-                // (so depth_relative_to_arg = 2), then this points to
-                // [a, b, c, d, e, f]
-                //           ^------- here!
-                // which is level 4 (actual index = 3) into the array.
-                // 6 - (5 - 2)
-
-                // SAFETY: subtraction is safe because we just checked that index <= depth_relative_to_arg
-                // and return in the case that this happens.
-                let index_relative_to_parent = index - depth_relative_to_arg;
-
-                // In the case of an open term - eg: λ (λ 1 1) 99
-                // it is possible for an index to actually point to an implict parent which
-                // doesn't actually exist in the tree. In this case, we just do nothing.
-                if usages.len() < index_relative_to_parent {
-                    return;
-                }
-
-                // SAFETY: we just checked that usages.len() < index_relative_to_parent, and return
-                // in the case that this happens
-                let level = usages.len() - index_relative_to_parent;
-                usages[level] += 1;
-            }
-            DebruijnNode::Abstraction(abs) => {
-                _get_usage_by_depth(root, abs.body, usages, depth_relative_to_arg + 1)
-            }
-            DebruijnNode::Application(app) => {
-                _get_usage_by_depth(root, app.func, usages, depth_relative_to_arg);
-                _get_usage_by_depth(root, app.arg, usages, depth_relative_to_arg);
-            }
-        }
-    }
-
     let mut usages = vec![0; parent_chain.depth()];
-    _get_usage_by_depth(root, arg, &mut usages, 0);
+    root.preorder_walk_at(arg, |root, term, chain| {
+        if let DebruijnNode::Index(index) = root[term] {
+            let depth_relative_to_arg = chain.depth();
+            // We need to account for the fact that we may be inside an abstraction in the argument
+            // If we are, we should skip if this is a bound variable.
+            let is_bound = index <= depth_relative_to_arg;
+            if is_bound {
+                return ControlFlow::Continue::<()>(());
+            }
 
+            // We want to transform this into an index into the usages array,
+            // which is sorted by parent-chain depth.
+            // In other words, we need to convert from a debruijn index to a debruijn level.
+
+            // arg. For example, if we have index = 5 and parent chain = [a, b, c, d, e, f]
+            // but are two abstractions deep into the arg
+            // (so depth_relative_to_arg = 2), then this points to
+            // [a, b, c, d, e, f]
+            //           ^------- here!
+            // which is level 4 (actual index = 3) into the array.
+            // 6 - (5 - 2)
+
+            // SAFETY: subtraction is safe because we just checked that index <= depth_relative_to_arg
+            // and return in the case that this happens.
+            let index_relative_to_parent = index - depth_relative_to_arg;
+
+            // In the case of an open term - eg: λ (λ 1 1) 99
+            // it is possible for an index to actually point to an implict parent which
+            // doesn't actually exist in the tree. In this case, we just do nothing.
+            if usages.len() < index_relative_to_parent {
+                return ControlFlow::Continue::<()>(());
+            }
+
+            // SAFETY: we just checked that usages.len() < index_relative_to_parent, and return
+            // in the case that this happens
+            let level = usages.len() - index_relative_to_parent;
+            usages[level] += 1;
+        }
+        ControlFlow::Continue::<()>(())
+    });
     usages
 }
 
