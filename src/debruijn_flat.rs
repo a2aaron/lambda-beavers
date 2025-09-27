@@ -741,7 +741,7 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &RedexMut) -> TermInde
         // Perform the actual substition on body.
         // This method actually fuses the fixing down/up that needs to happen for the whole body
         // in addition to performing substitutions.
-        _substitute_shift_fused(root, &redex);
+        substitute_shift_fused_nonzero_usage(root, &redex);
 
         // The body of abs may get repointed if the redex body consists of a single leaf node that gets substituted.
         // Hence, we need to check for this and get the actually new body.
@@ -749,7 +749,7 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &RedexMut) -> TermInde
     }
 }
 
-fn _substitute_shift_fused(root: &mut FlatRoot, redex: &RedexMut) {
+fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &RedexMut) {
     let mut substitution_i = 0;
     root.preorder_walk_at_mut(redex.body, |root, term, chain| {
         if let DebruijnNode::Index(debruijn_index) = root[term] {
