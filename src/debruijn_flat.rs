@@ -18,7 +18,7 @@ impl FlatRoot {
             backing: vec![],
             root: TermIndex {
                 index: 0,
-                adjust: 0,
+                subterm_adjust: None,
             },
         }
     }
@@ -304,28 +304,34 @@ pub struct TermIndex {
     pub index: usize,
     /// An "adjustment" value. All DebruijnNode::Index nodes are implictly increased or decreased by
     /// this amount. Note that this is cumulative.
-    adjust: isize,
+    subterm_adjust: Option<isize>,
 }
 impl TermIndex {
     /// Create a new TermIndex with adjustment zero.
     pub fn new(index: usize) -> Self {
-        Self { index, adjust: 0 }
+        Self {
+            index,
+            subterm_adjust: None,
+        }
     }
 }
 
 impl Display for TermIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if self.adjust == 0 {
-            write!(f, "{}", self.index)
+        if let Some(adjust) = self.subterm_adjust {
+            write!(f, "{} (adjust={})", self.index, adjust)
         } else {
-            write!(f, "{} (adjust={})", self.index, self.adjust)
+            write!(f, "{}", self.index)
         }
     }
 }
 
 impl From<usize> for TermIndex {
     fn from(index: usize) -> Self {
-        TermIndex { index, adjust: 0 }
+        TermIndex {
+            index,
+            subterm_adjust: None,
+        }
     }
 }
 
