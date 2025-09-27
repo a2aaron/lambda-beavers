@@ -219,9 +219,11 @@ mod test {
         }
 
         fn get_by_term(&self, root: &FlatRoot) -> Option<NodeIndex> {
+            // Note: Normalized is used here since the graph has no control over the inner layout
+            // of a given node.
             self.nodes
                 .iter()
-                .position(|the_node| the_node.root == *root)
+                .position(|the_node| the_node.root.normalized() == root.normalized())
                 .map(NodeIndex)
         }
     }
@@ -275,8 +277,16 @@ mod test {
             (5, 6),
         ];
 
+        for node in &graph.nodes {
+            println!("node: {}", node.root);
+        }
+
         for node in &nodes {
-            assert!(graph.contains_term(node))
+            assert!(
+                graph.contains_term(node),
+                "Expected graph to contain node {} but it didn't",
+                node
+            )
         }
 
         for (a, b) in edges {

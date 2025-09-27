@@ -58,30 +58,28 @@ impl FlatRoot {
     }
 
     pub fn normalized(&self) -> FlatRoot {
-        fn _clone(old_root: &FlatRoot, new_root: &mut FlatRoot, term: TermIndex) -> TermIndex {
-            match old_root[term] {
-                DebruijnNode::Index(idx) => {
-                    let idx = DebruijnNode::Index(idx);
-                    new_root.alloc_one(Some(idx))
-                }
-                DebruijnNode::Abstraction(abs) => {
-                    let new_abs = new_root.alloc_one(None);
-                    let body = _clone(old_root, new_root, abs.body);
-                    new_root[new_abs] = DebruijnNode::abs(body, abs.usage);
-                    new_abs
-                }
-                DebruijnNode::Application(app) => {
-                    let new_app = new_root.alloc_one(None);
-                    let func = _clone(old_root, new_root, app.func);
-                    let arg = _clone(old_root, new_root, app.arg);
-                    new_root[new_app] = DebruijnNode::app(func, arg);
-                    new_app
-                }
-            }
-        }
-
         let mut new_root = FlatRoot::new();
-        _clone(self, &mut new_root, self.root);
+        let root_node = self.postorder_walk(|_root, _term, _chain, result| match result {
+            ChildResults::Index(idx) => {
+                let idx = DebruijnNode::Index(idx);
+                new_root.alloc_one(Some(idx))
+            }
+            ChildResults::Abstraction { abs, body_result } => {
+                let new_abs = new_root.alloc_one(None);
+                new_root[new_abs] = DebruijnNode::abs(body_result, abs.usage);
+                new_abs
+            }
+            ChildResults::Application {
+                func_result,
+                arg_result,
+                ..
+            } => {
+                let new_app = new_root.alloc_one(None);
+                new_root[new_app] = DebruijnNode::app(func_result, arg_result);
+                new_app
+            }
+        });
+        new_root.root = root_node;
         new_root
     }
 
@@ -951,6 +949,20 @@ mod test {
     fn round_trip() {
         let original = Debruijn::from("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2");
         let flat = FlatRoot::from(&original);
+        let roundtripped = Debruijn::from(&flat);
+
+        assert_eq!(
+            original, roundtripped,
+            "Expected {original}, got {roundtripped}",
+        );
+    }
+
+    #[test]
+    fn round_trip_normalized() {
+        let original = Debruijn::from("(((λ (λ ((2 1) 2))) (λ (λ 2))) (λ (λ 1)))");
+        let original2 = Debruijn::from("(λ λ 2 1 2) (λ λ 2) λ λ 1");
+        assert_eq!(original, original2);
+        let flat = FlatRoot::from(&original).normalized();
         let roundtripped = Debruijn::from(&flat);
 
         assert_eq!(
