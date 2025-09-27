@@ -776,39 +776,36 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &RedexMut) -> TermInde
 fn _substitute_shift_fused(root: &mut FlatRoot, redex: &RedexMut) {
     let mut substitution_i = 0;
     root.preorder_walk_at_mut(redex.body, |root, term, chain| {
-        match root[term] {
-            DebruijnNode::Index(debruijn_index) => {
-                let depth = chain.depth();
-                // Note that the depth here is 0-indexed, while debruijn_index is 1-indexed
-                // Hence need to add one to compare properly. (eg: at depth-0, which is to say at
-                // the top body layer, a debruijn index of 1 should get substituted.)
-                let is_substituting = debruijn_index == depth + 1;
-                if is_substituting {
-                    let last_arg_allocation = substitution_i == redex.body_usage - 1;
-                    let new_arg = if last_arg_allocation {
-                        // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
-                        // Bump up free variables by `depth`
-                        // Note that normally we would have fixed up the argument by one prior to
-                        // calling this method. However, we also fix down the entire body by one after
-                        // calling the method. Both of these fixups cancel out, so we still only just
-                        // fix up by `depth`
-                        up_by(root, redex.arg(), depth);
-                        redex.arg
-                    } else {
-                        clone_subtree_and_fix_up_fused(root, redex.arg, depth)
-                    };
+        if let DebruijnNode::Index(debruijn_index) = root[term] {
+            let depth = chain.depth();
+            // Note that the depth here is 0-indexed, while debruijn_index is 1-indexed
+            // Hence need to add one to compare properly. (eg: at depth-0, which is to say at
+            // the top body layer, a debruijn index of 1 should get substituted.)
+            let is_substituting = debruijn_index == depth + 1;
+            if is_substituting {
+                let last_arg_allocation = substitution_i == redex.body_usage - 1;
+                let new_arg = if last_arg_allocation {
+                    // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
+                    // Bump up free variables by `depth`
+                    // Note that normally we would have fixed up the argument by one prior to
+                    // calling this method. However, we also fix down the entire body by one after
+                    // calling the method. Both of these fixups cancel out, so we still only just
+                    // fix up by `depth`
+                    up_by(root, redex.arg(), depth);
+                    redex.arg
+                } else {
+                    clone_subtree_and_fix_up_fused(root, redex.arg, depth)
+                };
 
-                    repoint_node(root, term.parent, new_arg);
-                    substitution_i += 1;
-                } else if debruijn_index > depth {
-                    // Variable is a free variable, but is NOT getting substituted.
-                    // Remember that the body of the term is getting dropped out of the abstraction
-                    // Because of this, we need to reduce the term_index by one, since there's one
-                    // less abstraction to jump over for the index.
-                    root[term] = DebruijnNode::Index(debruijn_index - 1);
-                }
+                repoint_node(root, term.parent, new_arg);
+                substitution_i += 1;
+            } else if debruijn_index > depth {
+                // Variable is a free variable, but is NOT getting substituted.
+                // Remember that the body of the term is getting dropped out of the abstraction
+                // Because of this, we need to reduce the term_index by one, since there's one
+                // less abstraction to jump over for the index.
+                root[term] = DebruijnNode::Index(debruijn_index - 1);
             }
-            _ => (),
         }
         ControlFlow::Continue::<()>(())
     });
@@ -881,18 +878,14 @@ fn down_one(root: &mut FlatRoot, term: TermWithParent) {
 fn shift_cutoff(root: &mut FlatRoot, term: TermWithParent, up_by: isize, depth: DebruijnDepth) {
     root.preorder_walk_at_mut(term, |root, term, chain| {
         let term = term.term;
-        match root[term] {
-            DebruijnNode::Index(term_index) => {
-                let depth = chain.depth() + depth;
-                // Recall that an index starts at 1, so if depth is set to 1, then this branch will always be taken.
-                let is_free = term_index >= depth;
-                if is_free {
-                    let new_index = term_index.checked_add_signed(up_by).unwrap();
-                    root[term] = DebruijnNode::Index(new_index);
-                }
+        if let DebruijnNode::Index(term_index) = root[term] {
+            let depth = chain.depth() + depth;
+            // Recall that an index starts at 1, so if depth is set to 1, then this branch will always be taken.
+            let is_free = term_index >= depth;
+            if is_free {
+                let new_index = term_index.checked_add_signed(up_by).unwrap();
+                root[term] = DebruijnNode::Index(new_index);
             }
-            DebruijnNode::Abstraction(_) => (),
-            DebruijnNode::Application(_) => (),
         };
         ControlFlow::Continue::<()>(())
     });
