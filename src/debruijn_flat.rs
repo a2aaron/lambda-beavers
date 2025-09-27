@@ -297,7 +297,7 @@ pub struct TermIndex {
     pub index: usize,
     /// An "adjustment" value. All DebruijnNode::Index nodes are implictly increased or decreased by
     /// this amount. Note that this is cumulative.
-    subterm_adjust: Option<isize>,
+    pub subterm_adjust: Option<isize>,
 }
 impl TermIndex {
     /// Create a new TermIndex with adjustment zero.

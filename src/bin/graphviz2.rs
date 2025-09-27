@@ -241,18 +241,30 @@ fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<Edge>
         }
         DebruijnNode::Abstraction(abs) => {
             let body = abs.body.index;
+            add_if_subterm_termindex(&mut edge_attribs, abs.body);
             edges.push(Edge::new(node_info.index, body, &edge_attribs));
         }
         DebruijnNode::Application(app) => {
             let func = app.func.index;
             let arg = app.arg.index;
-            edges.push(Edge::new(node_info.index, func, &edge_attribs));
 
-            edge_attribs.set("arrowhead", "onormal");
-            edges.push(Edge::new(node_info.index, arg, &edge_attribs));
+            let mut func_attribs = edge_attribs.clone();
+            add_if_subterm_termindex(&mut func_attribs, app.func);
+            edges.push(Edge::new(node_info.index, func, &func_attribs));
+
+            let mut arg_attribs = edge_attribs.clone();
+            add_if_subterm_termindex(&mut arg_attribs, app.arg);
+            arg_attribs.set("arrowhead", "onormal");
+            edges.push(Edge::new(node_info.index, arg, &arg_attribs));
         }
     };
     edges
+}
+
+fn add_if_subterm_termindex(edge_attribs: &mut Attributes, term: TermIndex) {
+    if term.subterm_adjust.is_some() {
+        edge_attribs.set("penwidth", "5");
+    }
 }
 
 fn make_node(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Node {
