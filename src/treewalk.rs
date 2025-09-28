@@ -9,7 +9,7 @@ pub struct ActionCtx<'chain> {
     pub chain: &'chain mut ParentChain,
 }
 
-pub trait ActionMut<T> = FnMut(&mut FlatRoot, TermWithParent, &mut ParentChain) -> ControlFlow<T>;
+pub trait ActionMut<T> = FnMut(&mut FlatRoot, &mut ActionCtx) -> ControlFlow<T>;
 pub trait Action<T> = FnMut(&FlatRoot, &mut ActionCtx) -> ControlFlow<T>;
 
 impl FlatRoot {
@@ -33,22 +33,19 @@ impl FlatRoot {
     }
 
     pub fn preorder_walk_mut<T>(&mut self, mut action: impl ActionMut<T>) -> Option<T> {
-        preorder_walk_mut(
-            self,
-            TermWithParent::root(self),
-            &mut ParentChain::new(),
-            &mut action,
-        )
-        .break_value()
+        let mut ctx = ActionCtx {
+            term: TermWithParent::root(self),
+            chain: &mut ParentChain::new(),
+        };
+        preorder_walk_mut(self, &mut ctx, &mut action).break_value()
     }
 
     pub fn preorder_walk_at_mut<T>(
         &mut self,
-        term: TermWithParent,
-        chain: &mut ParentChain,
+        ctx: &mut ActionCtx,
         mut action: impl ActionMut<T>,
     ) -> Option<T> {
-        preorder_walk_mut(self, term, chain, &mut action).break_value()
+        preorder_walk_mut(self, ctx, &mut action).break_value()
     }
 
     pub fn postorder_walk<T>(&self, mut action: impl PostOrderAction<T>) -> T {
@@ -62,11 +59,10 @@ impl FlatRoot {
 
     pub fn postorder_walk_at_mut<T>(
         &mut self,
-        term: TermWithParent,
-        chain: &mut ParentChain,
+        ctx: &mut ActionCtx,
         mut action: impl PostOrderActionMut<T>,
     ) -> T {
-        postorder_walk_mut(self, term, chain, &mut action)
+        postorder_walk_mut(self, ctx, &mut action)
     }
 }
 
@@ -123,36 +119,42 @@ pub fn postorder_walk<T>(
 
 pub fn postorder_walk_mut<T>(
     root: &mut FlatRoot,
-    term: TermWithParent,
-    parent_chain: &mut ParentChain,
+    ctx: &mut ActionCtx,
     action: &mut impl PostOrderActionMut<T>,
 ) -> T {
+    let term = ctx.term;
     match root[term] {
-        DebruijnNode::Index(idx) => action(root, term, &parent_chain, ChildResults::Index(idx)),
+        DebruijnNode::Index(idx) => action(root, term, &ctx.chain, ChildResults::Index(idx)),
         DebruijnNode::Abstraction(abs) => {
             let body = abs.body(term.term);
-            parent_chain.push_abs(term.term, abs);
-            let body_result = postorder_walk_mut(root, body, parent_chain, action);
-            parent_chain.pop_abs(abs);
+
+            ctx.chain.push_abs(term.term, abs);
+            ctx.term = body;
+            let body_result = postorder_walk_mut(root, ctx, action);
+            ctx.term = term;
+            ctx.chain.pop_abs(abs);
 
             let child_results = ChildResults::Abstraction { abs, body_result };
-            action(root, term, &parent_chain, child_results)
+            action(root, term, &ctx.chain, child_results)
         }
         DebruijnNode::Application(app) => {
             let arg = app.arg(term.term);
             let func = app.func(term.term);
 
-            parent_chain.push_app(term.term, app);
-            let func_result = postorder_walk_mut(root, func, parent_chain, action);
-            let arg_result = postorder_walk_mut(root, arg, parent_chain, action);
-            parent_chain.pop_app(app);
+            ctx.chain.push_app(term.term, app);
+            ctx.term = func;
+            let func_result = postorder_walk_mut(root, ctx, action);
+            ctx.term = arg;
+            let arg_result = postorder_walk_mut(root, ctx, action);
+            ctx.term = term;
+            ctx.chain.pop_app(app);
 
             let child_results = ChildResults::Application {
                 app,
                 func_result,
                 arg_result,
             };
-            action(root, term, &parent_chain, child_results)
+            action(root, term, &ctx.chain, child_results)
         }
     }
 }
@@ -195,29 +197,34 @@ pub fn preorder_walk<T>(
 
 pub fn preorder_walk_mut<T>(
     root: &mut FlatRoot,
-    term: TermWithParent,
-    parent_chain: &mut ParentChain,
+    ctx: &mut ActionCtx,
     action: &mut impl ActionMut<T>,
 ) -> ControlFlow<T> {
-    action(root, term, parent_chain)?;
+    action(root, ctx)?;
 
-    let term = term.term;
+    let term = ctx.term.term;
+    let prev_term = ctx.term;
     match root[term] {
         DebruijnNode::Index(_) => (),
         DebruijnNode::Abstraction(abs) => {
             let body = abs.body(term);
-            parent_chain.push_abs(term, abs);
-            preorder_walk_mut(root, body, parent_chain, action)?;
-            parent_chain.pop_abs(abs);
+            ctx.chain.push_abs(term, abs);
+            ctx.term = body;
+            preorder_walk_mut(root, ctx, action)?;
+            ctx.term = prev_term;
+            ctx.chain.pop_abs(abs);
         }
         DebruijnNode::Application(app) => {
             let arg = app.arg(term);
             let func = app.func(term);
 
-            parent_chain.push_app(term, app);
-            preorder_walk_mut(root, func, parent_chain, action)?;
-            preorder_walk_mut(root, arg, parent_chain, action)?;
-            parent_chain.pop_app(app);
+            ctx.chain.push_app(term, app);
+            ctx.term = func;
+            preorder_walk_mut(root, ctx, action)?;
+            ctx.term = arg;
+            preorder_walk_mut(root, ctx, action)?;
+            ctx.term = prev_term;
+            ctx.chain.pop_app(app);
         }
     }
     ControlFlow::Continue(())

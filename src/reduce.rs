@@ -6,7 +6,6 @@ use crate::{
     debruijn::Debruijn,
     debruijn_flat::{self, FlatRoot},
     graph::{NodeIndex, ReductionGraph},
-    treewalk::ActionCtx,
     utils::Rng,
 };
 
@@ -22,12 +21,8 @@ impl Reducer {
     }
 
     pub fn reduce_one(&mut self) -> Option<ReductionResult> {
-        let result = self.root.preorder_walk_mut(|root, term, mut chain| {
-            let mut ctx = ActionCtx {
-                term,
-                chain: &mut chain,
-            };
-            if let Some(redex) = debruijn_flat::RedexMut::try_get(root, &mut ctx) {
+        let result = self.root.preorder_walk_mut(|root, ctx| {
+            if let Some(redex) = debruijn_flat::RedexMut::try_get(root, ctx) {
                 debruijn_flat::beta_reduce(root, redex);
                 ControlFlow::Break(())
             } else {
