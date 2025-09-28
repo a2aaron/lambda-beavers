@@ -4,9 +4,10 @@ use clap::Parser;
 use inquire::Select;
 use lambda_beaver::{
     debruijn::Debruijn,
-    debruijn_flat::{DebruijnNode, FlatRoot, TermIndex, beta_reduce},
+    debruijn_flat::{FlatRoot, TermIndex, beta_reduce},
     parse,
     print::{NodeLabelType, PrintableTerm},
+    treewalk::ChildResults,
 };
 
 #[derive(Parser, Debug)]
@@ -20,32 +21,27 @@ struct Args {
 }
 
 fn print_highlighted<'a>(root: &'a FlatRoot, highlighted: TermIndex) -> String {
-    fn get_printable_terms<'a>(
-        root: &'a FlatRoot,
-        term: TermIndex,
-        highlighted: TermIndex,
-    ) -> PrintableTerm {
-        match root[term] {
-            DebruijnNode::Index(i) => PrintableTerm::Leaf(format!("{i}")),
-            DebruijnNode::Abstraction(abs) => PrintableTerm::Abstraction {
-                body_head: "λ ".to_string(),
-                body: Box::new(get_printable_terms(root, abs.body, highlighted)),
-            },
-            DebruijnNode::Application(app) => {
-                let func = get_printable_terms(root, app.func, highlighted);
-                let arg = get_printable_terms(root, app.arg, highlighted);
-                let highlight = term == highlighted;
+    let printable_terms = root.postorder_walk(|_root, term, chain, results| match results {
+        ChildResults::Index(index) => PrintableTerm::Leaf(format!("{}", index.get(chain))),
+        ChildResults::Abstraction { body_result, .. } => PrintableTerm::Abstraction {
+            body_head: "λ ".to_string(),
+            body: Box::new(body_result),
+        },
+        ChildResults::Application {
+            func_result,
+            arg_result,
+            ..
+        } => {
+            let highlight = term.term == highlighted;
 
-                PrintableTerm::Application {
-                    highlight,
-                    func: Box::new(func),
-                    arg: Box::new(arg),
-                }
+            PrintableTerm::Application {
+                highlight,
+                func: Box::new(func_result),
+                arg: Box::new(arg_result),
             }
         }
-    }
+    });
 
-    let printable_terms = get_printable_terms(&root, root.root, highlighted);
     printable_terms.print()
 }
 

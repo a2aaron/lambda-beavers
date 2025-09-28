@@ -176,7 +176,7 @@ impl From<&Debruijn> for FlatRoot {
     fn from(term: &Debruijn) -> Self {
         fn flatten(root: &mut FlatRoot, term: &Debruijn) -> TermIndex {
             match term {
-                Debruijn::Index(index) => root.alloc(DebruijnNode::Index(*index)),
+                Debruijn::Index(index) => root.alloc(DebruijnNode::idx(*index)),
                 Debruijn::Abstraction { body } => {
                     let usage = compute_usage(&body);
                     let body = flatten(root, body);
@@ -198,8 +198,8 @@ impl From<&Debruijn> for FlatRoot {
 
 impl From<&FlatRoot> for Debruijn {
     fn from(root: &FlatRoot) -> Self {
-        root.postorder_walk(|_root, _term, _chain, child_results| match child_results {
-            ChildResults::Index(idx) => Debruijn::Index(idx),
+        root.postorder_walk(|_root, _term, chain, child_results| match child_results {
+            ChildResults::Index(idx) => Debruijn::Index(idx.get(chain)),
             ChildResults::Abstraction { body_result, .. } => Debruijn::Abstraction {
                 body: Box::new(body_result),
             },
@@ -249,7 +249,7 @@ fn compute_usage_flat(root: &FlatRoot, body: TermWithParent) -> Usage {
         // the abstraction itself as input rather than it's body), then this would be 0.
         let depth = parent_chain.debruijn_depth() + 1;
         if let DebruijnNode::Index(index) = root[term] {
-            if index == depth {
+            if index.get(parent_chain) == depth {
                 usage += 1;
             }
         }
@@ -267,7 +267,18 @@ type DebruijnDepth = usize;
 
 // The index for the DebruijnNode::Index variant. This is an index for the actual lambda term and works
 // just like how Debruijn::Index works.
-pub type DebruijnIndex = usize;
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct DebruijnIndex(usize);
+
+impl DebruijnIndex {
+    pub fn get(&self, chain: &ParentChain) -> usize {
+        self.0
+    }
+
+    pub fn get_raw(&self) -> usize {
+        self.0
+    }
+}
 
 // The number of times a variable is used in an abstraction.
 type Usage = usize;
@@ -373,6 +384,10 @@ pub enum DebruijnNode {
     Application(Application),
 }
 impl DebruijnNode {
+    pub fn idx(index: usize) -> DebruijnNode {
+        DebruijnNode::Index(DebruijnIndex(index))
+    }
+
     pub fn abs(body: TermIndex, usage: usize) -> DebruijnNode {
         DebruijnNode::Abstraction(Abstraction { body, usage })
     }
@@ -397,16 +412,10 @@ impl From<Application> for DebruijnNode {
 impl std::fmt::Debug for DebruijnNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Index(index) => write!(f, "idx@{}", *index),
+            Self::Index(index) => write!(f, "idx@{}", index.get_raw()),
             Self::Abstraction(abs) => write!(f, "abs: body -> {} (usage={})", abs.body, abs.usage),
             Self::Application(app) => write!(f, "app: func -> {}, arg -> {}", app.func, app.arg),
         }
-    }
-}
-
-impl Default for DebruijnNode {
-    fn default() -> Self {
-        DebruijnNode::Index(0)
     }
 }
 
@@ -620,7 +629,7 @@ fn get_usage_by_depth(
             let depth_relative_to_arg = chain.debruijn_depth();
             // We need to account for the fact that we may be inside an abstraction in the argument
             // If we are, we should skip if this is a bound variable.
-            let is_bound = index <= depth_relative_to_arg;
+            let is_bound = index.get(chain) <= depth_relative_to_arg;
             if is_bound {
                 return ControlFlow::Continue::<()>(());
             }
@@ -639,7 +648,7 @@ fn get_usage_by_depth(
 
             // SAFETY: subtraction is safe because we just checked that index <= depth_relative_to_arg
             // and return in the case that this happens.
-            let index_relative_to_parent = index - depth_relative_to_arg;
+            let index_relative_to_parent = index.get(chain) - depth_relative_to_arg;
 
             // In the case of an open term - eg: λ (λ 1 1) 99
             // it is possible for an index to actually point to an implict parent which
@@ -740,7 +749,7 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &RedexMut) {
             // Note that the depth here is 0-indexed, while debruijn_index is 1-indexed
             // Hence need to add one to compare properly. (eg: at depth-0, which is to say at
             // the top body layer, a debruijn index of 1 should get substituted.)
-            let is_substituting = debruijn_index == depth + 1;
+            let is_substituting = debruijn_index.get(chain) == depth + 1;
             if is_substituting {
                 let last_arg_allocation = substitution_i == redex.body_usage - 1;
                 let new_arg = if last_arg_allocation {
@@ -758,12 +767,12 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &RedexMut) {
 
                 repoint_node(root, term.parent, new_arg);
                 substitution_i += 1;
-            } else if debruijn_index > depth {
+            } else if debruijn_index.get(chain) > depth {
                 // Variable is a free variable, but is NOT getting substituted.
                 // Remember that the body of the term is getting dropped out of the abstraction
                 // Because of this, we need to reduce the term_index by one, since there's one
                 // less abstraction to jump over for the index.
-                root[term] = DebruijnNode::Index(debruijn_index - 1);
+                root[term] = DebruijnNode::idx(debruijn_index.get(chain) - 1);
             }
         }
         ControlFlow::Continue::<()>(())
@@ -786,9 +795,13 @@ fn clone_subtree_and_fix_up_fused(
     root.postorder_walk_at_mut(term, |root, _term, chain, result| match result {
         ChildResults::Index(index) => {
             let depth = chain.debruijn_depth() + 1;
-            let is_free = index >= depth;
-            let index = if is_free { index + up_by } else { index };
-            root.alloc(DebruijnNode::Index(index))
+            let is_free = index.get(chain) >= depth;
+            let index = if is_free {
+                index.get(chain) + up_by
+            } else {
+                index.get(chain)
+            };
+            root.alloc(DebruijnNode::idx(index))
         }
         ChildResults::Abstraction { abs, body_result } => {
             root.alloc(DebruijnNode::abs(body_result, abs.usage))
@@ -826,10 +839,10 @@ fn shift_cutoff(root: &mut FlatRoot, term: TermWithParent, up_by: isize, depth: 
         if let DebruijnNode::Index(term_index) = root[term] {
             let depth = chain.debruijn_depth() + depth;
             // Recall that an index starts at 1, so if depth is set to 1, then this branch will always be taken.
-            let is_free = term_index >= depth;
+            let is_free = term_index.get(chain) >= depth;
             if is_free {
-                let new_index = term_index.checked_add_signed(up_by).unwrap();
-                root[term] = DebruijnNode::Index(new_index);
+                let new_index = term_index.get(chain).checked_add_signed(up_by).unwrap();
+                root[term] = DebruijnNode::idx(new_index);
             }
         };
         ControlFlow::Continue::<()>(())

@@ -215,7 +215,7 @@ mod test {
     }
 
     fn idx(a: usize) -> DebruijnNode {
-        DebruijnNode::Index(a)
+        DebruijnNode::idx(a)
     }
 
     fn def(body: usize) -> DebruijnNode {
