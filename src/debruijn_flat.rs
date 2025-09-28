@@ -59,7 +59,7 @@ impl FlatRoot {
 
     pub fn normalized(&self) -> FlatRoot {
         let mut new_root = FlatRoot::new();
-        let root_node = self.postorder_walk(|_root, _term, _chain, result| match result {
+        let root_node = self.postorder_walk(|_root, _ctx, result| match result {
             ChildResults::Index(idx) => new_root.alloc(DebruijnNode::Index(idx)),
             ChildResults::Abstraction { abs, body_result } => {
                 new_root.alloc(DebruijnNode::abs(body_result, abs.usage))
@@ -201,8 +201,8 @@ impl From<&Debruijn> for FlatRoot {
 
 impl From<&FlatRoot> for Debruijn {
     fn from(root: &FlatRoot) -> Self {
-        root.postorder_walk(|_root, _term, chain, child_results| match child_results {
-            ChildResults::Index(idx) => Debruijn::Index(idx.get(chain)),
+        root.postorder_walk(|_root, ctx, child_results| match child_results {
+            ChildResults::Index(idx) => Debruijn::Index(idx.get(ctx.chain)),
             ChildResults::Abstraction { body_result, .. } => Debruijn::Abstraction {
                 body: Box::new(body_result),
             },
@@ -806,25 +806,28 @@ fn clone_subtree_and_fix_up_fused(
     up_by: DebruijnDepth,
 ) -> TermIndex {
     let init_depth = ctx.chain.debruijn_depth();
-    root.postorder_walk_at_mut(ctx, |root, _term, chain, result| match result {
-        ChildResults::Index(index) => {
-            let depth_relative_to_term = chain.debruijn_depth() + 1 - init_depth;
-            let is_free = index.get(chain) >= depth_relative_to_term;
-            let index = if is_free {
-                index.get(chain) + up_by
-            } else {
-                index.get(chain)
-            };
-            root.alloc(DebruijnNode::idx(index))
+    root.postorder_walk_at_mut(ctx, |root, ctx, result| {
+        let chain = &ctx.chain;
+        match result {
+            ChildResults::Index(index) => {
+                let depth_relative_to_term = chain.debruijn_depth() + 1 - init_depth;
+                let is_free = index.get(chain) >= depth_relative_to_term;
+                let index = if is_free {
+                    index.get(chain) + up_by
+                } else {
+                    index.get(chain)
+                };
+                root.alloc(DebruijnNode::idx(index))
+            }
+            ChildResults::Abstraction { abs, body_result } => {
+                root.alloc(DebruijnNode::abs(body_result, abs.usage))
+            }
+            ChildResults::Application {
+                func_result,
+                arg_result,
+                ..
+            } => root.alloc(DebruijnNode::app(func_result, arg_result)),
         }
-        ChildResults::Abstraction { abs, body_result } => {
-            root.alloc(DebruijnNode::abs(body_result, abs.usage))
-        }
-        ChildResults::Application {
-            func_result,
-            arg_result,
-            ..
-        } => root.alloc(DebruijnNode::app(func_result, arg_result)),
     })
 }
 

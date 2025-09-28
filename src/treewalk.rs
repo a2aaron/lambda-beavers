@@ -4,6 +4,20 @@ use crate::debruijn_flat::{
     Abstraction, Application, DebruijnIndex, DebruijnNode, FlatRoot, ParentChain, TermWithParent,
 };
 
+// Important! All of these walk methods must treat ParentChain as "opaquely immutable". Basically,
+// the caller of these walk methods should not see any mutation done to an ActionCtx--it is as if
+// it has passed in an &ActionCtx instead of &mut ActionCtx
+// The reason why we give an &mut ActionCtx at all is because the walk methods are allowed to
+// mutate the ActionCtx **during** the walk, but since the walk will always return to the node
+// it stopped at, this is fine.
+// (This is is also why all of the walk_at methods do not allow for early exit. Unlike the normal
+// walk methods where the caller never needs to supply an ActionCtx and it does that on it's own,
+// the subtree walkers do get an outside ActionCtx. Hence, it will need to always crawl the whole subtree.
+// There may exist a future where this is not required but for now I am doing it this way since it
+// turns out all of the subtree crawling algorithms actually never require an early exit.)
+// In particlar, this means that the Action and ActionMut closures should NOT mutate the ActionCtx
+// and should pretend that it is an &ActionCtx
+
 pub struct ActionCtx<'chain> {
     pub term: TermWithParent,
     pub chain: &'chain mut ParentChain,
@@ -52,12 +66,11 @@ impl FlatRoot {
     }
 
     pub fn postorder_walk<T>(&self, mut action: impl PostOrderAction<T>) -> T {
-        postorder_walk(
-            self,
-            TermWithParent::root(self),
-            &mut ParentChain::new(),
-            &mut action,
-        )
+        let mut ctx = ActionCtx {
+            term: TermWithParent::root(self),
+            chain: &mut ParentChain::new(),
+        };
+        postorder_walk(self, &mut ctx, &mut action)
     }
 
     pub fn postorder_walk_at_mut<T>(
@@ -69,9 +82,8 @@ impl FlatRoot {
     }
 }
 
-pub trait PostOrderAction<T> = FnMut(&FlatRoot, TermWithParent, &ParentChain, ChildResults<T>) -> T;
-pub trait PostOrderActionMut<T> =
-    FnMut(&mut FlatRoot, TermWithParent, &ParentChain, ChildResults<T>) -> T;
+pub trait PostOrderAction<T> = FnMut(&FlatRoot, &ActionCtx, ChildResults<T>) -> T;
+pub trait PostOrderActionMut<T> = FnMut(&mut FlatRoot, &ActionCtx, ChildResults<T>) -> T;
 pub enum ChildResults<T> {
     Index(DebruijnIndex),
     Abstraction {
@@ -86,38 +98,43 @@ pub enum ChildResults<T> {
 }
 pub fn postorder_walk<T>(
     root: &FlatRoot,
-    term: TermWithParent,
-    parent_chain: &mut ParentChain,
+    ctx: &mut ActionCtx,
     action: &mut impl PostOrderAction<T>,
 ) -> T {
-    match root[term] {
-        DebruijnNode::Index(idx) => action(root, term, &parent_chain, ChildResults::Index(idx)),
+    let term = ctx.term;
+    let child_results = match root[term] {
+        DebruijnNode::Index(idx) => ChildResults::Index(idx),
         DebruijnNode::Abstraction(abs) => {
             let body = abs.body(term.term);
-            parent_chain.push_abs(term.term, abs);
-            let body_result = postorder_walk(root, body, parent_chain, action);
-            parent_chain.pop_abs(abs);
 
-            let child_results = ChildResults::Abstraction { abs, body_result };
-            action(root, term, &parent_chain, child_results)
+            ctx.chain.push_abs(term.term, abs);
+            ctx.term = body;
+            let body_result = postorder_walk(root, ctx, action);
+            ctx.term = term;
+            ctx.chain.pop_abs(abs);
+
+            ChildResults::Abstraction { abs, body_result }
         }
         DebruijnNode::Application(app) => {
             let arg = app.arg(term.term);
             let func = app.func(term.term);
 
-            parent_chain.push_app(term.term, app);
-            let func_result = postorder_walk(root, func, parent_chain, action);
-            let arg_result = postorder_walk(root, arg, parent_chain, action);
-            parent_chain.pop_app(app);
+            ctx.chain.push_app(term.term, app);
+            ctx.term = func;
+            let func_result = postorder_walk(root, ctx, action);
+            ctx.term = arg;
+            let arg_result = postorder_walk(root, ctx, action);
+            ctx.term = term;
+            ctx.chain.pop_app(app);
 
-            let child_results = ChildResults::Application {
+            ChildResults::Application {
                 app,
                 func_result,
                 arg_result,
-            };
-            action(root, term, &parent_chain, child_results)
+            }
         }
-    }
+    };
+    action(root, ctx, child_results)
 }
 
 pub fn postorder_walk_mut<T>(
@@ -126,8 +143,8 @@ pub fn postorder_walk_mut<T>(
     action: &mut impl PostOrderActionMut<T>,
 ) -> T {
     let term = ctx.term;
-    match root[term] {
-        DebruijnNode::Index(idx) => action(root, term, &ctx.chain, ChildResults::Index(idx)),
+    let child_results = match root[term] {
+        DebruijnNode::Index(idx) => ChildResults::Index(idx),
         DebruijnNode::Abstraction(abs) => {
             let body = abs.body(term.term);
 
@@ -137,8 +154,7 @@ pub fn postorder_walk_mut<T>(
             ctx.term = term;
             ctx.chain.pop_abs(abs);
 
-            let child_results = ChildResults::Abstraction { abs, body_result };
-            action(root, term, &ctx.chain, child_results)
+            ChildResults::Abstraction { abs, body_result }
         }
         DebruijnNode::Application(app) => {
             let arg = app.arg(term.term);
@@ -152,14 +168,14 @@ pub fn postorder_walk_mut<T>(
             ctx.term = term;
             ctx.chain.pop_app(app);
 
-            let child_results = ChildResults::Application {
+            ChildResults::Application {
                 app,
                 func_result,
                 arg_result,
-            };
-            action(root, term, &ctx.chain, child_results)
+            }
         }
-    }
+    };
+    action(root, &ctx, child_results)
 }
 
 pub fn preorder_walk<T>(
