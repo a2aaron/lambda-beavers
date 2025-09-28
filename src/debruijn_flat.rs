@@ -5,7 +5,10 @@ use std::{
     str::FromStr,
 };
 
-use crate::{debruijn::Debruijn, treewalk::ChildResults};
+use crate::{
+    debruijn::Debruijn,
+    treewalk::{ActionCtx, ChildResults},
+};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FlatRoot {
@@ -33,8 +36,8 @@ impl FlatRoot {
     }
 
     pub fn is_bnf(&self) -> bool {
-        let result = self.preorder_walk(|root, term, _| {
-            if RedexMut::is_redex(root, term.term) {
+        let result = self.preorder_walk(|root, ctx| {
+            if RedexMut::is_redex(root, ctx.term.term) {
                 ControlFlow::Break(false)
             } else {
                 ControlFlow::Continue(())
@@ -45,8 +48,8 @@ impl FlatRoot {
 
     pub fn get_redexes(&self) -> Vec<RedexMut> {
         let mut redexes = vec![];
-        self.preorder_walk(|root, term, parent_chain| {
-            if let Some(redex) = RedexMut::try_get(root, term, parent_chain.clone()) {
+        self.preorder_walk(|root, ctx| {
+            if let Some(redex) = RedexMut::try_get(root, ctx) {
                 redexes.push(redex);
             }
             ControlFlow::Continue::<()>(())
@@ -72,12 +75,12 @@ impl FlatRoot {
     }
 
     pub fn check_usage(&self) -> Result<(), (TermIndex, Usage, Usage)> {
-        let result = self.preorder_walk(|root, term, chain| {
-            if let DebruijnNode::Abstraction(abs) = root[term] {
-                let expected = compute_usage_flat(root, abs.body(term.term), chain);
+        let result = self.preorder_walk(|root, ctx| {
+            if let DebruijnNode::Abstraction(abs) = root[ctx.term] {
+                let expected = compute_usage_flat(root, ctx);
                 let actual = abs.usage;
                 if actual != expected {
-                    return ControlFlow::Break((term.term, actual, expected));
+                    return ControlFlow::Break((ctx.term.term, actual, expected));
                 }
             };
             ControlFlow::Continue(())
@@ -238,19 +241,15 @@ fn compute_usage(body: &Debruijn) -> Usage {
 
 /// Computes the number of usages that the first free variable appears in the body of an abstraction.
 /// (that is to say, this function computes the number times the input variable appears in the
-/// `body` must be the body of the abstraction!
-/// ter the body of an abstraction
 /// eg: in λ 1 λ 2 λ 3, we have that 1, 2, and 3 all refer to the same variable, so the usage is 3
-fn compute_usage_flat(root: &FlatRoot, body: TermWithParent, chain: &mut ParentChain) -> Usage {
+/// Note that ctx needs to be pointing at an abstraction!
+fn compute_usage_flat(root: &FlatRoot, ctx: &mut ActionCtx) -> Usage {
     let mut usage = 0;
-    let init_depth = chain.debruijn_depth();
-    root.preorder_walk_at(body, chain, |root, term, chain| {
-        if let DebruijnNode::Index(index) = root[term] {
-            // Because this is the body of an abstraction, we actually are starting at depth 1
-            // (so Index(1) refers to the input variable). If we had started at top-level (or had
-            // the abstraction itself as input rather than it's body), then this would be 0.
-            let depth_relative_to_arg = chain.debruijn_depth() - init_depth + 1;
-            if index.get(chain) == depth_relative_to_arg {
+    let init_depth = ctx.chain.debruijn_depth();
+    root.preorder_walk_at(ctx, |root, ctx| {
+        if let DebruijnNode::Index(index) = root[ctx.term] {
+            let depth_relative_to_arg = ctx.chain.debruijn_depth() - init_depth;
+            if index.get(ctx.chain) == depth_relative_to_arg {
                 usage += 1;
             }
         }
@@ -501,22 +500,18 @@ impl RedexMut {
         }
     }
 
-    pub fn try_get(
-        root: &FlatRoot,
-        term: TermWithParent,
-        parent_chain: ParentChain,
-    ) -> Option<RedexMut> {
-        match root[term] {
+    pub fn try_get(root: &FlatRoot, ctx: &mut ActionCtx) -> Option<RedexMut> {
+        match root[ctx.term] {
             DebruijnNode::Application(app) => match root[app.func] {
                 DebruijnNode::Abstraction(abs) => {
                     let body = abs.body(app.func);
                     let redex = RedexMut {
-                        app: term,
+                        app: ctx.term,
                         abs: app.func,
                         body,
                         arg: app.arg,
                         body_usage: abs.usage,
-                        parent_chain,
+                        parent_chain: ctx.chain.clone(),
                     };
                     Some(redex)
                 }
@@ -530,6 +525,13 @@ impl RedexMut {
         TermWithParent {
             term: self.arg,
             parent: Some(Parent::Arg(self.app.term)),
+        }
+    }
+
+    fn ctx(&'_ mut self) -> ActionCtx<'_> {
+        ActionCtx {
+            term: self.arg(),
+            chain: &mut self.parent_chain,
         }
     }
 }
@@ -570,8 +572,9 @@ pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
     // arg becoming garbage or modified (it would technically be fine to actually still do that,
     // because the way arg is modified would not affect it's usage counts, but semantically this
     // is easier to reason aboout, so we do it first.)
-    let arg = redex.arg();
-    update_parent_chain_usage(root, &mut redex.parent_chain, redex.body_usage, arg);
+    let body_usage = redex.body_usage;
+    let mut ctx = redex.ctx();
+    update_parent_chain_usage(root, &mut ctx, body_usage);
 
     let body = substitute_and_shift_fused(root, &mut redex);
 
@@ -584,19 +587,18 @@ pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
 // MEMORY: Modifies in place, does not allocate or make garbage.
 fn update_parent_chain_usage(
     root: &mut FlatRoot,
-    parent_chain: &mut ParentChain,
+    ctx: &mut ActionCtx,
     // Number of times body is used
     body_usage: Usage,
-    arg: TermWithParent,
 ) {
     // If there are no parents to update (which happens if the redex is the root)
     // or otherwise has no abstractions in it's parent path, then do nothing.
-    if parent_chain.debruijn_depth() == 0 {
+    if ctx.chain.debruijn_depth() == 0 {
         return;
     }
 
-    let usages_of_page_in_arg = get_usage_by_depth(root, arg, parent_chain);
-    for (depth, parent_term) in parent_chain.iter_abs().enumerate() {
+    let usages_of_page_in_arg = get_usage_by_depth(root, ctx);
+    for (depth, parent_term) in ctx.chain.iter_abs().enumerate() {
         let abs = root.get_abs(*parent_term);
 
         let usage_of_parent_in_arg = usages_of_page_in_arg[depth];
@@ -619,19 +621,15 @@ fn update_parent_chain_usage(
 // Note that the unbound variable is not included (we could talk about it's usage, but since there's
 // no abstraction term to bind it to, we will ignore it), and we also ignore the arg-bound term of c
 // since that won't get updated.
-fn get_usage_by_depth(
-    root: &FlatRoot,
-    arg: TermWithParent,
-    parent_chain: &mut ParentChain,
-) -> Vec<Usage> {
-    let init_depth = parent_chain.debruijn_depth();
+fn get_usage_by_depth(root: &FlatRoot, ctx: &mut ActionCtx) -> Vec<Usage> {
+    let init_depth = ctx.chain.debruijn_depth();
     let mut usages = vec![0; init_depth];
-    root.preorder_walk_at(arg, parent_chain, |root, term, chain| {
-        if let DebruijnNode::Index(index) = root[term] {
-            let depth_relative_to_arg = chain.debruijn_depth() - init_depth;
+    root.preorder_walk_at(ctx, |root, ctx| {
+        if let DebruijnNode::Index(index) = root[ctx.term] {
+            let depth_relative_to_arg = ctx.chain.debruijn_depth() - init_depth;
             // We need to account for the fact that we may be inside an abstraction in the argument
             // If we are, we should skip if this is a bound variable.
-            let is_bound = index.get(chain) <= depth_relative_to_arg;
+            let is_bound = index.get(ctx.chain) <= depth_relative_to_arg;
             if is_bound {
                 return;
             }
@@ -650,7 +648,7 @@ fn get_usage_by_depth(
 
             // SAFETY: subtraction is safe because we just checked that index <= depth_relative_to_arg
             // and return in the case that this happens.
-            let index_relative_to_parent = index.get(chain) - depth_relative_to_arg;
+            let index_relative_to_parent = index.get(ctx.chain) - depth_relative_to_arg;
 
             // In the case of an open term - eg: λ (λ 1 1) 99
             // it is possible for an index to actually point to an implict parent which
@@ -879,7 +877,11 @@ mod test {
     }
 
     fn redex_from_root(root: &FlatRoot) -> RedexMut {
-        RedexMut::try_get(root, TermWithParent::root(root), ParentChain::new()).unwrap()
+        let mut ctx = ActionCtx {
+            term: TermWithParent::root(root),
+            chain: &mut ParentChain::new(),
+        };
+        RedexMut::try_get(root, &mut ctx).unwrap()
     }
 
     #[test]

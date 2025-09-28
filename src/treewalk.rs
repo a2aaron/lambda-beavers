@@ -4,28 +4,30 @@ use crate::debruijn_flat::{
     Abstraction, Application, DebruijnIndex, DebruijnNode, FlatRoot, ParentChain, TermWithParent,
 };
 
+pub struct ActionCtx<'chain> {
+    pub term: TermWithParent,
+    pub chain: &'chain mut ParentChain,
+}
+
 pub trait ActionMut<T> = FnMut(&mut FlatRoot, TermWithParent, &mut ParentChain) -> ControlFlow<T>;
-pub trait Action<T> = FnMut(&FlatRoot, TermWithParent, &mut ParentChain) -> ControlFlow<T>;
+pub trait Action<T> = FnMut(&FlatRoot, &mut ActionCtx) -> ControlFlow<T>;
 
 impl FlatRoot {
     pub fn preorder_walk<T>(&self, mut action: impl Action<T>) -> Option<T> {
-        preorder_walk(
-            self,
-            TermWithParent::root(self),
-            &mut ParentChain::new(),
-            &mut action,
-        )
-        .break_value()
+        let mut ctx = ActionCtx {
+            term: TermWithParent::root(self),
+            chain: &mut ParentChain::new(),
+        };
+        preorder_walk(self, &mut ctx, &mut action).break_value()
     }
 
     pub fn preorder_walk_at(
         &self,
-        term: TermWithParent,
-        chain: &mut ParentChain,
-        mut action: impl FnMut(&FlatRoot, TermWithParent, &mut ParentChain),
+        ctx: &mut ActionCtx,
+        mut action: impl FnMut(&FlatRoot, &mut ActionCtx),
     ) {
-        let _ = preorder_walk(self, term, chain, &mut |root, term, chain| {
-            action(root, term, chain);
+        let _ = preorder_walk(self, ctx, &mut |root, ctx| {
+            action(root, ctx);
             ControlFlow::Continue::<()>(())
         });
     }
@@ -157,29 +159,35 @@ pub fn postorder_walk_mut<T>(
 
 pub fn preorder_walk<T>(
     root: &FlatRoot,
-    term: TermWithParent,
-    parent_chain: &mut ParentChain,
+    ctx: &mut ActionCtx,
     action: &mut impl Action<T>,
 ) -> ControlFlow<T> {
-    action(root, term, parent_chain)?;
+    action(root, ctx)?;
 
-    let term = term.term;
+    let term = ctx.term.term;
+    let prev_term = ctx.term;
     match root[term] {
         DebruijnNode::Index(_) => (),
         DebruijnNode::Abstraction(abs) => {
             let body = abs.body(term);
-            parent_chain.push_abs(term, abs);
-            preorder_walk(root, body, parent_chain, action)?;
-            parent_chain.pop_abs(abs);
+
+            ctx.chain.push_abs(term, abs);
+            ctx.term = body;
+            preorder_walk(root, ctx, action)?;
+            ctx.term = prev_term;
+            ctx.chain.pop_abs(abs);
         }
         DebruijnNode::Application(app) => {
             let arg = app.arg(term);
             let func = app.func(term);
 
-            parent_chain.push_app(term, app);
-            preorder_walk(root, func, parent_chain, action)?;
-            preorder_walk(root, arg, parent_chain, action)?;
-            parent_chain.pop_app(app);
+            ctx.chain.push_app(term, app);
+            ctx.term = func;
+            preorder_walk(root, ctx, action)?;
+            ctx.term = arg;
+            preorder_walk(root, ctx, action)?;
+            ctx.term = prev_term;
+            ctx.chain.pop_app(app);
         }
     }
     ControlFlow::Continue(())
@@ -318,8 +326,8 @@ mod test {
         let expected = test_data.from_string(&expected_pretty);
 
         let mut actual = vec![];
-        test_data.root.preorder_walk(|_, term, _| {
-            actual.push(term.term);
+        test_data.root.preorder_walk(|_root, ctx| {
+            actual.push(ctx.term.term);
             ControlFlow::Continue::<()>(())
         });
         let actual_pretty = test_data.into_string(&actual);

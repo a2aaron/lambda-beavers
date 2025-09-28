@@ -52,11 +52,13 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
     let mut info_vec: Vec<NodeInfo> = (0..root.backing.len())
         .map(|index| NodeInfo::garbage(index))
         .collect();
-    root.preorder_walk(|_, term, chain| {
-        let abs_bound = match root[term] {
+    root.preorder_walk(|root, ctx| {
+        let abs_bound = match root[ctx.term] {
             DebruijnNode::Index(index) => {
-                if index.get(chain) <= chain.debruijn_depth() {
-                    Some(chain.abstractions[chain.debruijn_depth() - index.get(chain)])
+                let chain = &ctx.chain;
+                let depth = ctx.chain.debruijn_depth();
+                if index.get(chain) <= depth {
+                    Some(chain.abstractions[depth - index.get(chain)])
                 } else {
                     None
                 }
@@ -64,7 +66,7 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
             _ => None,
         };
 
-        let redex_info = match RedexMut::try_get(root, term, chain.clone()) {
+        let redex_info = match RedexMut::try_get(root, ctx) {
             Some(redex) => Some(RedexInfo {
                 abs: redex.abs,
                 arg: redex.arg,
@@ -72,9 +74,9 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
             None => None,
         };
 
-        let is_root = root.root == term.term;
+        let is_root = root.root == ctx.term.term;
 
-        let index = term.term.index;
+        let index = ctx.term.term.index;
         info_vec[index].is_root = is_root;
         info_vec[index].is_garbage = false;
         info_vec[index].abs_binding = abs_bound;
