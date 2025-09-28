@@ -43,9 +43,10 @@ impl FlatRoot {
     pub fn preorder_walk_at_mut<T>(
         &mut self,
         term: TermWithParent,
+        chain: &mut ParentChain,
         mut action: impl ActionMut<T>,
     ) -> Option<T> {
-        preorder_walk_mut(self, term, &mut ParentChain::new(), &mut action).break_value()
+        preorder_walk_mut(self, term, chain, &mut action).break_value()
     }
 
     pub fn postorder_walk<T>(&self, mut action: impl PostOrderAction<T>) -> T {
@@ -60,9 +61,10 @@ impl FlatRoot {
     pub fn postorder_walk_at_mut<T>(
         &mut self,
         term: TermWithParent,
+        chain: &mut ParentChain,
         mut action: impl PostOrderActionMut<T>,
     ) -> T {
-        postorder_walk_mut(self, term, &mut ParentChain::new(), &mut action)
+        postorder_walk_mut(self, term, chain, &mut action)
     }
 }
 

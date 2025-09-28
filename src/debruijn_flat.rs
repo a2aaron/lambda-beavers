@@ -573,7 +573,7 @@ pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
     let arg = redex.arg();
     update_parent_chain_usage(root, &mut redex.parent_chain, redex.body_usage, arg);
 
-    let body = substitute_and_shift_fused(root, &redex);
+    let body = substitute_and_shift_fused(root, &mut redex);
 
     // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
@@ -721,11 +721,11 @@ fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
 // - Potentially invalidates redex.body (may repoint redex.abs's body in the case that body consists of a single leaf node that gets substituted)
 // - Potentially invalidates redex.arg (becomes garbage in the zero usage case, may be altered in non-zero usage case)
 // - Potentially alters redex.parent pointer
-fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &RedexMut) -> TermIndex {
+fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &mut RedexMut) -> TermIndex {
     if redex.body_usage == 0 {
         // No need to do anything with the argument because it is never used in the body
         // (Since the argument is not used, the entire arg subtree is garbage now.)
-        down_one(root, redex.body);
+        down_one(root, redex.body, &mut redex.parent_chain);
         // Fix up the indicies in it to account for the fact that we are still dropping out the abstraction that the body is in.
         redex.body.term
     } else {
@@ -734,7 +734,7 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &RedexMut) -> TermInde
         // Perform the actual substition on body.
         // This method actually fuses the fixing down/up that needs to happen for the whole body
         // in addition to performing substitutions.
-        substitute_shift_fused_nonzero_usage(root, &redex);
+        substitute_shift_fused_nonzero_usage(root, redex);
 
         // The body of abs may get repointed if the redex body consists of a single leaf node that gets substituted.
         // Hence, we need to check for this and get the actually new body.
@@ -742,15 +742,17 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &RedexMut) -> TermInde
     }
 }
 
-fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &RedexMut) {
+fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMut) {
     let mut substitution_i = 0;
-    root.preorder_walk_at_mut(redex.body, |root, term, chain| {
+    let redex_arg = redex.arg();
+    let init_depth = redex.parent_chain.debruijn_depth();
+    root.preorder_walk_at_mut(redex.body, &mut redex.parent_chain, |root, term, chain| {
         if let DebruijnNode::Index(debruijn_index) = root[term] {
-            let depth = chain.debruijn_depth();
+            let depth_relative_to_arg = chain.debruijn_depth() - init_depth;
             // Note that the depth here is 0-indexed, while debruijn_index is 1-indexed
             // Hence need to add one to compare properly. (eg: at depth-0, which is to say at
             // the top body layer, a debruijn index of 1 should get substituted.)
-            let is_substituting = debruijn_index.get(chain) == depth + 1;
+            let is_substituting = debruijn_index.get(chain) == depth_relative_to_arg + 1;
             if is_substituting {
                 let last_arg_allocation = substitution_i == redex.body_usage - 1;
                 let new_arg = if last_arg_allocation {
@@ -760,15 +762,15 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &RedexMut) {
                     // calling this method. However, we also fix down the entire body by one after
                     // calling the method. Both of these fixups cancel out, so we still only just
                     // fix up by `depth`
-                    up_by(root, redex.arg(), depth);
+                    up_by(root, redex_arg, chain, depth_relative_to_arg);
                     redex.arg
                 } else {
-                    clone_subtree_and_fix_up_fused(root, redex.arg(), depth)
+                    clone_subtree_and_fix_up_fused(root, redex_arg, chain, depth_relative_to_arg)
                 };
 
                 repoint_node(root, term.parent, new_arg);
                 substitution_i += 1;
-            } else if debruijn_index.get(chain) > depth {
+            } else if debruijn_index.get(chain) > depth_relative_to_arg {
                 // Variable is a free variable, but is NOT getting substituted.
                 // Remember that the body of the term is getting dropped out of the abstraction
                 // Because of this, we need to reduce the term_index by one, since there's one
@@ -791,12 +793,14 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &RedexMut) {
 fn clone_subtree_and_fix_up_fused(
     root: &mut FlatRoot,
     term: TermWithParent,
+    chain: &mut ParentChain,
     up_by: DebruijnDepth,
 ) -> TermIndex {
-    root.postorder_walk_at_mut(term, |root, _term, chain, result| match result {
+    let init_depth = chain.debruijn_depth();
+    root.postorder_walk_at_mut(term, chain, |root, _term, chain, result| match result {
         ChildResults::Index(index) => {
-            let depth = chain.debruijn_depth() + 1;
-            let is_free = index.get(chain) >= depth;
+            let depth_relative_to_term = chain.debruijn_depth() + 1 - init_depth;
+            let is_free = index.get(chain) >= depth_relative_to_term;
             let index = if is_free {
                 index.get(chain) + up_by
             } else {
@@ -816,8 +820,8 @@ fn clone_subtree_and_fix_up_fused(
 }
 
 /// MEMORY: Modifies in place, does not allocate or create garbage.
-fn up_by(root: &mut FlatRoot, term: TermWithParent, up_by: DebruijnDepth) {
-    shift_cutoff(root, term, up_by as isize, 1)
+fn up_by(root: &mut FlatRoot, term: TermWithParent, chain: &mut ParentChain, up_by: DebruijnDepth) {
+    shift_cutoff(root, term, chain, up_by as isize, 1)
 }
 
 // ↑ n = n         if n < cutoff
@@ -826,21 +830,28 @@ fn up_by(root: &mut FlatRoot, term: TermWithParent, up_by: DebruijnDepth) {
 // ↑ (t1 t2) = (↑ t1) (↑ t2)
 
 /// MEMORY: Modifies in place, does not allocate or create garbage.
-fn down_one(root: &mut FlatRoot, term: TermWithParent) {
-    shift_cutoff(root, term, -1, 1)
+fn down_one(root: &mut FlatRoot, term: TermWithParent, chain: &mut ParentChain) {
+    shift_cutoff(root, term, chain, -1, 1)
 }
 
 /// Shift the indicies for all terms up by an amount. Indicies below the cutoff are not modified
 /// This is useful during beta reduction because we need to "drop out" an abstraction.
 ///
 /// MEMORY: Modifies in place, does not allocate or create garbage.
-fn shift_cutoff(root: &mut FlatRoot, term: TermWithParent, up_by: isize, depth: DebruijnDepth) {
-    root.preorder_walk_at_mut(term, |root, term, chain| {
+fn shift_cutoff(
+    root: &mut FlatRoot,
+    term: TermWithParent,
+    chain: &mut ParentChain,
+    up_by: isize,
+    depth: DebruijnDepth,
+) {
+    let init_depth = chain.debruijn_depth();
+    root.preorder_walk_at_mut(term, chain, |root, term, chain| {
         let term = term.term;
         if let DebruijnNode::Index(term_index) = root[term] {
-            let depth = chain.debruijn_depth() + depth;
+            let depth_relative_to_term = chain.debruijn_depth() + depth - init_depth;
             // Recall that an index starts at 1, so if depth is set to 1, then this branch will always be taken.
-            let is_free = term_index.get(chain) >= depth;
+            let is_free = term_index.get(chain) >= depth_relative_to_term;
             if is_free {
                 let new_index = term_index.get(chain).checked_add_signed(up_by).unwrap();
                 root[term] = DebruijnNode::idx(new_index);
