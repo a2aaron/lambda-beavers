@@ -86,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .enumerate()
             .map(|(redex_index, redex)| {
                 // TODO: would be nice to not print out the full term if it is over 80ish characters long
-                let highlighted = print_highlighted(&current_term, redex.abs);
+                let highlighted = print_highlighted(&current_term, redex.app.term);
                 Choice::Reduce(redex_index, highlighted)
             })
             .collect();
