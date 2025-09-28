@@ -789,7 +789,6 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
                 root[term] = DebruijnNode::idx(debruijn_index.get(chain) - 1);
             }
         }
-        ControlFlow::Continue::<()>(())
     });
     assert_eq!(
         substitution_i, redex.body_usage,
@@ -862,7 +861,6 @@ fn shift_cutoff(root: &mut FlatRoot, ctx: &mut ActionCtx, up_by: isize, depth: D
                 root[term] = DebruijnNode::idx(new_index);
             }
         };
-        ControlFlow::Continue::<()>(())
     });
 }
 

@@ -40,12 +40,15 @@ impl FlatRoot {
         preorder_walk_mut(self, &mut ctx, &mut action).break_value()
     }
 
-    pub fn preorder_walk_at_mut<T>(
+    pub fn preorder_walk_at_mut(
         &mut self,
         ctx: &mut ActionCtx,
-        mut action: impl ActionMut<T>,
-    ) -> Option<T> {
-        preorder_walk_mut(self, ctx, &mut action).break_value()
+        mut action: impl FnMut(&mut FlatRoot, &mut ActionCtx),
+    ) {
+        let _ = preorder_walk_mut(self, ctx, &mut |root, ctx| {
+            action(root, ctx);
+            ControlFlow::Continue::<()>(())
+        });
     }
 
     pub fn postorder_walk<T>(&self, mut action: impl PostOrderAction<T>) -> T {
