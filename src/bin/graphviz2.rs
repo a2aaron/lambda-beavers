@@ -55,8 +55,8 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
     root.preorder_walk(|_, term, parent_chain| {
         let abs_bound = match root[term] {
             DebruijnNode::Index(index) => {
-                if index <= parent_chain.depth() {
-                    Some(parent_chain[parent_chain.depth() - index])
+                if index <= parent_chain.debruijn_depth() {
+                    Some(parent_chain.abstractions[parent_chain.debruijn_depth() - index])
                 } else {
                     None
                 }

@@ -247,7 +247,7 @@ fn compute_usage_flat(root: &FlatRoot, body: TermWithParent) -> Usage {
         // Because this is the body of an abstraction, we actually are starting at depth 1
         // (so Index(1) refers to the input variable). If we had started at top-level (or had
         // the abstraction itself as input rather than it's body), then this would be 0.
-        let depth = parent_chain.depth() + 1;
+        let depth = parent_chain.debruijn_depth() + 1;
         if let DebruijnNode::Index(index) = root[term] {
             if index == depth {
                 usage += 1;
@@ -429,46 +429,45 @@ pub enum Parent {
 // The sequence of outer abstractions a term is contained in.
 // Every element of this vector is an abstraction.
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
-pub struct ParentAbstractionChain(Vec<TermIndex>);
-
-impl ParentAbstractionChain {
-    pub fn new() -> ParentAbstractionChain {
-        ParentAbstractionChain::default()
-    }
-    pub fn push(&mut self, abs: TermIndex) {
-        self.0.push(abs)
-    }
-    pub fn pop(&mut self) {
-        self.0.pop();
-    }
-
-    pub fn depth(&self) -> DebruijnDepth {
-        self.0.len()
-    }
-
-    fn iter(&self) -> std::slice::Iter<'_, TermIndex> {
-        self.0.iter()
-    }
+pub struct ParentChain {
+    pub abstractions: Vec<TermIndex>,
+    full_chain: Vec<TermIndex>,
 }
 
-impl Index<DebruijnDepth> for ParentAbstractionChain {
-    type Output = TermIndex;
-
-    fn index(&self, index: DebruijnDepth) -> &Self::Output {
-        &self.0[index]
+impl ParentChain {
+    pub fn new() -> ParentChain {
+        ParentChain::default()
     }
-}
+    pub fn push_abs(&mut self, index: TermIndex, _abs: Abstraction) {
+        self.abstractions.push(index);
+        self.full_chain.push(index);
+    }
+    pub fn pop_abs(&mut self, _abs: Abstraction) {
+        self.abstractions.pop();
+        self.full_chain.pop();
+    }
 
-impl IndexMut<DebruijnDepth> for ParentAbstractionChain {
-    fn index_mut(&mut self, index: DebruijnDepth) -> &mut Self::Output {
-        &mut self.0[index]
+    pub fn push_app(&mut self, index: TermIndex, _app: Application) {
+        self.full_chain.push(index);
+    }
+
+    pub fn pop_app(&mut self, _app: Application) {
+        self.full_chain.pop();
+    }
+
+    pub fn debruijn_depth(&self) -> DebruijnDepth {
+        self.abstractions.len()
+    }
+
+    fn iter_abs(&self) -> std::slice::Iter<'_, TermIndex> {
+        self.abstractions.iter()
     }
 }
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RedexMut {
     // The entire chain of abstractions for the parent, which will all need to get fixed up during substitution.
-    parent_chain: ParentAbstractionChain,
+    parent_chain: ParentChain,
     // Application term for the redex. If the parent for this is none,
     // then the Redex is actually the root (and therefore is pointed to by FlatRoot.root)
     pub app: TermWithParent,
@@ -496,7 +495,7 @@ impl RedexMut {
     pub fn try_get(
         root: &FlatRoot,
         term: TermWithParent,
-        parent_chain: ParentAbstractionChain,
+        parent_chain: ParentChain,
     ) -> Option<RedexMut> {
         match root[term] {
             DebruijnNode::Application(app) => match root[app.func] {
@@ -575,19 +574,19 @@ pub fn beta_reduce(root: &mut FlatRoot, redex: RedexMut) {
 // MEMORY: Modifies in place, does not allocate or make garbage.
 fn update_parent_chain_usage(
     root: &mut FlatRoot,
-    parent_chain: &ParentAbstractionChain,
+    parent_chain: &ParentChain,
     // Number of times body is used
     body_usage: Usage,
     arg: TermWithParent,
 ) {
     // If there are no parents to update (which happens if the redex is the root)
     // or otherwise has no abstractions in it's parent path, then do nothing.
-    if parent_chain.depth() == 0 {
+    if parent_chain.debruijn_depth() == 0 {
         return;
     }
 
     let usages_of_page_in_arg = get_usage_by_depth(root, arg, parent_chain);
-    for (depth, parent_term) in parent_chain.iter().enumerate() {
+    for (depth, parent_term) in parent_chain.iter_abs().enumerate() {
         let abs = root.get_abs(*parent_term);
 
         let usage_of_parent_in_arg = usages_of_page_in_arg[depth];
@@ -613,12 +612,12 @@ fn update_parent_chain_usage(
 fn get_usage_by_depth(
     root: &FlatRoot,
     arg: TermWithParent,
-    parent_chain: &ParentAbstractionChain,
+    parent_chain: &ParentChain,
 ) -> Vec<Usage> {
-    let mut usages = vec![0; parent_chain.depth()];
+    let mut usages = vec![0; parent_chain.debruijn_depth()];
     root.preorder_walk_at(arg, |root, term, chain| {
         if let DebruijnNode::Index(index) = root[term] {
-            let depth_relative_to_arg = chain.depth();
+            let depth_relative_to_arg = chain.debruijn_depth();
             // We need to account for the fact that we may be inside an abstraction in the argument
             // If we are, we should skip if this is a bound variable.
             let is_bound = index <= depth_relative_to_arg;
@@ -737,7 +736,7 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &RedexMut) {
     let mut substitution_i = 0;
     root.preorder_walk_at_mut(redex.body, |root, term, chain| {
         if let DebruijnNode::Index(debruijn_index) = root[term] {
-            let depth = chain.depth();
+            let depth = chain.debruijn_depth();
             // Note that the depth here is 0-indexed, while debruijn_index is 1-indexed
             // Hence need to add one to compare properly. (eg: at depth-0, which is to say at
             // the top body layer, a debruijn index of 1 should get substituted.)
@@ -786,7 +785,7 @@ fn clone_subtree_and_fix_up_fused(
 ) -> TermIndex {
     root.postorder_walk_at_mut(term, |root, _term, chain, result| match result {
         ChildResults::Index(index) => {
-            let depth = chain.depth() + 1;
+            let depth = chain.debruijn_depth() + 1;
             let is_free = index >= depth;
             let index = if is_free { index + up_by } else { index };
             root.alloc(DebruijnNode::Index(index))
@@ -825,7 +824,7 @@ fn shift_cutoff(root: &mut FlatRoot, term: TermWithParent, up_by: isize, depth: 
     root.preorder_walk_at_mut(term, |root, term, chain| {
         let term = term.term;
         if let DebruijnNode::Index(term_index) = root[term] {
-            let depth = chain.depth() + depth;
+            let depth = chain.debruijn_depth() + depth;
             // Recall that an index starts at 1, so if depth is set to 1, then this branch will always be taken.
             let is_free = term_index >= depth;
             if is_free {
@@ -855,12 +854,7 @@ mod test {
     }
 
     fn redex_from_root(root: &FlatRoot) -> RedexMut {
-        RedexMut::try_get(
-            root,
-            TermWithParent::root(root),
-            ParentAbstractionChain::new(),
-        )
-        .unwrap()
+        RedexMut::try_get(root, TermWithParent::root(root), ParentChain::new()).unwrap()
     }
 
     #[test]
