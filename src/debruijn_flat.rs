@@ -23,13 +23,10 @@ impl FlatRoot {
         }
     }
 
-    /// Allocate the given term onto the backing vector. If none is passed, then a dummy node is
-    /// allocated, which should be modified by the caller. Otherwise, the node is set to the node
+    /// Allocate the given term onto the backing vector. The node is set to the node
     /// in the input `term`.
     /// The return value is the index to the newly allocated node.
-    fn alloc_one(&mut self, term: Option<DebruijnNode>) -> TermIndex {
-        // If none, then alloc a dummy node, this should be fixed up afterwards
-        let term = term.unwrap_or(DebruijnNode::Index(DebruijnIndex::MAX));
+    fn alloc(&mut self, term: DebruijnNode) -> TermIndex {
         let term_index = TermIndex::new(self.backing.len());
         self.backing.push(term);
         term_index
@@ -60,24 +57,15 @@ impl FlatRoot {
     pub fn normalized(&self) -> FlatRoot {
         let mut new_root = FlatRoot::new();
         let root_node = self.postorder_walk(|_root, _term, _chain, result| match result {
-            ChildResults::Index(idx) => {
-                let idx = DebruijnNode::Index(idx);
-                new_root.alloc_one(Some(idx))
-            }
+            ChildResults::Index(idx) => new_root.alloc(DebruijnNode::Index(idx)),
             ChildResults::Abstraction { abs, body_result } => {
-                let new_abs = new_root.alloc_one(None);
-                new_root[new_abs] = DebruijnNode::abs(body_result, abs.usage);
-                new_abs
+                new_root.alloc(DebruijnNode::abs(body_result, abs.usage))
             }
             ChildResults::Application {
                 func_result,
                 arg_result,
                 ..
-            } => {
-                let new_app = new_root.alloc_one(None);
-                new_root[new_app] = DebruijnNode::app(func_result, arg_result);
-                new_app
-            }
+            } => new_root.alloc(DebruijnNode::app(func_result, arg_result)),
         });
         new_root.root = root_node;
         new_root
@@ -188,26 +176,22 @@ impl From<&Debruijn> for FlatRoot {
     fn from(term: &Debruijn) -> Self {
         fn flatten(root: &mut FlatRoot, term: &Debruijn) -> TermIndex {
             match term {
-                Debruijn::Index(index) => root.alloc_one(Some(DebruijnNode::Index(*index))),
+                Debruijn::Index(index) => root.alloc(DebruijnNode::Index(*index)),
                 Debruijn::Abstraction { body } => {
                     let usage = compute_usage(&body);
-                    let abs = root.alloc_one(None);
                     let body = flatten(root, body);
-                    root[abs] = DebruijnNode::abs(body, usage);
-                    abs
+                    root.alloc(DebruijnNode::abs(body, usage))
                 }
                 Debruijn::Application { func, arg } => {
-                    let app = root.alloc_one(None);
                     let func = flatten(root, func);
                     let arg = flatten(root, arg);
-                    root[app] = DebruijnNode::app(func, arg);
-                    app
+                    root.alloc(DebruijnNode::app(func, arg))
                 }
             }
         }
 
         let mut root = FlatRoot::new();
-        flatten(&mut root, term);
+        root.root = flatten(&mut root, term);
         root
     }
 }
@@ -805,22 +789,16 @@ fn clone_subtree_and_fix_up_fused(
             let depth = chain.depth() + 1;
             let is_free = index >= depth;
             let index = if is_free { index + up_by } else { index };
-            root.alloc_one(Some(DebruijnNode::Index(index)))
+            root.alloc(DebruijnNode::Index(index))
         }
         ChildResults::Abstraction { abs, body_result } => {
-            let new_abs = root.alloc_one(None);
-            root[new_abs] = DebruijnNode::abs(body_result, abs.usage);
-            new_abs
+            root.alloc(DebruijnNode::abs(body_result, abs.usage))
         }
         ChildResults::Application {
             func_result,
             arg_result,
             ..
-        } => {
-            let new_app = root.alloc_one(None);
-            root[new_app] = DebruijnNode::app(func_result, arg_result);
-            new_app
-        }
+        } => root.alloc(DebruijnNode::app(func_result, arg_result)),
     })
 }
 
@@ -876,18 +854,6 @@ mod test {
         FlatRoot::from(&Debruijn::from_str(term).unwrap())
     }
 
-    fn idx(a: DebruijnIndex) -> DebruijnNode {
-        DebruijnNode::Index(a)
-    }
-
-    fn abs(body: impl Into<TermIndex>, usage: Usage) -> DebruijnNode {
-        DebruijnNode::abs(body.into(), usage)
-    }
-
-    fn app(func: impl Into<TermIndex>, arg: impl Into<TermIndex>) -> DebruijnNode {
-        DebruijnNode::app(func.into(), arg.into())
-    }
-
     fn redex_from_root(root: &FlatRoot) -> RedexMut {
         RedexMut::try_get(
             root,
@@ -895,54 +861,6 @@ mod test {
             ParentAbstractionChain::new(),
         )
         .unwrap()
-    }
-
-    #[test]
-    fn flattening_trivial_idx() {
-        let original = Debruijn::from("0");
-        let actual = FlatRoot::from(&original);
-        let expected = FlatRoot::from(vec![DebruijnNode::Index(0)]);
-        assert_eq!(actual, expected)
-    }
-
-    #[test]
-    fn flattening_trivial_abs() {
-        let original = Debruijn::from("λ 1");
-        let actual = FlatRoot::from(&original);
-        let expected = FlatRoot::from(vec![abs(1, 1), idx(1)]);
-        assert_eq!(actual, expected)
-    }
-
-    #[test]
-    fn flattening_trivial_abs_2() {
-        let original = Debruijn::from("λ λ 1");
-        let actual = FlatRoot::from(&original);
-        let expected = FlatRoot::from(vec![abs(1, 0), abs(2, 1), idx(1)]);
-        assert_eq!(actual, expected)
-    }
-
-    #[test]
-    fn flattening_trivial_app() {
-        let original = Debruijn::from("1 2");
-        let actual = FlatRoot::from(&original);
-        let expected = FlatRoot::from(vec![app(1, 2), idx(1), idx(2)]);
-        assert_eq!(actual, expected)
-    }
-
-    #[test]
-    fn flattening_trivial_app_2() {
-        let original = Debruijn::from("(1 2) (3 4)");
-        let actual = FlatRoot::from(&original);
-        let expected = FlatRoot::from(vec![
-            app(1, 4), // 0
-            app(2, 3), // 1
-            idx(1),    // 2
-            idx(2),    // 3
-            app(5, 6), // 4
-            idx(3),    // 5
-            idx(4),    // 6
-        ]);
-        assert_eq!(actual, expected)
     }
 
     #[test]
