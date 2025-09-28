@@ -4,20 +4,25 @@ use crate::debruijn_flat::{
     Abstraction, Application, DebruijnIndex, DebruijnNode, FlatRoot, ParentChain, TermWithParent,
 };
 
-pub trait ActionMut<T> = FnMut(&mut FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>;
-pub trait Action<T> = FnMut(&FlatRoot, TermWithParent, &ParentChain) -> ControlFlow<T>;
+pub trait ActionMut<T> = FnMut(&mut FlatRoot, TermWithParent, &mut ParentChain) -> ControlFlow<T>;
+pub trait Action<T> = FnMut(&FlatRoot, TermWithParent, &mut ParentChain) -> ControlFlow<T>;
 
 impl FlatRoot {
     pub fn preorder_walk<T>(&self, mut action: impl Action<T>) -> Option<T> {
-        self.preorder_walk_at(TermWithParent::root(self), &mut action)
+        self.preorder_walk_at(
+            TermWithParent::root(self),
+            &mut ParentChain::new(),
+            &mut action,
+        )
     }
 
     pub fn preorder_walk_at<T>(
         &self,
         term: TermWithParent,
+        chain: &mut ParentChain,
         mut action: impl Action<T>,
     ) -> Option<T> {
-        preorder_walk(self, term, &mut ParentChain::new(), &mut action).break_value()
+        preorder_walk(self, term, chain, &mut action).break_value()
     }
 
     pub fn preorder_walk_mut<T>(&mut self, mut action: impl ActionMut<T>) -> Option<T> {
@@ -149,7 +154,7 @@ pub fn preorder_walk<T>(
     parent_chain: &mut ParentChain,
     action: &mut impl Action<T>,
 ) -> ControlFlow<T> {
-    action(root, term, &parent_chain)?;
+    action(root, term, parent_chain)?;
 
     let term = term.term;
     match root[term] {
@@ -179,7 +184,7 @@ pub fn preorder_walk_mut<T>(
     parent_chain: &mut ParentChain,
     action: &mut impl ActionMut<T>,
 ) -> ControlFlow<T> {
-    action(root, term, &parent_chain)?;
+    action(root, term, parent_chain)?;
 
     let term = term.term;
     match root[term] {

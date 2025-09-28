@@ -72,9 +72,9 @@ impl FlatRoot {
     }
 
     pub fn check_usage(&self) -> Result<(), (TermIndex, Usage, Usage)> {
-        let result = self.preorder_walk(|root, term, _chain| {
+        let result = self.preorder_walk(|root, term, chain| {
             if let DebruijnNode::Abstraction(abs) = root[term] {
-                let expected = compute_usage_flat(root, abs.body(term.term));
+                let expected = compute_usage_flat(root, abs.body(term.term), chain);
                 let actual = abs.usage;
                 if actual != expected {
                     return ControlFlow::Break((term.term, actual, expected));
@@ -241,15 +241,16 @@ fn compute_usage(body: &Debruijn) -> Usage {
 /// `body` must be the body of the abstraction!
 /// ter the body of an abstraction
 /// eg: in λ 1 λ 2 λ 3, we have that 1, 2, and 3 all refer to the same variable, so the usage is 3
-fn compute_usage_flat(root: &FlatRoot, body: TermWithParent) -> Usage {
+fn compute_usage_flat(root: &FlatRoot, body: TermWithParent, chain: &mut ParentChain) -> Usage {
     let mut usage = 0;
-    root.preorder_walk_at(body, |root, term, parent_chain| {
-        // Because this is the body of an abstraction, we actually are starting at depth 1
-        // (so Index(1) refers to the input variable). If we had started at top-level (or had
-        // the abstraction itself as input rather than it's body), then this would be 0.
-        let depth = parent_chain.debruijn_depth() + 1;
+    let init_depth = chain.debruijn_depth();
+    root.preorder_walk_at(body, chain, |root, term, chain| {
         if let DebruijnNode::Index(index) = root[term] {
-            if index.get(parent_chain) == depth {
+            // Because this is the body of an abstraction, we actually are starting at depth 1
+            // (so Index(1) refers to the input variable). If we had started at top-level (or had
+            // the abstraction itself as input rather than it's body), then this would be 0.
+            let depth_relative_to_arg = chain.debruijn_depth() - init_depth + 1;
+            if index.get(chain) == depth_relative_to_arg {
                 usage += 1;
             }
         }
@@ -534,7 +535,7 @@ impl RedexMut {
     }
 }
 
-pub fn beta_reduce(root: &mut FlatRoot, redex: RedexMut) {
+pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
     // Before this, we have the following shape of tree:
     //   parent
     //     |
@@ -570,7 +571,8 @@ pub fn beta_reduce(root: &mut FlatRoot, redex: RedexMut) {
     // arg becoming garbage or modified (it would technically be fine to actually still do that,
     // because the way arg is modified would not affect it's usage counts, but semantically this
     // is easier to reason aboout, so we do it first.)
-    update_parent_chain_usage(root, &redex.parent_chain, redex.body_usage, redex.arg());
+    let arg = redex.arg();
+    update_parent_chain_usage(root, &mut redex.parent_chain, redex.body_usage, arg);
 
     let body = substitute_and_shift_fused(root, &redex);
 
@@ -583,7 +585,7 @@ pub fn beta_reduce(root: &mut FlatRoot, redex: RedexMut) {
 // MEMORY: Modifies in place, does not allocate or make garbage.
 fn update_parent_chain_usage(
     root: &mut FlatRoot,
-    parent_chain: &ParentChain,
+    parent_chain: &mut ParentChain,
     // Number of times body is used
     body_usage: Usage,
     arg: TermWithParent,
@@ -621,12 +623,13 @@ fn update_parent_chain_usage(
 fn get_usage_by_depth(
     root: &FlatRoot,
     arg: TermWithParent,
-    parent_chain: &ParentChain,
+    parent_chain: &mut ParentChain,
 ) -> Vec<Usage> {
-    let mut usages = vec![0; parent_chain.debruijn_depth()];
-    root.preorder_walk_at(arg, |root, term, chain| {
+    let init_depth = parent_chain.debruijn_depth();
+    let mut usages = vec![0; init_depth];
+    root.preorder_walk_at(arg, parent_chain, |root, term, chain| {
         if let DebruijnNode::Index(index) = root[term] {
-            let depth_relative_to_arg = chain.debruijn_depth();
+            let depth_relative_to_arg = chain.debruijn_depth() - init_depth;
             // We need to account for the fact that we may be inside an abstraction in the argument
             // If we are, we should skip if this is a bound variable.
             let is_bound = index.get(chain) <= depth_relative_to_arg;

@@ -114,6 +114,7 @@ mod test {
 
     use crate::{debruijn::Debruijn, reduce::Reducer};
 
+    #[track_caller]
     fn assert_usage(reducer: &Reducer) {
         if let Err((failing_term, actual, expected)) = reducer.root.check_usage() {
             panic!(
@@ -145,6 +146,7 @@ mod test {
             Debruijn::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
         let mut reducer = Reducer::new(&root);
 
+        assert_usage(&reducer);
         reducer.reduce_one();
         assert_usage(&reducer);
         reducer.reduce_one();
