@@ -9,20 +9,25 @@ pub trait Action<T> = FnMut(&FlatRoot, TermWithParent, &mut ParentChain) -> Cont
 
 impl FlatRoot {
     pub fn preorder_walk<T>(&self, mut action: impl Action<T>) -> Option<T> {
-        self.preorder_walk_at(
+        preorder_walk(
+            self,
             TermWithParent::root(self),
             &mut ParentChain::new(),
             &mut action,
         )
+        .break_value()
     }
 
-    pub fn preorder_walk_at<T>(
+    pub fn preorder_walk_at(
         &self,
         term: TermWithParent,
         chain: &mut ParentChain,
-        mut action: impl Action<T>,
-    ) -> Option<T> {
-        preorder_walk(self, term, chain, &mut action).break_value()
+        mut action: impl FnMut(&FlatRoot, TermWithParent, &mut ParentChain),
+    ) {
+        let _ = preorder_walk(self, term, chain, &mut |root, term, chain| {
+            action(root, term, chain);
+            ControlFlow::Continue::<()>(())
+        });
     }
 
     pub fn preorder_walk_mut<T>(&mut self, mut action: impl ActionMut<T>) -> Option<T> {

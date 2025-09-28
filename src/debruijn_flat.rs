@@ -254,7 +254,6 @@ fn compute_usage_flat(root: &FlatRoot, body: TermWithParent, chain: &mut ParentC
                 usage += 1;
             }
         }
-        ControlFlow::Continue::<()>(())
     });
 
     usage
@@ -634,7 +633,7 @@ fn get_usage_by_depth(
             // If we are, we should skip if this is a bound variable.
             let is_bound = index.get(chain) <= depth_relative_to_arg;
             if is_bound {
-                return ControlFlow::Continue::<()>(());
+                return;
             }
 
             // We want to transform this into an index into the usages array,
@@ -657,7 +656,7 @@ fn get_usage_by_depth(
             // it is possible for an index to actually point to an implict parent which
             // doesn't actually exist in the tree. In this case, we just do nothing.
             if usages.len() < index_relative_to_parent {
-                return ControlFlow::Continue::<()>(());
+                return;
             }
 
             // SAFETY: we just checked that usages.len() < index_relative_to_parent, and return
@@ -665,7 +664,6 @@ fn get_usage_by_depth(
             let level = usages.len() - index_relative_to_parent;
             usages[level] += 1;
         }
-        ControlFlow::Continue::<()>(())
     });
     usages
 }
