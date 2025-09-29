@@ -7,14 +7,32 @@ use std::{collections::HashMap, ops::ControlFlow, str::FromStr};
 use clap::Parser;
 use lambda_beaver::{
     debruijn::Debruijn,
-    debruijn_flat::{DebruijnNode, FlatRoot, RedexMut, TermIndex},
+    debruijn_flat::{DebruijnIndex, DebruijnNode, FlatRoot, RedexMut, TermIndex},
     parse,
     reduce::Reducer,
 };
 
 #[derive(Debug, Clone, Copy)]
+enum AbstractionBinding {
+    NotLeaf,
+    BindingMissing {
+        index: DebruijnIndex,
+        calculated_index: usize,
+    },
+    FreeVariable {
+        index: DebruijnIndex,
+        calculated_index: usize,
+    },
+    BoundTo {
+        index: DebruijnIndex,
+        calculated_index: usize,
+        abstraction: TermIndex,
+    },
+}
+
+#[derive(Debug, Clone, Copy)]
 struct NodeInfo {
-    is_root: bool,
+    is_root: Option<TermIndex>,
     index: usize,
     // If true, the this DebruijNode is garbage
     is_garbage: bool,
@@ -23,7 +41,7 @@ struct NodeInfo {
     // Index node binds to.
     // Note that a DebruijnNode can be an Index node without this field being set (which happens if
     // the Index node is garbage or if the Index node is unbound within the whole term)
-    abs_binding: Option<TermIndex>,
+    abs_binding: AbstractionBinding,
     // If not None, then this DebruijnNode is an non-garbage Application and is also a Redex
     redex_info: Option<RedexInfo>,
 }
@@ -32,9 +50,9 @@ impl NodeInfo {
     fn garbage(index: usize) -> NodeInfo {
         NodeInfo {
             index,
-            is_root: false,
+            is_root: None,
             is_garbage: true,
-            abs_binding: None,
+            abs_binding: AbstractionBinding::NotLeaf,
             redex_info: None,
         }
     }
@@ -57,13 +75,27 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
             DebruijnNode::Index(index) => {
                 let chain = &ctx.chain;
                 let depth = ctx.chain.debruijn_depth();
-                if index.get(chain) <= depth {
-                    Some(chain.abstractions[depth - index.get(chain)])
+                let calculated_index = index.get(chain);
+                if calculated_index <= depth {
+                    match chain.abstractions.get(depth - calculated_index) {
+                        Some(&abstraction) => AbstractionBinding::BoundTo {
+                            index,
+                            calculated_index,
+                            abstraction: abstraction.term(),
+                        },
+                        None => AbstractionBinding::BindingMissing {
+                            index,
+                            calculated_index,
+                        },
+                    }
                 } else {
-                    None
+                    AbstractionBinding::FreeVariable {
+                        index,
+                        calculated_index,
+                    }
                 }
             }
-            _ => None,
+            _ => AbstractionBinding::NotLeaf,
         };
 
         let redex_info = match RedexMut::try_get(root, ctx) {
@@ -77,7 +109,7 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
         let is_root = root.root == ctx.term.term;
 
         let index = ctx.term.term.index;
-        info_vec[index].is_root = is_root;
+        info_vec[index].is_root = if is_root { Some(root.root) } else { None };
         info_vec[index].is_garbage = false;
         info_vec[index].abs_binding = abs_bound;
         info_vec[index].redex_info = redex_info;
@@ -120,6 +152,20 @@ impl Attributes {
             .map(|(name, value)| format!("{name}=\"{}\"", value))
             .intersperse(" ".to_string())
             .collect()
+    }
+
+    fn get(&self, key: &str) -> Option<&String> {
+        self.attributes.get(key)
+    }
+
+    fn append_label(&mut self, str: impl ToString) {
+        let label = self.get("label");
+        if let Some(label) = label {
+            let label = format!("{label}\n{}", str.to_string());
+            self.set("label", label);
+        } else {
+            self.set("label", str);
+        }
     }
 }
 
@@ -196,6 +242,7 @@ fn to_graph(root: &FlatRoot, args: &Args) -> Graph {
         }
 
         let graph_node = make_node(args, node, node_info);
+
         let mut edges = get_edges(args, node, node_info);
 
         if let DebruijnNode::Application(app) = node
@@ -230,15 +277,15 @@ fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<Edge>
     );
     match node {
         DebruijnNode::Index(_) => {
-            if let Some(abs_bound) = node_info.abs_binding
+            if let AbstractionBinding::BoundTo { abstraction, .. } = node_info.abs_binding
                 && !args.no_color_abs
             {
-                let color = get_random_color(abs_bound.index, 1.0);
+                let color = get_random_color(abstraction.index, 1.0);
                 edge_attribs
                     .set("color", color)
                     .set("style", "dashed")
                     .set("constraint", "false");
-                edges.push(Edge::new(node_info.index, abs_bound.index, &edge_attribs));
+                edges.push(Edge::new(node_info.index, abstraction.index, &edge_attribs));
             }
         }
         DebruijnNode::Abstraction(abs) => {
@@ -264,8 +311,9 @@ fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<Edge>
 }
 
 fn add_if_subterm_termindex(edge_attribs: &mut Attributes, term: TermIndex) {
-    if term.subterm_adjust.is_some() {
+    if let Some(adjust) = term.subterm_adjust {
         edge_attribs.set("penwidth", "5");
+        edge_attribs.set("label", format!("adj = {adjust}"));
     }
 }
 
@@ -301,8 +349,37 @@ fn make_node(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Node {
             .set("style", "filled");
     }
 
-    if node_info.is_root {
+    if let Some(root) = node_info.is_root {
         attribs.set("penwidth", 2.0);
+        if let Some(adjust) = root.subterm_adjust {
+            attribs.append_label(format!("adj = {:?}", adjust));
+        }
+    }
+
+    match node_info.abs_binding {
+        AbstractionBinding::NotLeaf => (),
+        AbstractionBinding::BindingMissing {
+            index,
+            calculated_index,
+        } => {
+            attribs.set("fillcolor", "red").set("style", "filled");
+            attribs.append_label(format!(
+                "NO BINDING - raw: {}, calc: {}",
+                index.get_raw(),
+                calculated_index
+            ));
+        }
+        AbstractionBinding::FreeVariable {
+            calculated_index, ..
+        } => attribs.append_label(format!("(free, calc: {})", calculated_index)),
+        AbstractionBinding::BoundTo {
+            calculated_index,
+            abstraction,
+            ..
+        } => attribs.append_label(format!(
+            "(bound @ {}, calc: {})",
+            abstraction.index, calculated_index
+        )),
     }
 
     let graph_node = Node::new(node_info.index, &attribs);
@@ -312,7 +389,7 @@ fn make_node(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Node {
 fn get_random_color(term: usize, saturation: f32) -> String {
     // Divide by phi here to get reasonably 'random' colors
     let hue = (term as f32 / f32::consts::PHI).fract();
-    format!("{hue} {saturation} 1.0")
+    format!("{hue} {saturation} 0.75")
 }
 
 #[derive(Parser, Debug)]
@@ -325,19 +402,19 @@ pub struct Args {
     #[arg(short, long("out"), default_value = "out.dot")]
     output: String,
 
-    #[arg(short, long)]
+    #[arg(long)]
     reductions: usize,
 
-    #[arg(short, long, default_value = "false")]
+    #[arg(long, default_value = "false")]
     normalized: bool,
 
-    #[arg(short, long, default_value = "false")]
+    #[arg(long, default_value = "false")]
     no_garbage: bool,
 
-    #[arg(short, long, default_value = "false")]
+    #[arg(long, default_value = "false")]
     no_color_abs: bool,
 
-    #[arg(short, long, default_value = "false")]
+    #[arg(long, default_value = "false")]
     no_color_redex: bool,
 }
 fn main() -> Result<(), Box<dyn std::error::Error>> {

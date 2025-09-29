@@ -1,0 +1,235 @@
+{
+    // Use IntelliSense to learn about possible attributes.
+    // Hover to view descriptions of existing attributes.
+    // For more information, visit: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in library 'lambda_beaver'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--lib",
+                    "--package=lambda-beaver"
+                ],
+                "filter": {
+                    "name": "lambda_beaver",
+                    "kind": "lib"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'display_test'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=display_test",
+                    "--package=lambda-beaver"
+                ],
+                "filter": {
+                    "name": "display_test",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'display_test'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=display_test",
+                    "--package=lambda-beaver"
+                ],
+                "filter": {
+                    "name": "display_test",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'graphviz'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=graphviz",
+                    "--package=lambda-beaver"
+                ],
+                "filter": {
+                    "name": "graphviz",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'graphviz'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=graphviz",
+                    "--package=lambda-beaver"
+                ],
+                "filter": {
+                    "name": "graphviz",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'graphviz2'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=graphviz2",
+                    "--package=lambda-beaver"
+                ],
+                "filter": {
+                    "name": "graphviz2",
+                    "kind": "bin"
+                }
+            },
+            "args": [
+                "λ (λ λ λ 2 1 (1 1)) ((λ λ 2) 1)",
+                "--reductions",
+                "1"
+            ],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'graphviz2'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=graphviz2",
+                    "--package=lambda-beaver"
+                ],
+                "filter": {
+                    "name": "graphviz2",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'interactive'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=interactive",
+                    "--package=lambda-beaver"
+                ],
+                "filter": {
+                    "name": "interactive",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'interactive'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=interactive",
+                    "--package=lambda-beaver"
+                ],
+                "filter": {
+                    "name": "interactive",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug executable 'lambda-beaver'",
+            "cargo": {
+                "args": [
+                    "build",
+                    "--bin=lambda-beaver",
+                    "--package=lambda-beaver"
+                ],
+                "filter": {
+                    "name": "lambda-beaver",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug unit tests in executable 'lambda-beaver'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--bin=lambda-beaver",
+                    "--package=lambda-beaver"
+                ],
+                "filter": {
+                    "name": "lambda-beaver",
+                    "kind": "bin"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        },
+        {
+            "type": "lldb",
+            "request": "launch",
+            "name": "Debug integration test 'strong_reduction_tests'",
+            "cargo": {
+                "args": [
+                    "test",
+                    "--no-run",
+                    "--test=strong_reduction_tests",
+                    "--package=lambda-beaver"
+                ],
+                "filter": {
+                    "name": "strong_reduction_tests",
+                    "kind": "test"
+                }
+            },
+            "args": [],
+            "cwd": "${workspaceFolder}"
+        }
+    ]
+}
