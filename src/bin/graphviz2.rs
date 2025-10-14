@@ -7,7 +7,9 @@ use std::{collections::HashMap, ops::ControlFlow, str::FromStr};
 use clap::Parser;
 use lambda_beaver::{
     debruijn::Debruijn,
-    debruijn_flat::{DebruijnIndex, DebruijnNode, FlatRoot, RedexMut, TermIndex},
+    debruijn_flat::{
+        DebruijnIndex, DebruijnNode, FlatRoot, RedexMut, TermIndex, Usage, compute_usage_flat,
+    },
     parse,
     reduce::Reducer,
 };
@@ -44,6 +46,7 @@ struct NodeInfo {
     abs_binding: AbstractionBinding,
     // If not None, then this DebruijnNode is an non-garbage Application and is also a Redex
     redex_info: Option<RedexInfo>,
+    computed_usage: Option<Usage>,
 }
 
 impl NodeInfo {
@@ -54,6 +57,7 @@ impl NodeInfo {
             is_garbage: true,
             abs_binding: AbstractionBinding::NotLeaf,
             redex_info: None,
+            computed_usage: None,
         }
     }
 }
@@ -81,7 +85,7 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
                         Some(&abstraction) => AbstractionBinding::BoundTo {
                             index,
                             calculated_index,
-                            abstraction: abstraction.term(),
+                            abstraction: abstraction.parent().unwrap(),
                         },
                         None => AbstractionBinding::BindingMissing {
                             index,
@@ -106,13 +110,17 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
             None => None,
         };
 
-        let is_root = root.root == ctx.term.term;
+        let is_root = root.root.index == ctx.term.term;
 
-        let index = ctx.term.term.index;
+        let index = ctx.term.term;
         info_vec[index].is_root = if is_root { Some(root.root) } else { None };
         info_vec[index].is_garbage = false;
         info_vec[index].abs_binding = abs_bound;
         info_vec[index].redex_info = redex_info;
+
+        if matches!(root[ctx.term], DebruijnNode::Abstraction(_)) {
+            info_vec[index].computed_usage = Some(compute_usage_flat(root, ctx));
+        }
         ControlFlow::Continue::<()>(())
     });
 
@@ -380,6 +388,18 @@ fn make_node(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Node {
             "(bound @ {}, calc: {})",
             abstraction.index, calculated_index
         )),
+    }
+
+    if let DebruijnNode::Abstraction(abs) = *node
+        && let Some(computed_usage) = node_info.computed_usage
+        && abs.usage != computed_usage
+    {
+        attribs.set("fillcolor", "red");
+        attribs.set("style", "filled");
+        attribs.append_label(format!(
+            "WRONG USAGE - claimed: {}, actual: {} ",
+            abs.usage, computed_usage
+        ));
     }
 
     let graph_node = Node::new(node_info.index, &attribs);
