@@ -310,6 +310,8 @@ impl DebruijnIndex {
 // The number of times a variable is used in an abstraction.
 pub type Usage = usize;
 pub type RawTermIndex = usize;
+pub type Adjustment = Option<isize>;
+
 /// A pointer to a given DebruijnNode within a FlatRoot
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct TermIndex {
@@ -317,7 +319,7 @@ pub struct TermIndex {
     pub index: RawTermIndex,
     /// An "adjustment" value. All DebruijnNode::Index nodes are implictly increased or decreased by
     /// this amount. Note that this is cumulative.
-    pub subterm_adjust: Option<isize>,
+    pub subterm_adjust: Adjustment,
 }
 impl TermIndex {
     /// Create a new TermIndex with adjustment zero.
@@ -361,7 +363,7 @@ pub struct TermWithParent {
     pub edge_kind: EdgeKind,
     pub term: RawTermIndex,
     pub parent: Option<RawTermIndex>,
-    pub adjust: Option<isize>,
+    pub adjust: Adjustment,
 }
 impl TermWithParent {
     pub fn root(root: &FlatRoot) -> TermWithParent {
@@ -512,20 +514,20 @@ pub enum Parent {
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ParentChainEdge {
     ToRoot {
-        subterm_adjust: Option<isize>,
+        subterm_adjust: Adjustment,
     },
     AbsToBody {
         abs: usize,
-        subterm_adjust: Option<isize>,
+        subterm_adjust: Adjustment,
     },
     AppToTerm {
         app: usize,
-        subterm_adjust: Option<isize>,
+        subterm_adjust: Adjustment,
     },
 }
 
 impl ParentChainEdge {
-    pub fn subterm_adjust(&self) -> Option<isize> {
+    pub fn subterm_adjust(&self) -> Adjustment {
         match *self {
             ParentChainEdge::ToRoot { subterm_adjust, .. } => subterm_adjust,
             ParentChainEdge::AbsToBody { subterm_adjust, .. } => subterm_adjust,
@@ -773,7 +775,7 @@ pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
     // TODO: Should the parent -> app and abs -> body edges also be included here?
 }
 
-fn get_subterm_adjustment(root: &FlatRoot, parent: Option<Parent>) -> Option<isize> {
+fn get_subterm_adjustment(root: &FlatRoot, parent: Option<Parent>) -> Adjustment {
     match parent {
         Some(Parent::Body(parent)) => {
             let abs = root.get_abs(parent);
@@ -792,11 +794,7 @@ fn get_subterm_adjustment(root: &FlatRoot, parent: Option<Parent>) -> Option<isi
     }
 }
 
-fn set_subterm_adjustment(
-    root: &mut FlatRoot,
-    parent: Option<Parent>,
-    new_adjustment: Option<isize>,
-) {
+fn set_subterm_adjustment(root: &mut FlatRoot, parent: Option<Parent>, new_adjustment: Adjustment) {
     match parent {
         Some(Parent::Body(parent)) => {
             let mut abs = root.get_abs(parent);
@@ -820,7 +818,7 @@ fn set_subterm_adjustment(
     }
 }
 
-fn add(a: Option<isize>, b: Option<isize>) -> Option<isize> {
+fn add(a: Adjustment, b: Adjustment) -> Adjustment {
     match (a, b) {
         (None, None) => None,
         (None, Some(b)) => Some(b),
