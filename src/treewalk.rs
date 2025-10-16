@@ -100,35 +100,33 @@ pub fn postorder_walk<T>(
     ctx: &mut ActionCtx,
     action: &mut impl PostOrderAction<T>,
 ) -> T {
-    let term = ctx.term;
-    let child_results = match root[term] {
+    fn run_action<T>(
+        root: &FlatRoot,
+        ctx: &mut ActionCtx,
+        action: &mut impl PostOrderAction<T>,
+        term: TermWithParent,
+    ) -> T {
+        let old_term = ctx.term;
+        ctx.term = term;
+        ctx.chain.push(term.as_parent().unwrap());
+        let result = postorder_walk(root, ctx, action);
+        ctx.chain.pop(term.as_parent().unwrap());
+        ctx.term = old_term;
+        result
+    }
+    let child_results = match root[ctx.term] {
         DebruijnNode::Index(idx) => ChildResults::Index(idx),
         DebruijnNode::Abstraction(abs) => {
-            let body = abs.body(term.term);
-
-            ctx.term = body;
-            ctx.chain.push(body.as_parent().unwrap());
-            let body_result = postorder_walk(root, ctx, action);
-            ctx.chain.pop(body.as_parent().unwrap());
-            ctx.term = term;
-
+            let body = abs.body(ctx.term.term);
+            let body_result = run_action(root, ctx, action, body);
             ChildResults::Abstraction { abs, body_result }
         }
         DebruijnNode::Application(app) => {
-            let arg = app.arg(term.term);
-            let func = app.func(term.term);
+            let arg = app.arg(ctx.term.term);
+            let func = app.func(ctx.term.term);
 
-            ctx.term = func;
-            ctx.chain.push(func.as_parent().unwrap());
-            let func_result = postorder_walk(root, ctx, action);
-            ctx.chain.pop(func.as_parent().unwrap());
-
-            ctx.term = arg;
-            ctx.chain.push(arg.as_parent().unwrap());
-            let arg_result = postorder_walk(root, ctx, action);
-            ctx.chain.pop(arg.as_parent().unwrap());
-            ctx.term = term;
-
+            let func_result = run_action(root, ctx, action, func);
+            let arg_result = run_action(root, ctx, action, arg);
             ChildResults::Application {
                 app,
                 func_result,
@@ -146,35 +144,33 @@ pub fn postorder_walk_mut<T>(
     ctx: &mut ActionCtx,
     action: &mut impl PostOrderActionMut<T>,
 ) -> T {
-    let term = ctx.term;
-
-    let child_results = match root[term] {
+    fn run_action<T>(
+        root: &mut FlatRoot,
+        ctx: &mut ActionCtx<'_>,
+        action: &mut impl PostOrderActionMut<T>,
+        term: TermWithParent,
+    ) -> T {
+        let old_term = ctx.term;
+        ctx.term = term;
+        ctx.chain.push(term.as_parent().unwrap());
+        let result = postorder_walk_mut(root, ctx, action);
+        ctx.chain.pop(term.as_parent().unwrap());
+        ctx.term = old_term;
+        result
+    }
+    let child_results = match root[ctx.term] {
         DebruijnNode::Index(idx) => ChildResults::Index(idx),
         DebruijnNode::Abstraction(abs) => {
-            let body = abs.body(term.term);
-
-            ctx.term = body;
-            ctx.chain.push(body.as_parent().unwrap());
-            let body_result = postorder_walk_mut(root, ctx, action);
-            ctx.chain.pop(body.as_parent().unwrap());
-            ctx.term = term;
-
+            let body = abs.body(ctx.term.term);
+            let body_result = run_action(root, ctx, action, body);
             ChildResults::Abstraction { abs, body_result }
         }
         DebruijnNode::Application(app) => {
-            let arg = app.arg(term.term);
-            let func = app.func(term.term);
+            let arg = app.arg(ctx.term.term);
+            let func = app.func(ctx.term.term);
 
-            ctx.term = func;
-            ctx.chain.push(func.as_parent().unwrap());
-            let func_result = postorder_walk_mut(root, ctx, action);
-            ctx.chain.pop(func.as_parent().unwrap());
-
-            ctx.term = arg;
-            ctx.chain.push(arg.as_parent().unwrap());
-            let arg_result = postorder_walk_mut(root, ctx, action);
-            ctx.chain.pop(arg.as_parent().unwrap());
-            ctx.term = term;
+            let func_result = run_action(root, ctx, action, func);
+            let arg_result = run_action(root, ctx, action, arg);
 
             ChildResults::Application {
                 app,
@@ -193,34 +189,33 @@ pub fn preorder_walk<T>(
     ctx: &mut ActionCtx,
     action: &mut impl Action<T>,
 ) -> ControlFlow<T> {
-    let term = ctx.term;
+    fn run_action<T>(
+        root: &FlatRoot,
+        ctx: &mut ActionCtx<'_>,
+        action: &mut impl Action<T>,
+        term: TermWithParent,
+    ) -> ControlFlow<T> {
+        ctx.term = term;
+        ctx.chain.push(term.as_parent().unwrap());
+        let result = preorder_walk(root, ctx, action);
+        ctx.chain.pop(term.as_parent().unwrap());
+        ctx.term = ctx.term;
+        result
+    }
+
     action(root, ctx)?;
 
-    match root[term.term] {
+    match root[ctx.term.term] {
         DebruijnNode::Index(_) => (),
         DebruijnNode::Abstraction(abs) => {
-            let body = abs.body(term.term);
-
-            ctx.term = body;
-            ctx.chain.push(body.as_parent().unwrap());
-            preorder_walk(root, ctx, action)?;
-            ctx.chain.pop(body.as_parent().unwrap());
-            ctx.term = term;
+            let body = abs.body(ctx.term.term);
+            run_action(root, ctx, action, body)?;
         }
         DebruijnNode::Application(app) => {
-            let arg = app.arg(term.term);
-            let func = app.func(term.term);
-
-            ctx.term = func;
-            ctx.chain.push(func.as_parent().unwrap());
-            preorder_walk(root, ctx, action)?;
-            ctx.chain.pop(func.as_parent().unwrap());
-
-            ctx.term = arg;
-            ctx.chain.push(arg.as_parent().unwrap());
-            preorder_walk(root, ctx, action)?;
-            ctx.chain.pop(arg.as_parent().unwrap());
-            ctx.term = term;
+            let arg = app.arg(ctx.term.term);
+            let func = app.func(ctx.term.term);
+            run_action(root, ctx, action, func)?;
+            run_action(root, ctx, action, arg)?;
         }
     }
     ControlFlow::Continue(())
@@ -231,33 +226,33 @@ pub fn preorder_walk_mut<T>(
     ctx: &mut ActionCtx,
     action: &mut impl ActionMut<T>,
 ) -> ControlFlow<T> {
-    let term = ctx.term;
+    fn run_action<T>(
+        root: &mut FlatRoot,
+        ctx: &mut ActionCtx<'_>,
+        action: &mut impl ActionMut<T>,
+        body: TermWithParent,
+    ) -> ControlFlow<T> {
+        ctx.term = body;
+        ctx.chain.push(body.as_parent().unwrap());
+        let result = preorder_walk_mut(root, ctx, action);
+        ctx.chain.pop(body.as_parent().unwrap());
+        ctx.term = ctx.term;
+        result
+    }
+
     action(root, ctx)?;
 
-    match root[term] {
+    match root[ctx.term] {
         DebruijnNode::Index(_) => (),
         DebruijnNode::Abstraction(abs) => {
-            let body = abs.body(term.term);
-            ctx.term = body;
-            ctx.chain.push(body.as_parent().unwrap());
-            preorder_walk_mut(root, ctx, action)?;
-            ctx.chain.pop(body.as_parent().unwrap());
-            ctx.term = term;
+            let body = abs.body(ctx.term.term);
+            run_action(root, ctx, action, body)?;
         }
         DebruijnNode::Application(app) => {
-            let arg = app.arg(term.term);
-            let func = app.func(term.term);
-
-            ctx.term = func;
-            ctx.chain.push(func.as_parent().unwrap());
-            preorder_walk_mut(root, ctx, action)?;
-            ctx.chain.pop(func.as_parent().unwrap());
-
-            ctx.term = arg;
-            ctx.chain.push(arg.as_parent().unwrap());
-            preorder_walk_mut(root, ctx, action)?;
-            ctx.chain.pop(arg.as_parent().unwrap());
-            ctx.term = term;
+            let arg = app.arg(ctx.term.term);
+            let func = app.func(ctx.term.term);
+            run_action(root, ctx, action, func)?;
+            run_action(root, ctx, action, arg)?;
         }
     }
     ControlFlow::Continue(())
