@@ -164,7 +164,28 @@ mod test {
 
     #[test]
     fn parent_usage2() {
-        let root = Debruijn::from_str("λ (λ λ λ 2 1 (2 1)) ((λ λ 2) 1)").unwrap();
+        let root = Debruijn::from_str("(λ λ 1) 10").unwrap();
+        let mut reducer = Reducer::new(&root);
+
+        reducer.reduce_one();
+        assert_usage(&reducer);
+    }
+
+    #[test]
+    fn usage3() {
+        let root = Debruijn::from_str("λ λ λ λ (λ λ 6) 2 1").unwrap();
+        let mut reducer = Reducer::new(&root);
+
+        reducer.reduce_one();
+        println!("{}", reducer.root);
+        reducer.reduce_one();
+        println!("{}", reducer.root);
+        assert_usage(&reducer);
+    }
+
+    #[test]
+    fn usage4() {
+        let root = Debruijn::from_str("λ ((λ λ 1) 99) 1 99").unwrap();
         let mut reducer = Reducer::new(&root);
 
         assert_usage(&reducer);

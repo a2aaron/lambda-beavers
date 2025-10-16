@@ -104,6 +104,15 @@ impl FlatRoot {
         }
     }
 
+    fn get_app2(&self, term: RawTermIndex) -> Application {
+        match self[term] {
+            DebruijnNode::Application(app) => app,
+            _ => panic!(
+                "Expected abstraction for term @ {term}, got {:?}",
+                self[term]
+            ),
+        }
+    }
     fn get_app(&self, term: TermIndex) -> Application {
         match self[term] {
             DebruijnNode::Application(app) => app,
@@ -606,12 +615,11 @@ impl ParentChain {
         // the the given parent node)
         let mut current_depth = 0;
         let mut total_adjust = 0;
-
         for edge in self.full_chain.iter().cloned() {
             // indicies which are greater or equal to this value are considered free
             // This means as we decend, the threshold decreases
             let threshold = self.debruijn_depth() - current_depth;
-            let is_free = threshold <= index;
+            let is_free = threshold < index;
 
             if let Some(adjust) = edge.subterm_adjust()
                 && is_free
@@ -753,7 +761,72 @@ pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
 
     // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
-    repoint_node(root, redex.app.as_parent(), body);
+    let app_parent_edge = redex.app.as_parent();
+    repoint_node(root, app_parent_edge, body);
+    // Now that parent points to body, we need to fix up the parent -> body adjustment value
+    // This is because it's possible for the app -> abs edge to have a subterm adjustment value
+
+    let existing_adjust = get_subterm_adjustment(root, app_parent_edge);
+    let app_abs_subterm_adjust = root.get_app2(redex.app.term).func.subterm_adjust;
+    let new_adjustment = add(existing_adjust, app_abs_subterm_adjust);
+    set_subterm_adjustment(root, redex.app.as_parent(), new_adjustment);
+    // TODO: Should the parent -> app and abs -> body edges also be included here?
+}
+
+fn get_subterm_adjustment(root: &FlatRoot, parent: Option<Parent>) -> Option<isize> {
+    match parent {
+        Some(Parent::Body(parent)) => {
+            let abs = root.get_abs(parent);
+            abs.body.subterm_adjust
+        }
+        Some(Parent::Func(parent)) => {
+            let app = root.get_app(parent);
+            app.func.subterm_adjust
+        }
+        Some(Parent::Arg(parent)) => {
+            let app = root.get_app(parent);
+            app.arg.subterm_adjust
+        }
+        // Root
+        None => root.root.subterm_adjust,
+    }
+}
+
+fn set_subterm_adjustment(
+    root: &mut FlatRoot,
+    parent: Option<Parent>,
+    new_adjustment: Option<isize>,
+) {
+    match parent {
+        Some(Parent::Body(parent)) => {
+            let mut abs = root.get_abs(parent);
+            abs.body.subterm_adjust = new_adjustment;
+            root[parent] = DebruijnNode::Abstraction(abs);
+        }
+        Some(Parent::Func(parent)) => {
+            let mut app = root.get_app(parent);
+            app.func.subterm_adjust = new_adjustment;
+            root[parent] = DebruijnNode::Application(app);
+        }
+        Some(Parent::Arg(parent)) => {
+            let mut app = root.get_app(parent);
+            app.arg.subterm_adjust = new_adjustment;
+            root[parent] = DebruijnNode::Application(app);
+        }
+        // Root
+        None => {
+            root.root.subterm_adjust = new_adjustment;
+        }
+    }
+}
+
+fn add(a: Option<isize>, b: Option<isize>) -> Option<isize> {
+    match (a, b) {
+        (None, None) => None,
+        (None, Some(b)) => Some(b),
+        (Some(a), None) => Some(a),
+        (Some(a), Some(b)) => Some(a + b),
+    }
 }
 
 // Updates the usages of the parent chain.
@@ -865,9 +938,8 @@ fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: TermIndex) {
         // Root
         None => {
             root.root = child;
-            return;
         }
-    };
+    }
 }
 
 // This substitutes indicies that point to the implicit lambda that `function_body` is
@@ -950,7 +1022,8 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
                 } else {
                     clone_subtree_and_fix_up_fused(root, arg_ctx, depth_relative_to_arg - 1)
                 };
-
+                // Point parent to the newly created subtree
+                // TODO: Does adjustment need to be inherited here?
                 repoint_node(root, term.as_parent(), new_arg);
                 substitution_i += 1;
             } else if calculated_index > depth_relative_to_arg {

@@ -1,8 +1,7 @@
 use std::ops::ControlFlow;
 
 use crate::debruijn_flat::{
-    Abstraction, Application, DebruijnIndex, DebruijnNode, FlatRoot, Parent, ParentChain,
-    TermWithParent,
+    Abstraction, Application, DebruijnIndex, DebruijnNode, FlatRoot, ParentChain, TermWithParent,
 };
 
 // Important! All of these walk methods must treat ParentChain as "opaquely immutable". Basically,

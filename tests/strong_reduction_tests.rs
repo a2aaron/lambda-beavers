@@ -58,8 +58,8 @@ fn assert_usage(test: &str, test_i: usize) {
         if let Err((failing_term, actual, expected)) = reducer.root.check_usage() {
             println!("Failed test case #{test_i} - {test}: ({starting} -> {expected})");
             panic!(
-                "Expected usage to be {expected} but got {actual} for node {failing_term} in {}",
-                reducer.root
+                "Expected usage to be {expected} but got {actual} for node {failing_term} in {} (original: {})",
+                reducer.root, starting
             );
         }
         match result {
