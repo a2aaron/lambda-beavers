@@ -268,22 +268,22 @@ pub fn preorder_walk_mut<T>(
 mod test {
     use std::{collections::HashMap, ops::ControlFlow, str::FromStr};
 
-    use crate::debruijn_flat::{DebruijnNode, FlatRoot, RawTermIndex, TermIndex};
+    use crate::debruijn_flat::{BackingIndex, DebruijnEdge, DebruijnNode, FlatRoot};
 
     fn idx(a: usize) -> DebruijnNode {
         DebruijnNode::idx(a)
     }
 
     fn def(body: usize) -> DebruijnNode {
-        DebruijnNode::abs(TermIndex::new(body), 0)
+        DebruijnNode::abs(DebruijnEdge::new(body), 0)
     }
 
     fn call(func: usize, arg: usize) -> DebruijnNode {
-        DebruijnNode::app(TermIndex::new(func), TermIndex::new(arg))
+        DebruijnNode::app(DebruijnEdge::new(func), DebruijnEdge::new(arg))
     }
 
-    type NodeToName = HashMap<RawTermIndex, String>;
-    type NameToNode = HashMap<String, RawTermIndex>;
+    type NodeToName = HashMap<BackingIndex, String>;
+    type NameToNode = HashMap<String, BackingIndex>;
 
     struct TestData {
         root: FlatRoot,
@@ -342,7 +342,7 @@ mod test {
             }
         }
 
-        fn into_string(&self, order: &[RawTermIndex]) -> String {
+        fn into_string(&self, order: &[BackingIndex]) -> String {
             order
                 .iter()
                 .map(|node| self.node_to_name[node].clone())
@@ -350,7 +350,7 @@ mod test {
                 .collect()
         }
 
-        fn from_string(&self, order: &str) -> Vec<RawTermIndex> {
+        fn from_string(&self, order: &str) -> Vec<BackingIndex> {
             order
                 .split(",")
                 .map(|string| self.name_to_node[string.trim()])

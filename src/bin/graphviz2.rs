@@ -8,7 +8,7 @@ use clap::Parser;
 use lambda_beaver::{
     debruijn::Debruijn,
     debruijn_flat::{
-        DebruijnIndex, DebruijnNode, FlatRoot, RedexMut, TermIndex, Usage, compute_usage_flat,
+        DebruijnEdge, DebruijnIndex, DebruijnNode, FlatRoot, RedexMut, Usage, compute_usage_flat,
     },
     parse,
     reduce::Reducer,
@@ -28,13 +28,13 @@ enum AbstractionBinding {
     BoundTo {
         index: DebruijnIndex,
         calculated_index: usize,
-        abstraction: TermIndex,
+        abstraction: DebruijnEdge,
     },
 }
 
 #[derive(Debug, Clone, Copy)]
 struct NodeInfo {
-    is_root: Option<TermIndex>,
+    is_root: Option<DebruijnEdge>,
     index: usize,
     // If true, the this DebruijNode is garbage
     is_garbage: bool,
@@ -65,9 +65,9 @@ impl NodeInfo {
 #[derive(Debug, Clone, Copy)]
 struct RedexInfo {
     // The function of the application in the redex, which will be an Abstraction
-    abs: TermIndex,
+    abs: DebruijnEdge,
     // The argument of the application in the redex
-    arg: TermIndex,
+    arg: DebruijnEdge,
 }
 
 fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
@@ -180,8 +180,8 @@ impl Attributes {
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
 struct Graph {
     name: String,
-    nodes: Vec<Node>,
-    edges: Vec<Edge>,
+    nodes: Vec<GraphvizNode>,
+    edges: Vec<GraphvizEdge>,
     subgraphs: Vec<Graph>,
     attribs: Attributes,
 }
@@ -202,7 +202,7 @@ impl Graph {
             output.push(format!("{} [{}]", node.name, node.attribs.bake()))
         }
 
-        for Edge(head, tail, attribs) in &self.edges {
+        for GraphvizEdge(head, tail, attribs) in &self.edges {
             let attribs = &attribs.bake();
             output.push(format!("{head} -> {tail} [{attribs}]"));
         }
@@ -217,13 +217,13 @@ impl Graph {
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
-struct Node {
+struct GraphvizNode {
     name: String,
     attribs: Attributes,
 }
-impl Node {
-    fn new(name: usize, attributes: &Attributes) -> Node {
-        Node {
+impl GraphvizNode {
+    fn new(name: usize, attributes: &Attributes) -> GraphvizNode {
+        GraphvizNode {
             name: name.to_string(),
             attribs: attributes.clone(),
         }
@@ -231,10 +231,10 @@ impl Node {
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
-struct Edge(String, String, Attributes);
-impl Edge {
-    fn new(head: usize, tail: usize, attributes: &Attributes) -> Edge {
-        Edge(head.to_string(), tail.to_string(), attributes.clone())
+struct GraphvizEdge(String, String, Attributes);
+impl GraphvizEdge {
+    fn new(head: usize, tail: usize, attributes: &Attributes) -> GraphvizEdge {
+        GraphvizEdge(head.to_string(), tail.to_string(), attributes.clone())
     }
 }
 
@@ -258,7 +258,7 @@ fn to_graph(root: &FlatRoot, args: &Args) -> Graph {
         {
             let mut edge_attribs = Attributes::new();
             edge_attribs.set("style", "invis");
-            let edge = Edge::new(app.func.index, app.arg.index, &edge_attribs);
+            let edge = GraphvizEdge::new(app.func.index, app.arg.index, &edge_attribs);
             let mut same_rank = Graph::default();
             same_rank.edges.push(edge);
             same_rank.attribs.set("rank", "same");
@@ -272,7 +272,7 @@ fn to_graph(root: &FlatRoot, args: &Args) -> Graph {
     graph
 }
 
-fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<Edge> {
+fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<GraphvizEdge> {
     let mut edges = vec![];
     let mut edge_attribs = Attributes::new();
     edge_attribs.set(
@@ -293,13 +293,17 @@ fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<Edge>
                     .set("color", color)
                     .set("style", "dashed")
                     .set("constraint", "false");
-                edges.push(Edge::new(node_info.index, abstraction.index, &edge_attribs));
+                edges.push(GraphvizEdge::new(
+                    node_info.index,
+                    abstraction.index,
+                    &edge_attribs,
+                ));
             }
         }
         DebruijnNode::Abstraction(abs) => {
             let body = abs.body.index;
             add_if_subterm_termindex(&mut edge_attribs, abs.body);
-            edges.push(Edge::new(node_info.index, body, &edge_attribs));
+            edges.push(GraphvizEdge::new(node_info.index, body, &edge_attribs));
         }
         DebruijnNode::Application(app) => {
             let func = app.func.index;
@@ -307,25 +311,25 @@ fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<Edge>
 
             let mut func_attribs = edge_attribs.clone();
             add_if_subterm_termindex(&mut func_attribs, app.func);
-            edges.push(Edge::new(node_info.index, func, &func_attribs));
+            edges.push(GraphvizEdge::new(node_info.index, func, &func_attribs));
 
             let mut arg_attribs = edge_attribs.clone();
             add_if_subterm_termindex(&mut arg_attribs, app.arg);
             arg_attribs.set("arrowhead", "onormal");
-            edges.push(Edge::new(node_info.index, arg, &arg_attribs));
+            edges.push(GraphvizEdge::new(node_info.index, arg, &arg_attribs));
         }
     };
     edges
 }
 
-fn add_if_subterm_termindex(edge_attribs: &mut Attributes, term: TermIndex) {
+fn add_if_subterm_termindex(edge_attribs: &mut Attributes, term: DebruijnEdge) {
     if let Some(adjust) = term.subterm_adjust {
         edge_attribs.set("penwidth", "5");
         edge_attribs.set("label", format!("adj = {adjust}"));
     }
 }
 
-fn make_node(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Node {
+fn make_node(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> GraphvizNode {
     let mut attribs = Attributes::new();
     attribs
         .set("label", to_node_label(*node))
@@ -402,7 +406,7 @@ fn make_node(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Node {
         ));
     }
 
-    let graph_node = Node::new(node_info.index, &attribs);
+    let graph_node = GraphvizNode::new(node_info.index, &attribs);
     graph_node
 }
 
