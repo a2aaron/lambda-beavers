@@ -323,7 +323,7 @@ fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<Graph
 }
 
 fn add_if_subterm_termindex(edge_attribs: &mut Attributes, term: DebruijnEdge) {
-    if let Some(adjust) = term.subterm_adjust {
+    if let Some(adjust) = term.adjust {
         edge_attribs.set("penwidth", "5");
         edge_attribs.set("label", format!("adj = {adjust}"));
     }
@@ -363,7 +363,7 @@ fn make_node(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> GraphvizN
 
     if let Some(root) = node_info.is_root {
         attribs.set("penwidth", 2.0);
-        if let Some(adjust) = root.subterm_adjust {
+        if let Some(adjust) = root.adjust {
             attribs.append_label(format!("adj = {:?}", adjust));
         }
     }

@@ -21,7 +21,7 @@ impl FlatRoot {
             backing: vec![],
             root: DebruijnEdge {
                 index: 0,
-                subterm_adjust: None,
+                adjust: None,
             },
         }
     }
@@ -319,21 +319,21 @@ pub struct DebruijnEdge {
     pub index: BackingIndex,
     /// An "adjustment" value. All DebruijnNode::Index nodes are implictly increased or decreased by
     /// this amount. Note that this is cumulative.
-    pub subterm_adjust: Adjustment,
+    pub adjust: Adjustment,
 }
 impl DebruijnEdge {
     /// Create a new TermIndex with adjustment zero.
     pub fn new(index: BackingIndex) -> Self {
         Self {
             index,
-            subterm_adjust: None,
+            adjust: None,
         }
     }
 }
 
 impl Display for DebruijnEdge {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(adjust) = self.subterm_adjust {
+        if let Some(adjust) = self.adjust {
             write!(f, "{} (adjust={})", self.index, adjust)
         } else {
             write!(f, "{}", self.index)
@@ -345,7 +345,7 @@ impl From<BackingIndex> for DebruijnEdge {
     fn from(index: BackingIndex) -> Self {
         DebruijnEdge {
             index,
-            subterm_adjust: None,
+            adjust: None,
         }
     }
 }
@@ -380,15 +380,15 @@ impl TermWithParent {
             (None, EdgeKind::IntoRoot) => None,
             (Some(index), EdgeKind::AbsToBody) => Some(Parent::Body(DebruijnEdge {
                 index,
-                subterm_adjust: self.adjust,
+                adjust: self.adjust,
             })),
             (Some(index), EdgeKind::AppToArg) => Some(Parent::Arg(DebruijnEdge {
                 index,
-                subterm_adjust: self.adjust,
+                adjust: self.adjust,
             })),
             (Some(index), EdgeKind::AppToFunc) => Some(Parent::Func(DebruijnEdge {
                 index,
-                subterm_adjust: self.adjust,
+                adjust: self.adjust,
             })),
             _ => unreachable!(),
         }
@@ -398,7 +398,7 @@ impl TermWithParent {
         match self.parent {
             Some(parent) => Some(DebruijnEdge {
                 index: parent,
-                subterm_adjust: self.adjust,
+                adjust: self.adjust,
             }),
             None => None,
         }
@@ -421,7 +421,7 @@ impl Abstraction {
         TermWithParent {
             term: self.body.index,
             parent: Some(abs_index),
-            adjust: self.body.subterm_adjust,
+            adjust: self.body.adjust,
             edge_kind: EdgeKind::AbsToBody,
         }
     }
@@ -438,7 +438,7 @@ impl Application {
         TermWithParent {
             term: self.func.index,
             parent: Some(app_index),
-            adjust: self.func.subterm_adjust,
+            adjust: self.func.adjust,
             edge_kind: EdgeKind::AppToFunc,
         }
     }
@@ -447,7 +447,7 @@ impl Application {
         TermWithParent {
             term: self.arg.index,
             parent: Some(app_index),
-            adjust: self.arg.subterm_adjust,
+            adjust: self.arg.adjust,
             edge_kind: EdgeKind::AppToArg,
         }
     }
@@ -513,25 +513,17 @@ pub enum Parent {
 
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ParentChainEdge {
-    ToRoot {
-        subterm_adjust: Adjustment,
-    },
-    AbsToBody {
-        abs: usize,
-        subterm_adjust: Adjustment,
-    },
-    AppToTerm {
-        app: usize,
-        subterm_adjust: Adjustment,
-    },
+    ToRoot { adjust: Adjustment },
+    AbsToBody { abs: usize, adjust: Adjustment },
+    AppToTerm { app: usize, adjust: Adjustment },
 }
 
 impl ParentChainEdge {
-    pub fn subterm_adjust(&self) -> Adjustment {
+    pub fn adjust(&self) -> Adjustment {
         match *self {
-            ParentChainEdge::ToRoot { subterm_adjust, .. } => subterm_adjust,
-            ParentChainEdge::AbsToBody { subterm_adjust, .. } => subterm_adjust,
-            ParentChainEdge::AppToTerm { subterm_adjust, .. } => subterm_adjust,
+            ParentChainEdge::ToRoot { adjust, .. } => adjust,
+            ParentChainEdge::AbsToBody { adjust, .. } => adjust,
+            ParentChainEdge::AppToTerm { adjust, .. } => adjust,
         }
     }
 
@@ -539,15 +531,15 @@ impl ParentChainEdge {
         match parent {
             Parent::Body(parent) => ParentChainEdge::AbsToBody {
                 abs: parent.index,
-                subterm_adjust: parent.subterm_adjust,
+                adjust: parent.adjust,
             },
             Parent::Func(parent) => ParentChainEdge::AppToTerm {
                 app: parent.index,
-                subterm_adjust: parent.subterm_adjust,
+                adjust: parent.adjust,
             },
             Parent::Arg(parent) => ParentChainEdge::AppToTerm {
                 app: parent.index,
-                subterm_adjust: parent.subterm_adjust,
+                adjust: parent.adjust,
             },
         }
     }
@@ -555,20 +547,8 @@ impl ParentChainEdge {
     pub fn parent(&self) -> Option<DebruijnEdge> {
         match *self {
             ParentChainEdge::ToRoot { .. } => None,
-            ParentChainEdge::AbsToBody {
-                abs,
-                subterm_adjust,
-            } => Some(DebruijnEdge {
-                index: abs,
-                subterm_adjust,
-            }),
-            ParentChainEdge::AppToTerm {
-                app,
-                subterm_adjust,
-            } => Some(DebruijnEdge {
-                index: app,
-                subterm_adjust,
-            }),
+            ParentChainEdge::AbsToBody { abs, adjust } => Some(DebruijnEdge { index: abs, adjust }),
+            ParentChainEdge::AppToTerm { app, adjust } => Some(DebruijnEdge { index: app, adjust }),
         }
     }
 }
@@ -586,7 +566,7 @@ impl ParentChain {
         ParentChain {
             abstractions: vec![],
             full_chain: vec![ParentChainEdge::ToRoot {
-                subterm_adjust: root.root.subterm_adjust,
+                adjust: root.root.adjust,
             }],
         }
     }
@@ -623,7 +603,7 @@ impl ParentChain {
             let threshold = self.debruijn_depth() - current_depth;
             let is_free = threshold < index;
 
-            if let Some(adjust) = edge.subterm_adjust()
+            if let Some(adjust) = edge.adjust()
                 && is_free
             {
                 total_adjust += adjust;
@@ -768,52 +748,52 @@ pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
     // Now that parent points to body, we need to fix up the parent -> body adjustment value
     // This is because it's possible for the app -> abs edge to have a subterm adjustment value
 
-    let existing_adjust = get_subterm_adjustment(root, app_parent_edge);
-    let app_abs_subterm_adjust = root.get_app2(redex.app.term).func.subterm_adjust;
-    let new_adjustment = add(existing_adjust, app_abs_subterm_adjust);
-    set_subterm_adjustment(root, redex.app.as_parent(), new_adjustment);
+    let existing_adjust = get_adjustment(root, app_parent_edge);
+    let app_abs_adjust = root.get_app2(redex.app.term).func.adjust;
+    let new_adjustment = add(existing_adjust, app_abs_adjust);
+    set_adjustment(root, redex.app.as_parent(), new_adjustment);
     // TODO: Should the parent -> app and abs -> body edges also be included here?
 }
 
-fn get_subterm_adjustment(root: &FlatRoot, parent: Option<Parent>) -> Adjustment {
+fn get_adjustment(root: &FlatRoot, parent: Option<Parent>) -> Adjustment {
     match parent {
         Some(Parent::Body(parent)) => {
             let abs = root.get_abs(parent);
-            abs.body.subterm_adjust
+            abs.body.adjust
         }
         Some(Parent::Func(parent)) => {
             let app = root.get_app(parent);
-            app.func.subterm_adjust
+            app.func.adjust
         }
         Some(Parent::Arg(parent)) => {
             let app = root.get_app(parent);
-            app.arg.subterm_adjust
+            app.arg.adjust
         }
         // Root
-        None => root.root.subterm_adjust,
+        None => root.root.adjust,
     }
 }
 
-fn set_subterm_adjustment(root: &mut FlatRoot, parent: Option<Parent>, new_adjustment: Adjustment) {
+fn set_adjustment(root: &mut FlatRoot, parent: Option<Parent>, new_adjustment: Adjustment) {
     match parent {
         Some(Parent::Body(parent)) => {
             let mut abs = root.get_abs(parent);
-            abs.body.subterm_adjust = new_adjustment;
+            abs.body.adjust = new_adjustment;
             root[parent] = DebruijnNode::Abstraction(abs);
         }
         Some(Parent::Func(parent)) => {
             let mut app = root.get_app(parent);
-            app.func.subterm_adjust = new_adjustment;
+            app.func.adjust = new_adjustment;
             root[parent] = DebruijnNode::Application(app);
         }
         Some(Parent::Arg(parent)) => {
             let mut app = root.get_app(parent);
-            app.arg.subterm_adjust = new_adjustment;
+            app.arg.adjust = new_adjustment;
             root[parent] = DebruijnNode::Application(app);
         }
         // Root
         None => {
-            root.root.subterm_adjust = new_adjustment;
+            root.root.adjust = new_adjustment;
         }
     }
 }
@@ -974,7 +954,7 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &mut RedexMut) -> Debr
         let body = redex.body.term;
         DebruijnEdge {
             index: body,
-            subterm_adjust: Some(-1),
+            adjust: Some(-1),
         }
     } else {
         // Otherwise, perform substitution as usual
