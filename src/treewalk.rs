@@ -195,11 +195,12 @@ pub fn preorder_walk<T>(
         action: &mut impl Action<T>,
         term: TermWithParent,
     ) -> ControlFlow<T> {
+        let old_term = ctx.term;
         ctx.term = term;
         ctx.chain.push(term.as_parent().unwrap());
         let result = preorder_walk(root, ctx, action);
         ctx.chain.pop(term.as_parent().unwrap());
-        ctx.term = ctx.term;
+        ctx.term = old_term;
         result
     }
 
@@ -232,11 +233,12 @@ pub fn preorder_walk_mut<T>(
         action: &mut impl ActionMut<T>,
         body: TermWithParent,
     ) -> ControlFlow<T> {
+        let old_term = ctx.term;
         ctx.term = body;
         ctx.chain.push(body.as_parent().unwrap());
         let result = preorder_walk_mut(root, ctx, action);
         ctx.chain.pop(body.as_parent().unwrap());
-        ctx.term = ctx.term;
+        ctx.term = old_term;
         result
     }
 
@@ -263,7 +265,10 @@ pub fn preorder_walk_mut<T>(
 mod test {
     use std::{collections::HashMap, ops::ControlFlow, str::FromStr};
 
-    use crate::debruijn_flat::{BackingIndex, DebruijnEdge, DebruijnNode, FlatRoot};
+    use crate::{
+        debruijn_flat::{BackingIndex, DebruijnEdge, DebruijnNode, FlatRoot},
+        treewalk::{postorder_walk, postorder_walk_mut},
+    };
 
     fn idx(a: usize) -> DebruijnNode {
         DebruijnNode::idx(a)
@@ -502,7 +507,73 @@ mod test {
             root.preorder_walk_at(ctx, |_root, _ctx| {});
 
             assert_eq!(old_chain, *ctx.chain);
-            assert_eq!(old_term, ctx.term);
+            assert_eq!(
+                old_term, ctx.term,
+                "Expected {:?} to equal {:?}",
+                old_term, ctx.term
+            );
+            ControlFlow::Continue::<()>(())
+        });
+    }
+    #[test]
+    fn test_preorder_mut_immutability() {
+        let mut root =
+            FlatRoot::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
+
+        root.preorder_walk_mut(|root, ctx| {
+            let old_chain = ctx.chain.clone();
+            let old_term = ctx.term.clone();
+
+            root.preorder_walk_at_mut(ctx, |_root, _ctx| {});
+
+            assert_eq!(old_chain, *ctx.chain);
+            assert_eq!(
+                old_term, ctx.term,
+                "Expected {:?} to equal {:?}",
+                old_term, ctx.term
+            );
+            ControlFlow::Continue::<()>(())
+        });
+    }
+
+    #[test]
+    fn test_postorder_immutability() {
+        let root =
+            FlatRoot::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
+
+        root.preorder_walk(|root, ctx| {
+            let old_chain = ctx.chain.clone();
+            let old_term = ctx.term.clone();
+
+            postorder_walk(root, ctx, &mut |_root, _ctx, _results| {});
+
+            assert_eq!(old_chain, *ctx.chain);
+            assert_eq!(
+                old_term, ctx.term,
+                "Expected {:?} to equal {:?}",
+                old_term, ctx.term
+            );
+            ControlFlow::Continue::<()>(())
+        });
+    }
+
+    #[test]
+    fn test_postorder_mut_immutability() {
+        let mut root =
+            FlatRoot::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
+
+        root.preorder_walk_mut(|root, ctx| {
+            let old_chain = ctx.chain.clone();
+            let old_term = ctx.term.clone();
+
+            postorder_walk_mut(root, ctx, &mut |_root, _ctx, _results| {});
+
+            assert_eq!(old_chain, *ctx.chain);
+            assert_eq!(
+                old_term, ctx.term,
+                "Expected {:?} to equal {:?}",
+                old_term, ctx.term
+            );
             ControlFlow::Continue::<()>(())
         });
     }

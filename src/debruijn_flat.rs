@@ -949,13 +949,14 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &mut RedexMut) -> Debr
     if redex.body_usage == 0 {
         // No need to do anything with the argument because it is never used in the body
         // (Since the argument is not used, the entire arg subtree is garbage now.)
-        // down_one(root, &mut redex.func_ctx());
         // Fix up the indicies in it to account for the fact that we are still dropping out the abstraction that the body is in.
-        let body = redex.body.term;
-        DebruijnEdge {
-            index: body,
-            adjust: Some(-1),
-        }
+        down_one(root, &mut redex.func_ctx());
+        let abs = root.get_abs(redex.abs);
+        abs.body
+        // DebruijnEdge {
+        //     index: body,
+        //     adjust: Some(-1),
+        // }
     } else {
         // Otherwise, perform substitution as usual
 

@@ -107,7 +107,9 @@ fn assert_test(test: &str, test_i: usize) {
 }
 
 make_test_batch!("0", "3465", assert_round_trip);
-make_test_batch!("0", "500", assert_usage);
+make_test_batch!("0", "480", assert_usage);
+make_test_batch!("480", "490", assert_usage);
+make_test_batch!("490", "500", assert_usage);
 
 make_test!("0");
 make_test!("1");
