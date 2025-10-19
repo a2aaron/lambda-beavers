@@ -302,7 +302,7 @@ fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<Graph
         }
         DebruijnNode::Abstraction(abs) => {
             let body = abs.body.index;
-            add_if_subterm_termindex(&mut edge_attribs, abs.body);
+            add_if_edge_has_adjust(&mut edge_attribs, abs.body);
             edges.push(GraphvizEdge::new(node_info.index, body, &edge_attribs));
         }
         DebruijnNode::Application(app) => {
@@ -310,11 +310,11 @@ fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<Graph
             let arg = app.arg.index;
 
             let mut func_attribs = edge_attribs.clone();
-            add_if_subterm_termindex(&mut func_attribs, app.func);
+            add_if_edge_has_adjust(&mut func_attribs, app.func);
             edges.push(GraphvizEdge::new(node_info.index, func, &func_attribs));
 
             let mut arg_attribs = edge_attribs.clone();
-            add_if_subterm_termindex(&mut arg_attribs, app.arg);
+            add_if_edge_has_adjust(&mut arg_attribs, app.arg);
             arg_attribs.set("arrowhead", "onormal");
             edges.push(GraphvizEdge::new(node_info.index, arg, &arg_attribs));
         }
@@ -322,7 +322,7 @@ fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<Graph
     edges
 }
 
-fn add_if_subterm_termindex(edge_attribs: &mut Attributes, term: DebruijnEdge) {
+fn add_if_edge_has_adjust(edge_attribs: &mut Attributes, term: DebruijnEdge) {
     if let Some(adjust) = term.adjust {
         edge_attribs.set("penwidth", "5");
         edge_attribs.set("label", format!("adj = {adjust}"));
