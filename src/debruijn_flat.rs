@@ -680,30 +680,11 @@ pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
     // Now that parent points to body, we need to fix up the parent -> body adjustment value
     // This is because it's possible for the app -> abs edge to have a subterm adjustment value
 
-    let existing_adjust = get_adjustment(root, redex.app.edge_w_parent);
+    let existing_adjust = redex.app.adjust;
     let app_abs_adjust = root.get_app(redex.app.child).func.adjust;
     let new_adjustment = add(existing_adjust, app_abs_adjust);
     set_adjustment(root, redex.app.edge_w_parent, new_adjustment);
     // TODO: Should the parent -> app and abs -> body edges also be included here?
-}
-
-fn get_adjustment(root: &FlatRoot, parent: EdgeWithParent) -> Adjustment {
-    match parent {
-        EdgeWithParent::AbsToBody(parent) => {
-            let abs = root.get_abs(parent);
-            abs.body.adjust
-        }
-        EdgeWithParent::AppToFunc(parent) => {
-            let app = root.get_app(parent);
-            app.func.adjust
-        }
-        EdgeWithParent::AppToArg(parent) => {
-            let app = root.get_app(parent);
-            app.arg.adjust
-        }
-        // Root
-        EdgeWithParent::IntoRoot => root.root.adjust,
-    }
 }
 
 fn set_adjustment(root: &mut FlatRoot, parent: EdgeWithParent, new_adjustment: Adjustment) {

@@ -24,7 +24,7 @@ macro_rules! make_test {
 
     ($nth:literal, $invoke:ident) => {
         #[test]
-        fn ${concat(strong_reduction_test_, $nth)}() {
+        fn ${concat($invoke, _, $nth)}() {
             let n: usize = $nth.parse().unwrap();
             let test = TESTS.split('\n').nth(n).unwrap();
             $invoke(test, n);
