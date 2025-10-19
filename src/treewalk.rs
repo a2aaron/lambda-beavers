@@ -1,7 +1,7 @@
 use std::ops::ControlFlow;
 
 use crate::debruijn_flat::{
-    Abstraction, Application, DebruijnIndex, DebruijnNode, FlatRoot, ParentChain, TermWithParent,
+    Abstraction, Application, DebruijnIndex, DebruijnNode, DoubleEndedEdge, FlatRoot, ParentChain,
 };
 
 // Important! All of these walk methods must treat ParentChain as "opaquely immutable". Basically,
@@ -18,7 +18,7 @@ use crate::debruijn_flat::{
 // In particlar, this means that the Action and ActionMut closures should NOT mutate the ActionCtx
 // and should pretend that it is an &ActionCtx
 pub struct ActionCtx<'chain> {
-    pub term: TermWithParent,
+    pub term: DoubleEndedEdge,
     pub chain: &'chain mut ParentChain,
 }
 
@@ -28,7 +28,7 @@ pub trait Action<T> = FnMut(&FlatRoot, &mut ActionCtx) -> ControlFlow<T>;
 impl FlatRoot {
     pub fn preorder_walk<T>(&self, mut action: impl Action<T>) -> Option<T> {
         let mut ctx = ActionCtx {
-            term: TermWithParent::root(self),
+            term: DoubleEndedEdge::root(self),
             chain: &mut ParentChain::new(self),
         };
         preorder_walk(self, &mut ctx, &mut action).break_value()
@@ -47,7 +47,7 @@ impl FlatRoot {
 
     pub fn preorder_walk_mut<T>(&mut self, mut action: impl ActionMut<T>) -> Option<T> {
         let mut ctx = ActionCtx {
-            term: TermWithParent::root(self),
+            term: DoubleEndedEdge::root(self),
             chain: &mut ParentChain::new(self),
         };
         preorder_walk_mut(self, &mut ctx, &mut action).break_value()
@@ -66,7 +66,7 @@ impl FlatRoot {
 
     pub fn postorder_walk<T>(&self, mut action: impl PostOrderAction<T>) -> T {
         let mut ctx = ActionCtx {
-            term: TermWithParent::root(self),
+            term: DoubleEndedEdge::root(self),
             chain: &mut ParentChain::new(self),
         };
         postorder_walk(self, &mut ctx, &mut action)
@@ -104,26 +104,26 @@ pub fn postorder_walk<T>(
         root: &FlatRoot,
         ctx: &mut ActionCtx,
         action: &mut impl PostOrderAction<T>,
-        term: TermWithParent,
+        term: DoubleEndedEdge,
     ) -> T {
         let old_term = ctx.term;
         ctx.term = term;
-        ctx.chain.push(term.as_parent().unwrap());
+        ctx.chain.push(term);
         let result = postorder_walk(root, ctx, action);
-        ctx.chain.pop(term.as_parent().unwrap());
+        ctx.chain.pop(term);
         ctx.term = old_term;
         result
     }
-    let child_results = match root[ctx.term] {
+    let child_results = match root[ctx.term.child] {
         DebruijnNode::Index(idx) => ChildResults::Index(idx),
         DebruijnNode::Abstraction(abs) => {
-            let body = abs.body(ctx.term.term);
+            let body = abs.body(ctx.term.child);
             let body_result = run_action(root, ctx, action, body);
             ChildResults::Abstraction { abs, body_result }
         }
         DebruijnNode::Application(app) => {
-            let arg = app.arg(ctx.term.term);
-            let func = app.func(ctx.term.term);
+            let arg = app.arg(ctx.term.child);
+            let func = app.func(ctx.term.child);
 
             let func_result = run_action(root, ctx, action, func);
             let arg_result = run_action(root, ctx, action, arg);
@@ -148,26 +148,26 @@ pub fn postorder_walk_mut<T>(
         root: &mut FlatRoot,
         ctx: &mut ActionCtx<'_>,
         action: &mut impl PostOrderActionMut<T>,
-        term: TermWithParent,
+        term: DoubleEndedEdge,
     ) -> T {
         let old_term = ctx.term;
         ctx.term = term;
-        ctx.chain.push(term.as_parent().unwrap());
+        ctx.chain.push(term);
         let result = postorder_walk_mut(root, ctx, action);
-        ctx.chain.pop(term.as_parent().unwrap());
+        ctx.chain.pop(term);
         ctx.term = old_term;
         result
     }
     let child_results = match root[ctx.term] {
         DebruijnNode::Index(idx) => ChildResults::Index(idx),
         DebruijnNode::Abstraction(abs) => {
-            let body = abs.body(ctx.term.term);
+            let body = abs.body(ctx.term.child);
             let body_result = run_action(root, ctx, action, body);
             ChildResults::Abstraction { abs, body_result }
         }
         DebruijnNode::Application(app) => {
-            let arg = app.arg(ctx.term.term);
-            let func = app.func(ctx.term.term);
+            let arg = app.arg(ctx.term.child);
+            let func = app.func(ctx.term.child);
 
             let func_result = run_action(root, ctx, action, func);
             let arg_result = run_action(root, ctx, action, arg);
@@ -193,28 +193,28 @@ pub fn preorder_walk<T>(
         root: &FlatRoot,
         ctx: &mut ActionCtx<'_>,
         action: &mut impl Action<T>,
-        term: TermWithParent,
+        term: DoubleEndedEdge,
     ) -> ControlFlow<T> {
         let old_term = ctx.term;
         ctx.term = term;
-        ctx.chain.push(term.as_parent().unwrap());
+        ctx.chain.push(term);
         let result = preorder_walk(root, ctx, action);
-        ctx.chain.pop(term.as_parent().unwrap());
+        ctx.chain.pop(term);
         ctx.term = old_term;
         result
     }
 
     action(root, ctx)?;
 
-    match root[ctx.term.term] {
+    match root[ctx.term.child] {
         DebruijnNode::Index(_) => (),
         DebruijnNode::Abstraction(abs) => {
-            let body = abs.body(ctx.term.term);
+            let body = abs.body(ctx.term.child);
             run_action(root, ctx, action, body)?;
         }
         DebruijnNode::Application(app) => {
-            let arg = app.arg(ctx.term.term);
-            let func = app.func(ctx.term.term);
+            let arg = app.arg(ctx.term.child);
+            let func = app.func(ctx.term.child);
             run_action(root, ctx, action, func)?;
             run_action(root, ctx, action, arg)?;
         }
@@ -231,13 +231,13 @@ pub fn preorder_walk_mut<T>(
         root: &mut FlatRoot,
         ctx: &mut ActionCtx<'_>,
         action: &mut impl ActionMut<T>,
-        body: TermWithParent,
+        term: DoubleEndedEdge,
     ) -> ControlFlow<T> {
         let old_term = ctx.term;
-        ctx.term = body;
-        ctx.chain.push(body.as_parent().unwrap());
+        ctx.term = term;
+        ctx.chain.push(term);
         let result = preorder_walk_mut(root, ctx, action);
-        ctx.chain.pop(body.as_parent().unwrap());
+        ctx.chain.pop(term);
         ctx.term = old_term;
         result
     }
@@ -247,12 +247,12 @@ pub fn preorder_walk_mut<T>(
     match root[ctx.term] {
         DebruijnNode::Index(_) => (),
         DebruijnNode::Abstraction(abs) => {
-            let body = abs.body(ctx.term.term);
+            let body = abs.body(ctx.term.child);
             run_action(root, ctx, action, body)?;
         }
         DebruijnNode::Application(app) => {
-            let arg = app.arg(ctx.term.term);
-            let func = app.func(ctx.term.term);
+            let arg = app.arg(ctx.term.child);
+            let func = app.func(ctx.term.child);
             run_action(root, ctx, action, func)?;
             run_action(root, ctx, action, arg)?;
         }
@@ -363,7 +363,7 @@ mod test {
 
         let mut actual = vec![];
         test_data.root.preorder_walk(|_root, ctx| {
-            actual.push(ctx.term.term);
+            actual.push(ctx.term.child);
             ControlFlow::Continue::<()>(())
         });
         let actual_pretty = test_data.into_string(&actual);
@@ -450,8 +450,8 @@ mod test {
         root.preorder_walk(|root, ctx| {
             let mut inner_walk_index = 0;
             root.preorder_walk_at(ctx, |_root, ctx| {
-                let actual = ctx.term.term;
-                let expected = expected_nodes[outer_walk_index][inner_walk_index].index;
+                let actual = ctx.term.child;
+                let expected = expected_nodes[outer_walk_index][inner_walk_index].child;
                 assert_eq!(expected, actual, "expected TermIndex {expected}, got {actual} at {outer_walk_index},{inner_walk_index}");
 
                 inner_walk_index += 1;
@@ -485,7 +485,7 @@ mod test {
                 assert_eq!(
                     expected, actual,
                     "expected depth of {expected} got {actual} at {outer_walk_index},{inner_walk_index}\n(ctx.term: {:?}, ter: {:?})",
-                    ctx.term, root[ctx.term.term ]
+                    ctx.term, root[ctx.term.child ]
                 );
 
                 inner_walk_index += 1;

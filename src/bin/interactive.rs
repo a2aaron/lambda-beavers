@@ -32,7 +32,7 @@ fn print_highlighted<'a>(root: &'a FlatRoot, highlighted: BackingIndex) -> Strin
             arg_result,
             ..
         } => {
-            let highlight = ctx.term.term == highlighted;
+            let highlight = ctx.term.child == highlighted;
 
             PrintableTerm::Application {
                 highlight,
@@ -86,7 +86,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             .enumerate()
             .map(|(redex_index, redex)| {
                 // TODO: would be nice to not print out the full term if it is over 80ish characters long
-                let highlighted = print_highlighted(&current_term, redex.app.term);
+                let highlighted = print_highlighted(&current_term, redex.app.child);
                 Choice::Reduce(redex_index, highlighted)
             })
             .collect();

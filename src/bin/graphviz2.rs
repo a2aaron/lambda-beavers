@@ -110,9 +110,9 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
             None => None,
         };
 
-        let is_root = root.root.index == ctx.term.term;
+        let is_root = root.root.child == ctx.term.child;
 
-        let index = ctx.term.term;
+        let index = ctx.term.child;
         info_vec[index].is_root = if is_root { Some(root.root) } else { None };
         info_vec[index].is_garbage = false;
         info_vec[index].abs_binding = abs_bound;
@@ -258,7 +258,7 @@ fn to_graph(root: &FlatRoot, args: &Args) -> Graph {
         {
             let mut edge_attribs = Attributes::new();
             edge_attribs.set("style", "invis");
-            let edge = GraphvizEdge::new(app.func.index, app.arg.index, &edge_attribs);
+            let edge = GraphvizEdge::new(app.func.child, app.arg.child, &edge_attribs);
             let mut same_rank = Graph::default();
             same_rank.edges.push(edge);
             same_rank.attribs.set("rank", "same");
@@ -288,26 +288,26 @@ fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<Graph
             if let AbstractionBinding::BoundTo { abstraction, .. } = node_info.abs_binding
                 && !args.no_color_abs
             {
-                let color = get_random_color(abstraction.index, 1.0);
+                let color = get_random_color(abstraction.child, 1.0);
                 edge_attribs
                     .set("color", color)
                     .set("style", "dashed")
                     .set("constraint", "false");
                 edges.push(GraphvizEdge::new(
                     node_info.index,
-                    abstraction.index,
+                    abstraction.child,
                     &edge_attribs,
                 ));
             }
         }
         DebruijnNode::Abstraction(abs) => {
-            let body = abs.body.index;
+            let body = abs.body.child;
             add_if_edge_has_adjust(&mut edge_attribs, abs.body);
             edges.push(GraphvizEdge::new(node_info.index, body, &edge_attribs));
         }
         DebruijnNode::Application(app) => {
-            let func = app.func.index;
-            let arg = app.arg.index;
+            let func = app.func.child;
+            let arg = app.arg.child;
 
             let mut func_attribs = edge_attribs.clone();
             add_if_edge_has_adjust(&mut func_attribs, app.func);
@@ -352,8 +352,8 @@ fn make_node(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> GraphvizN
     if let Some(info) = node_info.redex_info
         && !args.no_color_redex
     {
-        let color1 = get_random_color(info.abs.index, 0.5);
-        let color2 = get_random_color(info.arg.index, 0.5);
+        let color1 = get_random_color(info.abs.child, 0.5);
+        let color2 = get_random_color(info.arg.child, 0.5);
         let bg_color = format!("{};0.5:{}", color1, color2);
         attribs
             .set("shape", "diamond")
@@ -390,7 +390,7 @@ fn make_node(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> GraphvizN
             ..
         } => attribs.append_label(format!(
             "(bound @ {}, calc: {})",
-            abstraction.index, calculated_index
+            abstraction.child, calculated_index
         )),
     }
 

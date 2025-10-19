@@ -20,7 +20,7 @@ impl FlatRoot {
         FlatRoot {
             backing: vec![],
             root: DebruijnEdge {
-                index: 0,
+                child: 0,
                 adjust: None,
             },
         }
@@ -37,7 +37,7 @@ impl FlatRoot {
 
     pub fn is_bnf(&self) -> bool {
         let result = self.preorder_walk(|root, ctx| {
-            if RedexMut::is_redex(root, ctx.term.term) {
+            if RedexMut::is_redex(root, ctx.term.child) {
                 ControlFlow::Break(false)
             } else {
                 ControlFlow::Continue(())
@@ -83,7 +83,7 @@ impl FlatRoot {
                 let expected = compute_usage_flat(root, ctx);
                 let actual = abs.usage;
                 if actual != expected {
-                    return ControlFlow::Break((ctx.term.term, actual, expected));
+                    return ControlFlow::Break((ctx.term.child, actual, expected));
                 }
             };
             ControlFlow::Continue(())
@@ -94,7 +94,7 @@ impl FlatRoot {
         }
     }
 
-    fn get_abs(&self, term: DebruijnEdge) -> Abstraction {
+    fn get_abs(&self, term: BackingIndex) -> Abstraction {
         match self[term] {
             DebruijnNode::Abstraction(abs) => abs,
             _ => panic!(
@@ -104,16 +104,7 @@ impl FlatRoot {
         }
     }
 
-    fn get_app2(&self, term: BackingIndex) -> Application {
-        match self[term] {
-            DebruijnNode::Application(app) => app,
-            _ => panic!(
-                "Expected abstraction for term @ {term}, got {:?}",
-                self[term]
-            ),
-        }
-    }
-    fn get_app(&self, term: DebruijnEdge) -> Application {
+    fn get_app(&self, term: BackingIndex) -> Application {
         match self[term] {
             DebruijnNode::Application(app) => app,
             _ => panic!(
@@ -162,27 +153,27 @@ impl Index<DebruijnEdge> for FlatRoot {
     type Output = DebruijnNode;
 
     fn index(&self, index: DebruijnEdge) -> &Self::Output {
-        &self[index.index]
+        &self[index.child]
     }
 }
 
 impl IndexMut<DebruijnEdge> for FlatRoot {
     fn index_mut(&mut self, index: DebruijnEdge) -> &mut Self::Output {
-        &mut self[index.index]
+        &mut self[index.child]
     }
 }
 
-impl Index<TermWithParent> for FlatRoot {
+impl Index<DoubleEndedEdge> for FlatRoot {
     type Output = DebruijnNode;
 
-    fn index(&self, index: TermWithParent) -> &Self::Output {
-        &self[index.term]
+    fn index(&self, index: DoubleEndedEdge) -> &Self::Output {
+        &self[index.child]
     }
 }
 
-impl IndexMut<TermWithParent> for FlatRoot {
-    fn index_mut(&mut self, index: TermWithParent) -> &mut Self::Output {
-        &mut self[index.term]
+impl IndexMut<DoubleEndedEdge> for FlatRoot {
+    fn index_mut(&mut self, index: DoubleEndedEdge) -> &mut Self::Output {
+        &mut self[index.child]
     }
 }
 
@@ -309,23 +300,32 @@ impl DebruijnIndex {
 
 // The number of times a variable is used in an abstraction.
 pub type Usage = usize;
+/// A pointer to a given DebruijnNode within a FlatRoot
 pub type BackingIndex = usize;
 pub type Adjustment = Option<isize>;
 
-/// A pointer to a given DebruijnNode within a FlatRoot
+/// An edge in the debruijn tree. This specific consists of
+/// - The child node
+/// - The adjustment, which is attached to the edge itself
+/// ```
+///   | adjust
+///   V
+/// child
+/// ```
+/// It does not contain the parent index, use EdgeWithParent for that.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DebruijnEdge {
     /// An index into the backing vector of a FlatRoot.
-    pub index: BackingIndex,
+    pub child: BackingIndex,
     /// An "adjustment" value. All DebruijnNode::Index nodes are implictly increased or decreased by
     /// this amount. Note that this is cumulative.
     pub adjust: Adjustment,
 }
 impl DebruijnEdge {
     /// Create a new TermIndex with adjustment zero.
-    pub fn new(index: BackingIndex) -> Self {
+    pub fn new(child: BackingIndex) -> Self {
         Self {
-            index,
+            child,
             adjust: None,
         }
     }
@@ -334,9 +334,9 @@ impl DebruijnEdge {
 impl Display for DebruijnEdge {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         if let Some(adjust) = self.adjust {
-            write!(f, "{} (adjust={})", self.index, adjust)
+            write!(f, "{} (adjust={})", self.child, adjust)
         } else {
-            write!(f, "{}", self.index)
+            write!(f, "{}", self.child)
         }
     }
 }
@@ -344,63 +344,50 @@ impl Display for DebruijnEdge {
 impl From<BackingIndex> for DebruijnEdge {
     fn from(index: BackingIndex) -> Self {
         DebruijnEdge {
-            index,
+            child: index,
             adjust: None,
         }
     }
 }
 
+/// An edge in the Debruijn tree, containing:
+/// - The parent node (if there is one. for the root, there is no parent)
+/// - The type of parent-edge this edge is (ie: is this an edge from an abstraction to body,
+/// from application to arg, application to func, or into-root)
+/// It does not contain the child edge
+/// ```
+/// parent (if present)
+///    | edge type
+///    V
+/// ```
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum EdgeKind {
+pub enum EdgeWithParent {
+    /// The "edge" has no parent, and the child here is the root of the tree
     IntoRoot,
-    AbsToBody,
-    AppToArg,
-    AppToFunc,
+    /// The edge is an abstraction to body edge, and the BackingIndex here is the index for the abstraction
+    AbsToBody(BackingIndex),
+    /// The edge is an application to function edge, and the BackingIndex here is the index for the application
+    AppToFunc(BackingIndex),
+    /// The edge is an application to argument edge, and the BackingIndex here is the index for the application
+    AppToArg(BackingIndex),
 }
 
+/// Struct containing an edge along with the parent and child
+/// parent      <- edge_w_parent backing index (if present)
+///   | adjust
+/// child      
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct TermWithParent {
-    pub edge_kind: EdgeKind,
-    pub term: BackingIndex,
-    pub parent: Option<BackingIndex>,
+pub struct DoubleEndedEdge {
+    pub edge_w_parent: EdgeWithParent,
+    pub child: BackingIndex,
     pub adjust: Adjustment,
 }
-impl TermWithParent {
-    pub fn root(root: &FlatRoot) -> TermWithParent {
-        TermWithParent {
-            edge_kind: EdgeKind::IntoRoot,
-            term: root.root.index,
-            parent: None,
+impl DoubleEndedEdge {
+    pub fn root(root: &FlatRoot) -> DoubleEndedEdge {
+        DoubleEndedEdge {
+            edge_w_parent: EdgeWithParent::IntoRoot,
+            child: root.root.child,
             adjust: None,
-        }
-    }
-
-    pub fn as_parent(&self) -> Option<Parent> {
-        match (self.parent, self.edge_kind) {
-            (None, EdgeKind::IntoRoot) => None,
-            (Some(index), EdgeKind::AbsToBody) => Some(Parent::Body(DebruijnEdge {
-                index,
-                adjust: self.adjust,
-            })),
-            (Some(index), EdgeKind::AppToArg) => Some(Parent::Arg(DebruijnEdge {
-                index,
-                adjust: self.adjust,
-            })),
-            (Some(index), EdgeKind::AppToFunc) => Some(Parent::Func(DebruijnEdge {
-                index,
-                adjust: self.adjust,
-            })),
-            _ => unreachable!(),
-        }
-    }
-
-    pub fn parent_term(&self) -> Option<DebruijnEdge> {
-        match self.parent {
-            Some(parent) => Some(DebruijnEdge {
-                index: parent,
-                adjust: self.adjust,
-            }),
-            None => None,
         }
     }
 }
@@ -417,12 +404,11 @@ pub struct Abstraction {
 }
 
 impl Abstraction {
-    pub fn body(&self, abs_index: BackingIndex) -> TermWithParent {
-        TermWithParent {
-            term: self.body.index,
-            parent: Some(abs_index),
+    pub fn body(&self, abs_index: BackingIndex) -> DoubleEndedEdge {
+        DoubleEndedEdge {
+            child: self.body.child,
             adjust: self.body.adjust,
-            edge_kind: EdgeKind::AbsToBody,
+            edge_w_parent: EdgeWithParent::AbsToBody(abs_index),
         }
     }
 }
@@ -434,21 +420,19 @@ pub struct Application {
 }
 
 impl Application {
-    pub fn func(&self, app_index: BackingIndex) -> TermWithParent {
-        TermWithParent {
-            term: self.func.index,
-            parent: Some(app_index),
+    pub fn func(&self, app_index: BackingIndex) -> DoubleEndedEdge {
+        DoubleEndedEdge {
+            child: self.func.child,
             adjust: self.func.adjust,
-            edge_kind: EdgeKind::AppToFunc,
+            edge_w_parent: EdgeWithParent::AppToFunc(app_index),
         }
     }
 
-    pub fn arg(&self, app_index: BackingIndex) -> TermWithParent {
-        TermWithParent {
-            term: self.arg.index,
-            parent: Some(app_index),
+    pub fn arg(&self, app_index: BackingIndex) -> DoubleEndedEdge {
+        DoubleEndedEdge {
+            child: self.arg.child,
             adjust: self.arg.adjust,
-            edge_kind: EdgeKind::AppToArg,
+            edge_w_parent: EdgeWithParent::AppToArg(app_index),
         }
     }
 }
@@ -495,22 +479,6 @@ impl std::fmt::Debug for DebruijnNode {
     }
 }
 
-/// Represents the parent of a given DebruijnNode. The TermIndex in each variant points to the parent
-/// node (and not the child node). In methods which take Option<Parent>, generally None indicates that
-/// a term is the root of the lambda term and therefore has no parent.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum Parent {
-    /// Indicates that the parent is an Abstraction and the child is pointed to
-    /// by the parent's `body` field.
-    Body(DebruijnEdge),
-    /// Indicates that the parent is an Application and the child is pointed to
-    /// by the parent's `func` field.
-    Func(DebruijnEdge),
-    /// Indicates that the parent is an Application and the child is pointed to
-    /// by the parent's `arg` field.
-    Arg(DebruijnEdge),
-}
-
 #[derive(Debug, PartialEq, Eq, Clone, Copy)]
 pub enum ParentChainEdge {
     ToRoot { adjust: Adjustment },
@@ -519,6 +487,16 @@ pub enum ParentChainEdge {
 }
 
 impl ParentChainEdge {
+    fn from(edge: DoubleEndedEdge) -> ParentChainEdge {
+        let adjust = edge.adjust;
+        match edge.edge_w_parent {
+            EdgeWithParent::IntoRoot => ParentChainEdge::ToRoot { adjust },
+            EdgeWithParent::AbsToBody(abs) => ParentChainEdge::AbsToBody { abs, adjust },
+            EdgeWithParent::AppToArg(app) => ParentChainEdge::AppToTerm { app, adjust },
+            EdgeWithParent::AppToFunc(app) => ParentChainEdge::AppToTerm { app, adjust },
+        }
+    }
+
     pub fn adjust(&self) -> Adjustment {
         match *self {
             ParentChainEdge::ToRoot { adjust, .. } => adjust,
@@ -527,28 +505,11 @@ impl ParentChainEdge {
         }
     }
 
-    fn from(parent: Parent) -> ParentChainEdge {
-        match parent {
-            Parent::Body(parent) => ParentChainEdge::AbsToBody {
-                abs: parent.index,
-                adjust: parent.adjust,
-            },
-            Parent::Func(parent) => ParentChainEdge::AppToTerm {
-                app: parent.index,
-                adjust: parent.adjust,
-            },
-            Parent::Arg(parent) => ParentChainEdge::AppToTerm {
-                app: parent.index,
-                adjust: parent.adjust,
-            },
-        }
-    }
-
     pub fn parent(&self) -> Option<DebruijnEdge> {
         match *self {
             ParentChainEdge::ToRoot { .. } => None,
-            ParentChainEdge::AbsToBody { abs, adjust } => Some(DebruijnEdge { index: abs, adjust }),
-            ParentChainEdge::AppToTerm { app, adjust } => Some(DebruijnEdge { index: app, adjust }),
+            ParentChainEdge::AbsToBody { abs, adjust } => Some(DebruijnEdge { child: abs, adjust }),
+            ParentChainEdge::AppToTerm { app, adjust } => Some(DebruijnEdge { child: app, adjust }),
         }
     }
 }
@@ -570,7 +531,7 @@ impl ParentChain {
             }],
         }
     }
-    pub fn push(&mut self, parent: Parent) {
+    pub fn push(&mut self, parent: DoubleEndedEdge) {
         let edge = ParentChainEdge::from(parent);
 
         if matches!(edge, ParentChainEdge::AbsToBody { .. }) {
@@ -578,7 +539,7 @@ impl ParentChain {
         }
         self.full_chain.push(edge);
     }
-    pub fn pop(&mut self, parent: Parent) {
+    pub fn pop(&mut self, parent: DoubleEndedEdge) {
         let edge = ParentChainEdge::from(parent);
         if matches!(edge, ParentChainEdge::AbsToBody { .. }) {
             self.abstractions.pop();
@@ -623,11 +584,11 @@ pub struct RedexMut {
     parent_chain: ParentChain,
     // Application term for the redex. If the parent for this is none,
     // then the Redex is actually the root (and therefore is pointed to by FlatRoot.root)
-    pub app: TermWithParent,
+    pub app: DoubleEndedEdge,
     // The Abstraction containing the body. This must be an Abstraction
     pub abs: DebruijnEdge,
     // The body of the Abstraction. This must be pointed to by `abs`
-    body: TermWithParent,
+    body: DoubleEndedEdge,
     // The argument of the Application. This must be pointed to by `app.arg`
     pub arg: DebruijnEdge,
     // The usage of the `body`. Provided for convinence
@@ -649,7 +610,7 @@ impl RedexMut {
         match root[ctx.term] {
             DebruijnNode::Application(app) => match root[app.func] {
                 DebruijnNode::Abstraction(abs) => {
-                    let body = abs.body(app.func.index);
+                    let body = abs.body(app.func.child);
                     let redex = RedexMut {
                         app: ctx.term,
                         abs: app.func,
@@ -666,21 +627,19 @@ impl RedexMut {
         }
     }
 
-    fn arg(&self) -> TermWithParent {
-        TermWithParent {
-            term: self.arg.index,
-            parent: Some(self.app.term),
+    fn arg(&self) -> DoubleEndedEdge {
+        DoubleEndedEdge {
+            child: self.arg.child,
             adjust: self.app.adjust,
-            edge_kind: EdgeKind::AppToArg,
+            edge_w_parent: EdgeWithParent::AppToArg(self.app.child),
         }
     }
 
-    fn abs(&self) -> TermWithParent {
-        TermWithParent {
-            term: self.abs.index,
-            parent: Some(self.app.term),
+    fn abs(&self) -> DoubleEndedEdge {
+        DoubleEndedEdge {
+            child: self.abs.child,
             adjust: self.app.adjust,
-            edge_kind: EdgeKind::AppToFunc,
+            edge_w_parent: EdgeWithParent::AppToFunc(self.app.child),
         }
     }
 
@@ -743,56 +702,54 @@ pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
 
     // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
-    let app_parent_edge = redex.app.as_parent();
-    repoint_node(root, app_parent_edge, body);
+    repoint_node(root, redex.app.edge_w_parent, body);
     // Now that parent points to body, we need to fix up the parent -> body adjustment value
     // This is because it's possible for the app -> abs edge to have a subterm adjustment value
 
-    let existing_adjust = get_adjustment(root, app_parent_edge);
-    let app_abs_adjust = root.get_app2(redex.app.term).func.adjust;
+    let existing_adjust = get_adjustment(root, redex.app.edge_w_parent);
+    let app_abs_adjust = root.get_app(redex.app.child).func.adjust;
     let new_adjustment = add(existing_adjust, app_abs_adjust);
-    set_adjustment(root, redex.app.as_parent(), new_adjustment);
+    set_adjustment(root, redex.app.edge_w_parent, new_adjustment);
     // TODO: Should the parent -> app and abs -> body edges also be included here?
 }
 
-fn get_adjustment(root: &FlatRoot, parent: Option<Parent>) -> Adjustment {
+fn get_adjustment(root: &FlatRoot, parent: EdgeWithParent) -> Adjustment {
     match parent {
-        Some(Parent::Body(parent)) => {
+        EdgeWithParent::AbsToBody(parent) => {
             let abs = root.get_abs(parent);
             abs.body.adjust
         }
-        Some(Parent::Func(parent)) => {
+        EdgeWithParent::AppToFunc(parent) => {
             let app = root.get_app(parent);
             app.func.adjust
         }
-        Some(Parent::Arg(parent)) => {
+        EdgeWithParent::AppToArg(parent) => {
             let app = root.get_app(parent);
             app.arg.adjust
         }
         // Root
-        None => root.root.adjust,
+        EdgeWithParent::IntoRoot => root.root.adjust,
     }
 }
 
-fn set_adjustment(root: &mut FlatRoot, parent: Option<Parent>, new_adjustment: Adjustment) {
+fn set_adjustment(root: &mut FlatRoot, parent: EdgeWithParent, new_adjustment: Adjustment) {
     match parent {
-        Some(Parent::Body(parent)) => {
+        EdgeWithParent::AbsToBody(parent) => {
             let mut abs = root.get_abs(parent);
             abs.body.adjust = new_adjustment;
             root[parent] = DebruijnNode::Abstraction(abs);
         }
-        Some(Parent::Func(parent)) => {
+        EdgeWithParent::AppToFunc(parent) => {
             let mut app = root.get_app(parent);
             app.func.adjust = new_adjustment;
             root[parent] = DebruijnNode::Application(app);
         }
-        Some(Parent::Arg(parent)) => {
+        EdgeWithParent::AppToArg(parent) => {
             let mut app = root.get_app(parent);
             app.arg.adjust = new_adjustment;
             root[parent] = DebruijnNode::Application(app);
         }
-        // Root
-        None => {
+        EdgeWithParent::IntoRoot => {
             root.root.adjust = new_adjustment;
         }
     }
@@ -826,7 +783,7 @@ fn update_parent_chain_usage(
         // Unwrap is safe here because all of the values in the ctx.chain.abstractions iterator
         // are AbsToBody values.
         let parent = edge.parent().unwrap();
-        let abs = root.get_abs(parent);
+        let abs = root.get_abs(parent.child);
 
         let usage_of_parent_in_arg = usages_of_page_in_arg[depth];
         let usage_delta: isize = (body_usage as isize - 1) * usage_of_parent_in_arg as isize;
@@ -896,25 +853,35 @@ fn get_usage_by_depth(root: &FlatRoot, ctx: &mut ActionCtx) -> Vec<Usage> {
 /// Repoint the term at `child` so that it is the child of `parent`. This does not affect the
 /// existing parent (which means that the child should either be an orphan--eg: has no existing parent
 /// or is root).
-/// If `parent` is none, then the child is made the root node of `root`.
-/// This does NOT recompute the usage of the parent if the parent is an abstraction.
-/// MEMORY: Child becomes garbage after repointing.
-fn repoint_node(root: &mut FlatRoot, parent: Option<Parent>, child: DebruijnEdge) {
+/// Example
+///
+///     parent   <- parent               old parent
+///       |      <- parent      child ->     |
+///  old child                  child ->   new child
+///
+/// This will become:
+///
+/// parent                 old parent <- garbage
+///   |
+/// child                  old child <- garbage
+///
+/// MEMORY: Old child becomes garbage after repointing.
+fn repoint_node(root: &mut FlatRoot, parent: EdgeWithParent, child: DebruijnEdge) {
     match parent {
-        Some(Parent::Body(parent)) => {
+        EdgeWithParent::AbsToBody(parent) => {
             let abs = root.get_abs(parent);
             root[parent] = DebruijnNode::abs(child, abs.usage)
         }
-        Some(Parent::Func(parent)) => {
+        EdgeWithParent::AppToFunc(parent) => {
             let app = root.get_app(parent);
             root[parent] = DebruijnNode::app(child, app.arg);
         }
-        Some(Parent::Arg(parent)) => {
+        EdgeWithParent::AppToArg(parent) => {
             let app = root.get_app(parent);
             root[parent] = DebruijnNode::app(app.func, child)
         }
         // Root
-        None => {
+        EdgeWithParent::IntoRoot => {
             root.root = child;
         }
     }
@@ -951,7 +918,7 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &mut RedexMut) -> Debr
         // (Since the argument is not used, the entire arg subtree is garbage now.)
         // Fix up the indicies in it to account for the fact that we are still dropping out the abstraction that the body is in.
         down_one(root, &mut redex.func_ctx());
-        let abs = root.get_abs(redex.abs);
+        let abs = root.get_abs(redex.abs.child);
         abs.body
         // DebruijnEdge {
         //     index: body,
@@ -967,7 +934,7 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &mut RedexMut) -> Debr
 
         // The body of abs may get repointed if the redex body consists of a single leaf node that gets substituted.
         // Hence, we need to check for this and get the actually new body.
-        root.get_abs(redex.abs).body
+        root.get_abs(redex.abs.child).body
     }
 }
 
@@ -1003,7 +970,7 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
                 };
                 // Point parent to the newly created subtree
                 // TODO: Does adjustment need to be inherited here?
-                repoint_node(root, term.as_parent(), new_arg);
+                repoint_node(root, term.edge_w_parent, new_arg);
                 substitution_i += 1;
             } else if calculated_index > depth_relative_to_arg {
                 // Variable is a free variable, but is NOT getting substituted.
@@ -1078,7 +1045,7 @@ fn down_one(root: &mut FlatRoot, ctx: &mut ActionCtx) {
 fn shift_cutoff(root: &mut FlatRoot, ctx: &mut ActionCtx, up_by: isize, depth: DebruijnDepth) {
     let init_depth = ctx.chain.debruijn_depth();
     root.preorder_walk_at_mut(ctx, |root, ctx| {
-        let term = ctx.term.term;
+        let term = ctx.term.child;
         let chain = &ctx.chain;
         if let DebruijnNode::Index(term_index) = root[term] {
             let depth_relative_to_term = chain.debruijn_depth() + depth - init_depth;
@@ -1111,7 +1078,7 @@ mod test {
 
     fn redex_from_root(root: &FlatRoot) -> RedexMut {
         let mut ctx = ActionCtx {
-            term: TermWithParent::root(root),
+            term: DoubleEndedEdge::root(root),
             chain: &mut ParentChain::new(root),
         };
         RedexMut::try_get(root, &mut ctx).unwrap()
