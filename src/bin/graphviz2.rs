@@ -8,7 +8,8 @@ use clap::Parser;
 use lambda_beaver::{
     debruijn::Debruijn,
     debruijn_flat::{
-        DebruijnEdge, DebruijnIndex, DebruijnNode, FlatRoot, RedexMut, Usage, compute_usage_flat,
+        BackingIndex, DebruijnEdge, DebruijnIndex, DebruijnNode, FlatRoot, RedexMut, Usage,
+        compute_usage_flat,
     },
     parse,
     reduce::Reducer,
@@ -22,13 +23,11 @@ enum AbstractionBinding {
         calculated_index: usize,
     },
     FreeVariable {
-        index: DebruijnIndex,
         calculated_index: usize,
     },
     BoundTo {
-        index: DebruijnIndex,
         calculated_index: usize,
-        abstraction: DebruijnEdge,
+        abstraction: BackingIndex,
     },
 }
 
@@ -83,9 +82,8 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
                 if calculated_index <= depth {
                     match chain.abstractions.get(depth - calculated_index) {
                         Some(&abstraction) => AbstractionBinding::BoundTo {
-                            index,
                             calculated_index,
-                            abstraction: abstraction.parent().unwrap(),
+                            abstraction: abstraction.parent_index().unwrap(),
                         },
                         None => AbstractionBinding::BindingMissing {
                             index,
@@ -93,10 +91,7 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
                         },
                     }
                 } else {
-                    AbstractionBinding::FreeVariable {
-                        index,
-                        calculated_index,
-                    }
+                    AbstractionBinding::FreeVariable { calculated_index }
                 }
             }
             _ => AbstractionBinding::NotLeaf,
@@ -288,14 +283,14 @@ fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<Graph
             if let AbstractionBinding::BoundTo { abstraction, .. } = node_info.abs_binding
                 && !args.no_color_abs
             {
-                let color = get_random_color(abstraction.child, 1.0);
+                let color = get_random_color(abstraction, 1.0);
                 edge_attribs
                     .set("color", color)
                     .set("style", "dashed")
                     .set("constraint", "false");
                 edges.push(GraphvizEdge::new(
                     node_info.index,
-                    abstraction.child,
+                    abstraction,
                     &edge_attribs,
                 ));
             }
@@ -390,7 +385,7 @@ fn make_node(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> GraphvizN
             ..
         } => attribs.append_label(format!(
             "(bound @ {}, calc: {})",
-            abstraction.child, calculated_index
+            abstraction, calculated_index
         )),
     }
 

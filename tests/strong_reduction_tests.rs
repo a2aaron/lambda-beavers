@@ -21,6 +21,15 @@ macro_rules! make_test {
             assert_test(test, n);
         }
     };
+
+    ($nth:literal, $invoke:ident) => {
+        #[test]
+        fn ${concat(strong_reduction_test_, $nth)}() {
+            let n: usize = $nth.parse().unwrap();
+            let test = TESTS.split('\n').nth(n).unwrap();
+            $invoke(test, n);
+        }
+    };
 }
 
 macro_rules! make_test_batch {
@@ -109,7 +118,17 @@ fn assert_test(test: &str, test_i: usize) {
 make_test_batch!("0", "3465", assert_round_trip);
 make_test_batch!("0", "480", assert_usage);
 make_test_batch!("480", "490", assert_usage);
-make_test_batch!("490", "500", assert_usage);
+make_test!("490", assert_usage);
+make_test!("491", assert_usage);
+make_test!("492", assert_usage);
+make_test!("493", assert_usage);
+make_test!("494", assert_usage);
+make_test!("495", assert_usage);
+make_test!("496", assert_usage);
+make_test!("497", assert_usage);
+make_test!("498", assert_usage);
+make_test!("499", assert_usage);
+make_test!("500", assert_usage);
 
 make_test!("0");
 make_test!("1");

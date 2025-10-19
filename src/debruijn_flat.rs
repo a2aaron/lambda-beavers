@@ -371,6 +371,16 @@ pub enum EdgeWithParent {
     /// The edge is an application to argument edge, and the BackingIndex here is the index for the application
     AppToArg(BackingIndex),
 }
+impl EdgeWithParent {
+    fn backing_index(&self) -> Option<BackingIndex> {
+        match self {
+            EdgeWithParent::IntoRoot => None,
+            EdgeWithParent::AbsToBody(abs) => Some(*abs),
+            EdgeWithParent::AppToFunc(app) => Some(*app),
+            EdgeWithParent::AppToArg(app) => Some(*app),
+        }
+    }
+}
 
 /// Struct containing an edge along with the parent and child
 /// parent      <- edge_w_parent backing index (if present)
@@ -389,6 +399,10 @@ impl DoubleEndedEdge {
             child: root.root.child,
             adjust: None,
         }
+    }
+
+    pub fn parent_index(&self) -> Option<BackingIndex> {
+        self.edge_w_parent.backing_index()
     }
 }
 
@@ -479,69 +493,29 @@ impl std::fmt::Debug for DebruijnNode {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone, Copy)]
-pub enum ParentChainEdge {
-    ToRoot { adjust: Adjustment },
-    AbsToBody { abs: usize, adjust: Adjustment },
-    AppToTerm { app: usize, adjust: Adjustment },
-}
-
-impl ParentChainEdge {
-    fn from(edge: DoubleEndedEdge) -> ParentChainEdge {
-        let adjust = edge.adjust;
-        match edge.edge_w_parent {
-            EdgeWithParent::IntoRoot => ParentChainEdge::ToRoot { adjust },
-            EdgeWithParent::AbsToBody(abs) => ParentChainEdge::AbsToBody { abs, adjust },
-            EdgeWithParent::AppToArg(app) => ParentChainEdge::AppToTerm { app, adjust },
-            EdgeWithParent::AppToFunc(app) => ParentChainEdge::AppToTerm { app, adjust },
-        }
-    }
-
-    pub fn adjust(&self) -> Adjustment {
-        match *self {
-            ParentChainEdge::ToRoot { adjust, .. } => adjust,
-            ParentChainEdge::AbsToBody { adjust, .. } => adjust,
-            ParentChainEdge::AppToTerm { adjust, .. } => adjust,
-        }
-    }
-
-    pub fn parent(&self) -> Option<DebruijnEdge> {
-        match *self {
-            ParentChainEdge::ToRoot { .. } => None,
-            ParentChainEdge::AbsToBody { abs, adjust } => Some(DebruijnEdge { child: abs, adjust }),
-            ParentChainEdge::AppToTerm { app, adjust } => Some(DebruijnEdge { child: app, adjust }),
-        }
-    }
-}
-
-// The sequence of outer abstractions a term is contained in.
-// Every element of this vector is an abstraction.
+// The path of edges from the root to a node
 #[derive(Debug, PartialEq, Eq, Clone, Default)]
 pub struct ParentChain {
-    pub abstractions: Vec<ParentChainEdge>,
-    full_chain: Vec<ParentChainEdge>,
+    // Every edge in this vector is a abs -> body edge
+    pub abstractions: Vec<DoubleEndedEdge>,
+    full_chain: Vec<DoubleEndedEdge>,
 }
 
 impl ParentChain {
     pub fn new(root: &FlatRoot) -> ParentChain {
         ParentChain {
             abstractions: vec![],
-            full_chain: vec![ParentChainEdge::ToRoot {
-                adjust: root.root.adjust,
-            }],
+            full_chain: vec![DoubleEndedEdge::root(root)],
         }
     }
-    pub fn push(&mut self, parent: DoubleEndedEdge) {
-        let edge = ParentChainEdge::from(parent);
-
-        if matches!(edge, ParentChainEdge::AbsToBody { .. }) {
+    pub fn push(&mut self, edge: DoubleEndedEdge) {
+        if matches!(edge.edge_w_parent, EdgeWithParent::AbsToBody(_)) {
             self.abstractions.push(edge);
         }
         self.full_chain.push(edge);
     }
-    pub fn pop(&mut self, parent: DoubleEndedEdge) {
-        let edge = ParentChainEdge::from(parent);
-        if matches!(edge, ParentChainEdge::AbsToBody { .. }) {
+    pub fn pop(&mut self, edge: DoubleEndedEdge) {
+        if matches!(edge.edge_w_parent, EdgeWithParent::AbsToBody(_)) {
             self.abstractions.pop();
         }
         self.full_chain.pop();
@@ -564,13 +538,13 @@ impl ParentChain {
             let threshold = self.debruijn_depth() - current_depth;
             let is_free = threshold < index;
 
-            if let Some(adjust) = edge.adjust()
+            if let Some(adjust) = edge.adjust
                 && is_free
             {
                 total_adjust += adjust;
             }
 
-            if matches!(edge, ParentChainEdge::AbsToBody { .. }) {
+            if matches!(edge.edge_w_parent, EdgeWithParent::AbsToBody(_)) {
                 current_depth += 1;
             }
         }
@@ -782,8 +756,8 @@ fn update_parent_chain_usage(
     for (depth, edge) in ctx.chain.abstractions.iter().enumerate() {
         // Unwrap is safe here because all of the values in the ctx.chain.abstractions iterator
         // are AbsToBody values.
-        let parent = edge.parent().unwrap();
-        let abs = root.get_abs(parent.child);
+        let parent = edge.parent_index().unwrap();
+        let abs = root.get_abs(parent);
 
         let usage_of_parent_in_arg = usages_of_page_in_arg[depth];
         let usage_delta: isize = (body_usage as isize - 1) * usage_of_parent_in_arg as isize;
