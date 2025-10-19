@@ -687,8 +687,8 @@ pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
     // TODO: Should the parent -> app and abs -> body edges also be included here?
 }
 
-fn set_adjustment(root: &mut FlatRoot, parent: EdgeWithParent, new_adjustment: Adjustment) {
-    match parent {
+fn set_adjustment(root: &mut FlatRoot, edge: EdgeWithParent, new_adjustment: Adjustment) {
+    match edge {
         EdgeWithParent::AbsToBody(parent) => {
             let mut abs = root.get_abs(parent);
             abs.body.adjust = new_adjustment;
