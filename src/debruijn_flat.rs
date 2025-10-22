@@ -404,6 +404,13 @@ impl DoubleEndedEdge {
     pub fn parent_index(&self) -> Option<BackingIndex> {
         self.edge_w_parent.backing_index()
     }
+
+    fn child_edge(&self) -> DebruijnEdge {
+        DebruijnEdge {
+            child: self.child,
+            adjust: self.adjust,
+        }
+    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
@@ -558,13 +565,13 @@ pub struct RedexMut {
     parent_chain: ParentChain,
     // Application term for the redex. If the parent for this is none,
     // then the Redex is actually the root (and therefore is pointed to by FlatRoot.root)
-    pub app: DoubleEndedEdge,
+    pub parent_to_app: DoubleEndedEdge,
     // The Abstraction containing the body. This must be an Abstraction
-    pub abs: DebruijnEdge,
+    pub app_to_abs: DebruijnEdge,
     // The body of the Abstraction. This must be pointed to by `abs`
-    body: DoubleEndedEdge,
+    abs_to_body: DoubleEndedEdge,
     // The argument of the Application. This must be pointed to by `app.arg`
-    pub arg: DebruijnEdge,
+    pub app_to_arg: DebruijnEdge,
     // The usage of the `body`. Provided for convinence
     body_usage: Usage,
 }
@@ -586,10 +593,10 @@ impl RedexMut {
                 DebruijnNode::Abstraction(abs) => {
                     let body = abs.body(app.func.child);
                     let redex = RedexMut {
-                        app: ctx.term,
-                        abs: app.func,
-                        body,
-                        arg: app.arg,
+                        parent_to_app: ctx.term,
+                        app_to_abs: app.func,
+                        abs_to_body: body,
+                        app_to_arg: app.arg,
                         body_usage: abs.usage,
                         parent_chain: ctx.chain.clone(),
                     };
@@ -603,17 +610,17 @@ impl RedexMut {
 
     fn arg(&self) -> DoubleEndedEdge {
         DoubleEndedEdge {
-            child: self.arg.child,
-            adjust: self.app.adjust,
-            edge_w_parent: EdgeWithParent::AppToArg(self.app.child),
+            child: self.app_to_arg.child,
+            adjust: self.parent_to_app.adjust,
+            edge_w_parent: EdgeWithParent::AppToArg(self.parent_to_app.child),
         }
     }
 
     fn abs(&self) -> DoubleEndedEdge {
         DoubleEndedEdge {
-            child: self.abs.child,
-            adjust: self.app.adjust,
-            edge_w_parent: EdgeWithParent::AppToFunc(self.app.child),
+            child: self.app_to_abs.child,
+            adjust: self.parent_to_app.adjust,
+            edge_w_parent: EdgeWithParent::AppToFunc(self.parent_to_app.child),
         }
     }
 
@@ -676,14 +683,14 @@ pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
 
     // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
-    repoint_node(root, redex.app.edge_w_parent, body);
+    repoint_node(root, redex.parent_to_app.edge_w_parent, body);
     // Now that parent points to body, we need to fix up the parent -> body adjustment value
     // This is because it's possible for the app -> abs edge to have a subterm adjustment value
 
-    let existing_adjust = redex.app.adjust;
-    let app_abs_adjust = root.get_app(redex.app.child).func.adjust;
+    let existing_adjust = redex.parent_to_app.adjust;
+    let app_abs_adjust = root.get_app(redex.parent_to_app.child).func.adjust;
     let new_adjustment = add(existing_adjust, app_abs_adjust);
-    set_adjustment(root, redex.app.edge_w_parent, new_adjustment);
+    set_adjustment(root, redex.parent_to_app.edge_w_parent, new_adjustment);
     // TODO: Should the parent -> app and abs -> body edges also be included here?
 }
 
@@ -873,8 +880,7 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &mut RedexMut) -> Debr
         // (Since the argument is not used, the entire arg subtree is garbage now.)
         // Fix up the indicies in it to account for the fact that we are still dropping out the abstraction that the body is in.
         down_one(root, &mut redex.func_ctx());
-        let abs = root.get_abs(redex.abs.child);
-        abs.body
+        redex.abs_to_body.child_edge()
         // DebruijnEdge {
         //     index: body,
         //     adjust: Some(-1),
@@ -889,7 +895,7 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &mut RedexMut) -> Debr
 
         // The body of abs may get repointed if the redex body consists of a single leaf node that gets substituted.
         // Hence, we need to check for this and get the actually new body.
-        root.get_abs(redex.abs.child).body
+        root.get_abs(redex.app_to_abs.child).body
     }
 }
 
@@ -899,7 +905,7 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
 
     let mut redex2 = redex.clone();
     let arg_ctx = &mut redex2.arg_ctx();
-    let redex_arg = redex.arg;
+    let redex_arg = redex.app_to_arg;
     let body_usage = redex.body_usage;
     root.preorder_walk_at_mut(&mut redex.func_ctx(), |root, ctx| {
         let term = ctx.term;

@@ -99,8 +99,8 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
 
         let redex_info = match RedexMut::try_get(root, ctx) {
             Some(redex) => Some(RedexInfo {
-                abs: redex.abs,
-                arg: redex.arg,
+                abs: redex.app_to_abs,
+                arg: redex.app_to_arg,
             }),
             None => None,
         };
