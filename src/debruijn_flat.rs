@@ -397,7 +397,7 @@ impl DoubleEndedEdge {
         DoubleEndedEdge {
             edge_w_parent: EdgeWithParent::IntoRoot,
             child: root.root.child,
-            adjust: None,
+            adjust: root.root.adjust,
         }
     }
 
