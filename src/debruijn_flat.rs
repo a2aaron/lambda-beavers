@@ -930,12 +930,6 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
                 // Point parent to the newly created subtree
                 repoint_node(root, term.edge_w_parent, new_arg);
                 substitution_i += 1;
-            } else if calculated_index > depth_relative_to_arg {
-                // Variable is a free variable, but is NOT getting substituted.
-                // Remember that the body of the term is getting dropped out of the abstraction
-                // Because of this, we need to reduce the term_index by one, since there's one
-                // less abstraction to jump over for the index.
-                root[term] = DebruijnNode::idx(calculated_index - 1);
             }
         }
     });
