@@ -900,6 +900,7 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
     let arg_ctx = &mut redex2.arg_ctx();
     let redex_arg = redex.app_to_arg;
     let body_usage = redex.body_usage;
+    let app_to_abs_adjustment = redex.app_to_abs.adjust;
     root.preorder_walk_at_mut(&mut redex.func_ctx(), |root, ctx| {
         let term = ctx.term;
         let chain = &ctx.chain;
@@ -909,21 +910,24 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
             let calculated_index = debruijn_index.get(chain);
             let is_substituting = calculated_index == depth_relative_to_arg;
             if is_substituting {
+                // Total adjustment from the app -> abs node. This is a negative value, so we need to 
+                // mulitply by -1 in order to know how many 'ghost abstractions' are actually present
+                // Note that depth_relative_to_arg is only tracking the number of *non-ghost* abstractions
+                // are present!
+                let adj_amount = (-app_to_abs_adjustment.unwrap_or(0)) as usize;
+                let up_by_amount =
+                adj_amount + depth_relative_to_arg;
+                println!("up_by = {up_by_amount}, adj_amount: {adj_amount}, depth_relative_to_arg: {depth_relative_to_arg}");
+                
                 let last_arg_allocation = substitution_i == body_usage - 1;
                 let new_arg = if last_arg_allocation {
                     // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
-                    // Bump up free variables by `depth`
-                    // Note that normally we would have fixed up the argument by one prior to
-                    // calling this method. However, we also fix down the entire body by one after
-                    // calling the method. Both of these fixups cancel out, so we still only just
-                    // fix up by `depth`
-                    up_by(root, arg_ctx, depth_relative_to_arg);
+                    up_by(root, arg_ctx, up_by_amount);
                     redex_arg
                 } else {
-                    clone_subtree_and_fix_up_fused(root, arg_ctx, depth_relative_to_arg - 1)
+                    clone_subtree_and_fix_up_fused(root, arg_ctx, up_by_amount)
                 };
                 // Point parent to the newly created subtree
-                // TODO: Does adjustment need to be inherited here?
                 repoint_node(root, term.edge_w_parent, new_arg);
                 substitution_i += 1;
             } else if calculated_index > depth_relative_to_arg {
