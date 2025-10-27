@@ -112,6 +112,7 @@ pub enum ParseError {
         err: ParseIntError,
         token: String,
     },
+    IntIsZeroError,
     Empty,
 }
 
@@ -155,6 +156,7 @@ impl std::fmt::Display for ParseError {
             ParseError::ParseIntError { err, token } => {
                 write!(f, "Couldn't parse {} as integer: {}", token, err)
             }
+            ParseError::IntIsZeroError => write!(f, "Integer must be non-zero"),
         }
     }
 }
@@ -195,6 +197,9 @@ fn parse_term_up_to_paren(tokens: &mut TokenStream) -> ParseResult<Debruijn> {
             }
             Token::Index(_index) => {
                 let index = tokens.consume_index().unwrap();
+                if index == 0 {
+                    return Err(ParseError::IntIsZeroError);
+                }
                 let term = debruijn::idx(index);
                 current_term = wrap(current_term, term);
             }
@@ -324,6 +329,11 @@ mod tests {
     #[test]
     fn parse_invalid_empty() {
         assert_invalid!("");
+    }
+
+    #[test]
+    fn parse_zero_is_invalid() {
+        assert_invalid!("λ 0");
     }
 
     #[test]
