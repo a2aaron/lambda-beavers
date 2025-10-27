@@ -272,6 +272,52 @@ mod test {
     }
 
     #[test]
+    fn from_fuzzer() {
+        let root = "λ (λ 1 λ 1) λ λ 3";
+        let root = Debruijn::from_str(root).unwrap();
+        let mut reducer = Reducer::new(&root);
+
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+    }
+
+    #[test]
+    fn from_fuzzer2() {
+        let root = "(λ 1 λ 3) λ 1";
+        let root = Debruijn::from_str(root).unwrap();
+        let mut reducer = Reducer::new(&root);
+
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+    }
+
+    #[test]
     fn parent_usage_simple_2() {
         let root = Debruijn::from_str("λ (λ λ 1) 100").unwrap();
         let mut reducer = Reducer::new(&root);

@@ -685,15 +685,17 @@ pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
     // leaf node that gets substituted--aka: the abstraction node looks like λ 1
     let mut new_body = substitute_and_shift_fused(root, &mut redex);
     // Adjust down by one.
-    let app_abs_adjust = root.get_app(redex.parent_to_app.child).func.adjust;
     // Add an adjustment of -1. This represents the effect of the redex abstraction drop out
     // (in other words, this is being logically applied to the abs -> body edge).
-    new_body.adjust = add(new_body.adjust, Some(-1));
+    let adjust = -1;
     // Because we are dissolving disolving the parent -> app -> abs -> body path into just
     // parent -> body, we need to add all of the adjustments that were on those edges.
-    // TODO: Should the parent -> app and abs -> body edges also be included here?
-    new_body.adjust = add(new_body.adjust, app_abs_adjust);
+    let parent_app_adjust = redex.parent_to_app.adjust.unwrap_or(0);
+    let app_abs_adjust = redex.app_to_abs.adjust.unwrap_or(0);
+    let abs_body_adjust = redex.abs_to_body.adjust.unwrap_or(0);
+    let adjust = adjust + parent_app_adjust + app_abs_adjust + abs_body_adjust;
 
+    new_body.adjust = Some(adjust);
     // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
     // The tree now looks like this
@@ -910,15 +912,13 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
             let calculated_index = debruijn_index.get(chain);
             let is_substituting = calculated_index == depth_relative_to_arg;
             if is_substituting {
-                // Total adjustment from the app -> abs node. This is a negative value, so we need to 
+                // Total adjustment from the app -> abs node. This is a negative value, so we need to
                 // mulitply by -1 in order to know how many 'ghost abstractions' are actually present
                 // Note that depth_relative_to_arg is only tracking the number of *non-ghost* abstractions
                 // are present!
                 let adj_amount = (-app_to_abs_adjustment.unwrap_or(0)) as usize;
-                let up_by_amount =
-                adj_amount + depth_relative_to_arg;
-                println!("up_by = {up_by_amount}, adj_amount: {adj_amount}, depth_relative_to_arg: {depth_relative_to_arg}");
-                
+                let up_by_amount = adj_amount + depth_relative_to_arg;
+
                 let last_arg_allocation = substitution_i == body_usage - 1;
                 let new_arg = if last_arg_allocation {
                     // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
