@@ -386,7 +386,7 @@ impl EdgeWithParent {
 /// parent      <- edge_w_parent backing index (if present)
 ///   | adjust
 /// child      
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub struct DoubleEndedEdge {
     pub edge_w_parent: EdgeWithParent,
     pub child: BackingIndex,
@@ -410,6 +410,26 @@ impl DoubleEndedEdge {
             child: self.child,
             adjust: self.adjust,
         }
+    }
+}
+impl std::fmt::Debug for DoubleEndedEdge {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let edge_type = match self.edge_w_parent {
+            EdgeWithParent::IntoRoot => "into_root",
+            EdgeWithParent::AbsToBody(_) => "abs_to_body",
+            EdgeWithParent::AppToFunc(_) => "app_to_func",
+            EdgeWithParent::AppToArg(_) => "app_to_arg",
+        };
+        let child = self.child;
+        match self.edge_w_parent.backing_index() {
+            Some(parent) => write!(f, "{edge_type}: {parent} -> {child}")?,
+            None => write!(f, "{edge_type}: [root] -> {child}")?,
+        }
+
+        if let Some(adj) = self.adjust {
+            write!(f, ", adj = {adj}")?;
+        }
+        Ok(())
     }
 }
 
@@ -1004,7 +1024,11 @@ fn shift_cutoff(root: &mut FlatRoot, ctx: &mut ActionCtx, up_by: isize, depth: D
             // Recall that an index starts at 1, so if depth is set to 1, then this branch will always be taken.
             let is_free = term_index.get(chain) >= depth_relative_to_term;
             if is_free {
-                let new_index = term_index.get(chain).checked_add_signed(up_by).unwrap();
+                // Note that get_raw is used here because we want to adjust the index by the given amount
+                // (and we do not care about the calculated index for this purpose).
+                // for example, if the raw index is 3, and the calculated index is 1, and up_by is 2
+                // then we need the raw index to be 5, and the calculated index will then be 2
+                let new_index = term_index.get_raw().checked_add_signed(up_by).unwrap();
                 root[term] = DebruijnNode::idx(new_index);
             }
         };

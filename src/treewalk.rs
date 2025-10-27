@@ -17,6 +17,7 @@ use crate::debruijn_flat::{
 // turns out all of the subtree crawling algorithms actually never require an early exit.)
 // In particlar, this means that the Action and ActionMut closures should NOT mutate the ActionCtx
 // and should pretend that it is an &ActionCtx
+#[derive(Debug)]
 pub struct ActionCtx<'chain> {
     pub term: DoubleEndedEdge,
     pub chain: &'chain mut ParentChain,

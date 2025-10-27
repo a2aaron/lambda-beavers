@@ -461,8 +461,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         reducer.root
     };
 
-    println!("{root:#?}");
-
     let graph = to_graph(&root, &args);
     std::fs::write(args.output.clone(), graph.to_string())?;
     Ok(())
