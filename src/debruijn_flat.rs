@@ -288,9 +288,71 @@ pub struct DebruijnIndex(usize);
 
 impl DebruijnIndex {
     pub fn get(&self, chain: &ParentChain) -> usize {
-        let adjustment = chain.total_adjust(self.0);
-        let final_index = self.0.checked_add_signed(adjustment).unwrap();
-        final_index
+        // This gets the "normalized" value of the leaf node relative to the given chain
+        // Basically, we want to determine the actual lambda that this node binds to
+        // For example, in this tree:
+        // ----------> λ_1 ----------> 2, what does the 2 bind to?
+        //   adj=-1          adj=-1
+        // As it turns out, it should bind to the λ_1, and we would normalize this tree as λ 1
+        // How do we compute this?
+        // Each negative adjustment value is effectively turned into a number of "ghost" lambdas,
+        // which act as if they are in the tree for binding purposes, but are not actually present
+        // in the normalized tree. The above tree can be "ghost normalized" into the following:
+        // --> λ_g --> λ_1 --> λ_g --> 2
+        // Where each λ_g is a ghost lambda.
+        // From this, we do the binding as normal, so 2 ends up skipping over the first λ_g and
+        // then finally binding to λ_1
+
+        // Here's a few more examples:
+        // ------------------> λ_1 ----------> 2
+        //       adj=-2              adj=-1
+        // --> λ_g --> λ_g --> λ_1 --> λ_g --> 2
+        // (2 binds to λ_1, and the tree is equivalent to λ 1)
+
+        //        ------------------> λ_1 --> 4
+        //               adj=-2
+        // [λ_f1] --> λ_g --> λ_g --> λ_1 --> 4
+        // (2 binds to λ_f1)
+        // Note that λ_f1 is a "free" lambda. It does not actually exist in the
+        // tree, but unlike a ghost lambda, it is a valid target for a binding. The tree is
+        // equivalent to λ 2. Here's what the non-ghost normalized version of the tree looks like:
+        // [λ_f1] ------------------> λ_1 --> 2
+        // Note that it is not valid for a leaf node to bind to a ghost lambda--if this happens,
+        // then the tree is invalid and something terrible has happened.
+
+        // Effectively this means we have three lambda types:
+        // 1. Normal lambdas, which are in the tree and function as you expect
+        // 2. Ghost lambdas, which are not in the tree but act as if they are present
+        //    for binding purposes. Along a given edge with adj = -N, there are N ghost lambdas
+        //    They are not valid targets for binding.
+        // 3. Free lambdas, which are not in the tree because they are "above the root" and act as
+        //    if they are present for binding purposes. There are infinitely many free lambdas
+        //    that are above the root and they are all valid targets for binding.
+        let mut normal_lambdas = 0;
+        let mut remaining_index = self.get_raw();
+        for edge in chain.full_chain.iter().rev().cloned() {
+            let ghost_lambdas = -edge.adjust.unwrap_or(0) as usize;
+            if ghost_lambdas >= remaining_index {
+                panic!(
+                    "Expected {remaining_index} to be greater than {ghost_lambdas} in index: {}, chain: {chain:#?}",
+                    self.get_raw()
+                );
+            }
+            remaining_index -= ghost_lambdas;
+            assert!(remaining_index >= 1);
+
+            if matches!(edge.edge_w_parent, EdgeWithParent::AbsToBody(_)) {
+                normal_lambdas += 1;
+                remaining_index -= 1;
+            }
+
+            if remaining_index == 0 {
+                break;
+            }
+        }
+
+        let free_lambdas = remaining_index;
+        normal_lambdas + free_lambdas
     }
 
     pub fn get_raw(&self) -> usize {
@@ -550,32 +612,6 @@ impl ParentChain {
 
     pub fn debruijn_depth(&self) -> DebruijnDepth {
         self.abstractions.len()
-    }
-
-    fn total_adjust(&self, index: usize) -> isize {
-        // this effectively applies shift_cutoff on the spot
-        // each non-None adjustment value is equivalent to shift_cutoff of that amount, at the given
-        // depth (meaning we only apply the adjustment value if this index is bound with respect to
-        // the the given parent node)
-        let mut current_depth = 0;
-        let mut total_adjust = 0;
-        for edge in self.full_chain.iter().cloned() {
-            // indicies which are greater or equal to this value are considered free
-            // This means as we decend, the threshold decreases
-            let threshold = self.debruijn_depth() - current_depth;
-            let is_free = threshold < index;
-
-            if let Some(adjust) = edge.adjust
-                && is_free
-            {
-                total_adjust += adjust;
-            }
-
-            if matches!(edge.edge_w_parent, EdgeWithParent::AbsToBody(_)) {
-                current_depth += 1;
-            }
-        }
-        total_adjust
     }
 }
 
