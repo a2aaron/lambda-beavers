@@ -318,6 +318,10 @@ fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<Graph
             NORMAL_COLOR
         },
     );
+
+    if node_info.is_garbage {
+        edge_attribs.set("constraint", "false");
+    }
     match node {
         DebruijnNode::Index(_) => {
             if let AbstractionBinding::BoundTo { abstraction, .. } = node_info.abs_binding

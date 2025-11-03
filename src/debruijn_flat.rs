@@ -1033,10 +1033,13 @@ fn clone_subtree_and_fix_up_fused(
             ChildResults::Index(index) => {
                 let depth_relative_to_term = chain.debruijn_depth() + 1 - init_depth;
                 let is_free = index.get(chain) >= depth_relative_to_term;
+                // get_raw is used here for a similar reason that it is used in shift_cutoff
+                // (in that we are bumping up the value of the index by "up_by", so we need to
+                // ignore the effects of adjustment at the moment.)
                 let index = if is_free {
-                    index.get(chain) + up_by
+                    index.get_raw() + up_by
                 } else {
-                    index.get(chain)
+                    index.get_raw()
                 };
                 root.alloc(DebruijnNode::idx(index))
             }
