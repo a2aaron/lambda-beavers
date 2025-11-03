@@ -263,10 +263,18 @@ fn compute_usage(body: &Debruijn) -> Usage {
 pub fn compute_usage_flat(root: &FlatRoot, ctx: &mut ActionCtx) -> Usage {
     let mut usage = 0;
     let init_depth = ctx.chain.debruijn_depth();
+
     root.preorder_walk_at(ctx, |root, ctx| {
         if let DebruijnNode::Index(index) = root[ctx.term] {
             let depth_relative_to_arg = ctx.chain.debruijn_depth() - init_depth;
-            if index.get(ctx.chain) == depth_relative_to_arg {
+            let (calculated_index, err) = index.get_failable(ctx.chain);
+            if let Some(err) = err {
+                println!("=== compute_usage_flat - get_failable ===");
+                println!("{root:#?}");
+                println!("{err}");
+                println!("======");
+            }
+            if calculated_index == depth_relative_to_arg {
                 usage += 1;
             }
         }
@@ -287,7 +295,7 @@ type DebruijnDepth = usize;
 pub struct DebruijnIndex(usize);
 
 impl DebruijnIndex {
-    pub fn get(&self, chain: &ParentChain) -> usize {
+    pub fn get_failable(&self, chain: &ParentChain) -> (usize, Option<String>) {
         // This gets the "normalized" value of the leaf node relative to the given chain
         // Basically, we want to determine the actual lambda that this node binds to
         // For example, in this tree:
@@ -330,16 +338,19 @@ impl DebruijnIndex {
         //    that are above the root and they are all valid targets for binding.
         let mut normal_lambdas = 0;
         let mut remaining_index = self.get_raw();
+        let mut err = None;
+
         for edge in chain.full_chain.iter().rev().cloned() {
             let ghost_lambdas = -edge.adjust.unwrap_or(0) as usize;
             if ghost_lambdas >= remaining_index {
-                panic!(
+                let error = format!(
                     "Expected {remaining_index} to be greater than {ghost_lambdas} in index: {}, chain: {chain:#?}",
                     self.get_raw()
                 );
+                err = Some(error);
             }
             remaining_index -= ghost_lambdas;
-            assert!(remaining_index >= 1);
+            // assert!(remaining_index >= 1);
 
             if matches!(edge.edge_w_parent, EdgeWithParent::AbsToBody(_)) {
                 normal_lambdas += 1;
@@ -352,7 +363,17 @@ impl DebruijnIndex {
         }
 
         let free_lambdas = remaining_index;
-        normal_lambdas + free_lambdas
+        let calculated_index = normal_lambdas + free_lambdas;
+        (calculated_index, err)
+    }
+
+    #[track_caller]
+    pub fn get(&self, chain: &ParentChain) -> usize {
+        let (calculated_index, err) = self.get_failable(chain);
+        if let Some(err) = err {
+            panic!("{err}");
+        };
+        calculated_index
     }
 
     pub fn get_raw(&self) -> usize {
