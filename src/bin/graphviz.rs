@@ -1,11 +1,11 @@
 use std::str::FromStr;
 
 use clap::Parser;
-use lambda_beaver::{debruijn_flat::FlatRoot, print::NodeLabelType};
+use lambda_beavers::{debruijn_flat::FlatRoot, print::NodeLabelType};
 
-use lambda_beaver::parse;
-use lambda_beaver::reduce::{ReductionStrategy, ReductionStrategyKind};
-use lambda_beaver::{debruijn::Debruijn, graph::ReductionGraph};
+use lambda_beavers::parse;
+use lambda_beavers::reduce::{ReductionStrategy, ReductionStrategyKind};
+use lambda_beavers::{debruijn::Debruijn, graph::ReductionGraph};
 
 pub fn to_graphviz(graph: &ReductionGraph, node_label: NodeLabelType) -> String {
     let mut output = vec![];

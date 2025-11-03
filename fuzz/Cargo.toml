@@ -1,5 +1,5 @@
 [package]
-name = "lambda-beaver-fuzz"
+name = "lambda-beavers-fuzz"
 version = "0.0.0"
 publish = false
 edition = "2024"
@@ -10,8 +10,9 @@ cargo-fuzz = true
 [dependencies]
 libfuzzer-sys = "0.4"
 
-[dependencies.lambda-beaver]
+[dependencies.lambda-beavers]
 path = ".."
+features = ["arbitrary"]
 
 # Prevent this from interfering with workspaces
 [workspace]

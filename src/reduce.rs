@@ -347,4 +347,33 @@ mod test {
         reducer.reduce_one();
         assert_usage(&reducer);
     }
+
+    #[test]
+    fn fuzzer4() {
+        let root = Debruijn::from_str("2 1 λ λ (λ λ 1 20 2) 20 λ 2 λ λ λ 22 λ λ λ λ λ λ λ λ λ 22 λ 5 λ λ λ 5 λ λ (λ λ 1 20 2) 20 λ 2 λ 1 22").unwrap();
+    }
+
+    #[test]
+    fn fuzzer5() {
+        let root = Debruijn::from_str(
+            "λ λ λ (7 13) λ λ λ λ λ λ λ λ λ λ λ λ λ λ λ (λ λ λ λ λ λ λ λ λ λ λ λ λ 13 13) λ λ λ λ λ λ λ λ λ λ λ λ λ λ λ λ (λ λ λ λ λ λ λ λ λ λ λ λ λ λ λ 15 λ 15) 15 λ λ λ λ λ λ λ λ 255",
+        ).unwrap();
+        let mut reducer = Reducer::new(&root);
+
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+    }
 }

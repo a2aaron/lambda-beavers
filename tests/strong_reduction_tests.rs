@@ -1,7 +1,7 @@
 #![feature(macro_metavar_expr_concat)]
 #![cfg(test)]
 
-use lambda_beaver::{
+use lambda_beavers::{
     debruijn::Debruijn,
     debruijn_flat::FlatRoot,
     reduce::{Reducer, ReductionResult},

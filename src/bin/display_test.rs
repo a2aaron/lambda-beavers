@@ -1,7 +1,7 @@
 use std::{sync::LazyLock, time::Duration};
 
 use clap::Parser;
-use lambda_beaver::{
+use lambda_beavers::{
     reduce::ReductionResult,
     term::Classic,
     utils::strong_reduction_test::{parse_line, reduce_with_timeout},

@@ -2,9 +2,7 @@
 
 use libfuzzer_sys::fuzz_target;
 
-use std::str::FromStr;
-
-use lambda_beaver::{debruijn::Debruijn, reduce::Reducer};
+use lambda_beavers::{debruijn::Debruijn, reduce::Reducer};
 
 #[track_caller]
 fn assert_usage(reducer: &Reducer) {
@@ -16,14 +14,25 @@ fn assert_usage(reducer: &Reducer) {
     }
 }
 
-fuzz_target!(|data: &[u8]| {
-    let Ok(string) = std::str::from_utf8(data) else {
+fn is_valid(debruijn: &Debruijn, max_depth: usize) -> bool {
+    if max_depth == 0 {
+        return false;
+    }
+    match debruijn {
+        Debruijn::Index(idx) => *idx > 0 && *idx < 1000,
+        Debruijn::Application { func, arg } => {
+            is_valid(func, max_depth - 1) && is_valid(arg, max_depth - 1)
+        }
+        Debruijn::Abstraction { body } => is_valid(body, max_depth - 1),
+    }
+}
+
+fuzz_target!(|debruijn: Debruijn| {
+    if !is_valid(&debruijn, 10) {
         return;
-    };
-    let Ok(root) = Debruijn::from_str(string) else {
-        return;
-    };
-    let mut reducer = Reducer::new(&root);
+    }
+    // println!("{debruijn}");
+    let mut reducer = Reducer::new(&debruijn);
 
     assert_usage(&reducer);
     reducer.reduce_one();

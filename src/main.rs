@@ -1,7 +1,7 @@
 use clap::Parser;
 use std::collections::HashMap;
 
-use lambda_beaver::{
+use lambda_beavers::{
     debruijn::Debruijn,
     parse,
     reduce::{self, ReductionResult},

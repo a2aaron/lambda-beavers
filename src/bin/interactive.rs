@@ -2,7 +2,7 @@ use std::{fmt::Display, str::FromStr};
 
 use clap::Parser;
 use inquire::Select;
-use lambda_beaver::{
+use lambda_beavers::{
     debruijn::Debruijn,
     debruijn_flat::{BackingIndex, FlatRoot, beta_reduce},
     parse,

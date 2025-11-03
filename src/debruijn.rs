@@ -21,6 +21,7 @@ pub struct Root(pub Debruijn);
 /// (λx.x x) (λx.x x) = (λ 1 1) (λ 1 1)
 /// (λx.λx.x) (λ y.y) = (λ λ 1) (λ 1)
 #[derive(Clone, Debug, PartialEq, Eq, Hash)]
+#[cfg_attr(feature = "arbitrary", derive(arbitrary::Arbitrary))]
 pub enum Debruijn {
     Index(usize),
     Application {

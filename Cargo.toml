@@ -1,15 +1,17 @@
 [package]
-name = "lambda-beaver"
+name = "lambda-beavers"
 version = "0.1.0"
 edition = "2024"
 
 [features]
 strong-only = []
+arbitrary = ["dep:arbitrary"]
 
 [dependencies]
 # TODO: this should probably turn into a binary-only dependency
 clap = { version = "4.5.43", features = ["derive"] }
 inquire = "0.7.5"
+arbitrary = { version = "1", optional = true, features = ["derive"] }
 
 [profile.release]
 debug = true

@@ -3,7 +3,7 @@
 use std::str::FromStr;
 
 use clap::Parser;
-use lambda_beaver::{debruijn::Debruijn, graphviz::Args, parse, reduce::Reducer};
+use lambda_beavers::{debruijn::Debruijn, graphviz::Args, parse, reduce::Reducer};
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         reducer.root
     };
 
-    let graph = lambda_beaver::graphviz::to_graph(&root, &args);
+    let graph = lambda_beavers::graphviz::to_graph(&root, &args);
     std::fs::write(args.output.clone(), graph.to_string())?;
     Ok(())
 }
