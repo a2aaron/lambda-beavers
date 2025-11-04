@@ -13,6 +13,8 @@ use crate::{
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FlatRoot {
     pub backing: Vec<DebruijnNode>,
+    // The into-root edge, which has no parent and whose child is the root node itself
+    // --> root
     pub root: DebruijnEdge,
 }
 impl FlatRoot {
@@ -518,6 +520,9 @@ impl std::fmt::Debug for DoubleEndedEdge {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Abstraction {
+    // The child edge for this Abstraction
+    // abs --> body
+    //     ^^^^^^^^ It's this edge
     pub body: DebruijnEdge,
     /// Number of times the input argument is used in the body
     /// If this is zero, then when doing argument substitution, the algorithm can just
@@ -528,6 +533,9 @@ pub struct Abstraction {
 }
 
 impl Abstraction {
+    // Returns a double ended edge for this Abstraction
+    // abs --> body
+    // abs_index should be the index of the abstraction node.
     pub fn body(&self, abs_index: BackingIndex) -> DoubleEndedEdge {
         DoubleEndedEdge {
             child: self.body.child,
@@ -656,14 +664,14 @@ impl ParentChain {
 pub struct RedexMut {
     // The entire chain of abstractions for the parent, which will all need to get fixed up during substitution.
     parent_chain: ParentChain,
-    // Application term for the redex. If the parent for this is none,
-    // then the Redex is actually the root (and therefore is pointed to by FlatRoot.root)
+    // The edge pointing from the parent to the application. If the redex application node is
+    // actually at the root, then this is an into-root edge (and there is technically no parent)
     pub parent_to_app: DoubleEndedEdge,
-    // The Abstraction containing the body. This must be an Abstraction
+    // The edge pointing from the application to the function (which an abstraction)
     pub app_to_abs: DebruijnEdge,
-    // The body of the Abstraction. This must be pointed to by `abs`
+    // The edge pointing from the abstraction to the body
     abs_to_body: DoubleEndedEdge,
-    // The argument of the Application. This must be pointed to by `app.arg`
+    // The edge pointing from the application to the argument.
     pub app_to_arg: DebruijnEdge,
     // The usage of the `body`. Provided for convinence
     body_usage: Usage,
