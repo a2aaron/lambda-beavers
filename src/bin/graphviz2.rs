@@ -30,7 +30,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         reducer.root
     };
 
-    let graph = lambda_beavers::graphviz::to_graph(&root, &args);
+    let graph = lambda_beavers::graphviz::to_graph(&root, None, &args);
     std::fs::write(args.output.clone(), graph.to_string())?;
     Ok(())
 }

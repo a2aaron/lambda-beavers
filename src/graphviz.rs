@@ -1,4 +1,4 @@
-use std::{collections::HashMap, ops::ControlFlow, path::Path, process::Command, time::SystemTime};
+use std::{collections::HashMap, ops::ControlFlow, process::Command};
 
 use clap::Parser;
 
@@ -7,8 +7,39 @@ use crate::{
         BackingIndex, DebruijnEdge, DebruijnIndex, DebruijnNode, FlatRoot, RedexMut, Usage,
         compute_usage_flat,
     },
-    graph,
+    treewalk::ActionCtx,
 };
+pub fn debug_write_to_file_ctx(root: &FlatRoot, ctx: &ActionCtx, name: &str) {
+    _debug_write_to_file_ctx(root, Some(ctx), name);
+}
+pub fn debug_write_to_file(root: &FlatRoot, name: &str) {
+    _debug_write_to_file_ctx(root, None, name);
+}
+fn _debug_write_to_file_ctx(root: &FlatRoot, ctx: Option<&ActionCtx>, name: &str) {
+    let args = Args {
+        term: String::new(),
+        output: String::new(),
+        reductions: 999,
+        normalized: false,
+        no_garbage: false,
+        no_color_abs: false,
+        no_color_redex: false,
+    };
+    let graph = to_graph(root, ctx, &args);
+    let filename = format!("debug/{name}");
+    let graphviz_file = format!("{filename}.dot");
+    let image_file = format!("{filename}.png");
+    std::fs::create_dir_all(format!("debug/")).unwrap();
+    std::fs::write(graphviz_file.clone(), graph.to_string()).expect("Failed to write dot file");
+    // dot -Tpng out.dot > out_2.png
+    let command = Command::new("dot")
+        .arg("-Tpng")
+        .arg(graphviz_file)
+        .output()
+        .unwrap();
+    let image_data = command.stdout;
+    std::fs::write(image_file, image_data).expect("Failed to run graphviz command");
+}
 
 #[derive(Parser, Debug)]
 #[command(about, long_about = None)]
@@ -36,7 +67,7 @@ pub struct Args {
     pub no_color_redex: bool,
 }
 
-pub fn to_graph(root: &FlatRoot, args: &Args) -> Graph {
+pub fn to_graph(root: &FlatRoot, ctx: Option<&ActionCtx>, args: &Args) -> Graph {
     let mut graph = Graph::default();
     let info_vec = get_info_array(root);
 
@@ -47,7 +78,11 @@ pub fn to_graph(root: &FlatRoot, args: &Args) -> Graph {
             continue;
         }
 
-        let graph_node = make_node(args, node, node_info);
+        let mut graph_node = make_node(args, node, node_info);
+
+        if ctx.is_some_and(|ctx| ctx.term == index) {
+            graph_node.attribs.set("color", "green");
+        }
 
         let mut edges = get_edges(args, node, node_info);
 
@@ -133,7 +168,7 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
             DebruijnNode::Index(index) => {
                 let chain = &ctx.chain;
                 let depth = ctx.chain.debruijn_depth();
-                let (calculated_index, err) = index.get_failable(ctx.chain);
+                let (calculated_index, err) = index.get_failable(&ctx.chain);
                 if let Some(err) = err {
                     println!("{err}")
                 }
@@ -163,9 +198,9 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
             None => None,
         };
 
-        let is_root = root.root.child == ctx.term.child;
+        let is_root = root.root.child == ctx.term;
 
-        let index = ctx.term.child;
+        let index = ctx.term;
         info_vec[index].is_root = if is_root { Some(root.root) } else { None };
         info_vec[index].is_garbage = false;
         info_vec[index].abs_binding = abs_bound;
@@ -240,22 +275,6 @@ pub struct Graph {
 }
 
 impl Graph {
-    pub fn debug_write_to_file(&self, name: &str) {
-        let now = SystemTime::now();
-        let filename = format!("debug/{now:?}_{name}");
-        let graphviz_file = format!("{filename}.dot");
-        let image_file = format!("{filename}.png");
-        std::fs::write(filename, self.to_string()).expect("Failed to write dot file");
-        // dot -Tpng out.dot > out_2.png
-        let command = Command::new("dot")
-            .arg("-Tpng")
-            .arg(graphviz_file)
-            .output()
-            .unwrap();
-        let image_data = command.stdout;
-        std::fs::write(image_file, image_data).expect("Failed to run graphviz command");
-    }
-
     pub fn to_string(&self) -> String {
         self.print_graph("digraph")
     }
@@ -310,17 +329,12 @@ impl GraphvizEdge {
 fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<GraphvizEdge> {
     let mut edges = vec![];
     let mut edge_attribs = Attributes::new();
-    edge_attribs.set(
-        "color",
-        if node_info.is_garbage {
-            GARBAGE_COLOR
-        } else {
-            NORMAL_COLOR
-        },
-    );
+    edge_attribs.set("color", NORMAL_COLOR);
 
     if node_info.is_garbage {
         edge_attribs.set("constraint", "false");
+        edge_attribs.set("color", GARBAGE_COLOR);
+        edge_attribs.set("fontcolor", GARBAGE_COLOR);
     }
     match node {
         DebruijnNode::Index(_) => {
