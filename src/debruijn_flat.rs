@@ -618,7 +618,23 @@ impl ParentChain {
             full_chain: vec![DoubleEndedEdge::root(root)],
         }
     }
+    #[track_caller]
     pub fn push(&mut self, edge: DoubleEndedEdge) {
+        // Sanity check - we expect the previous edge's child to match up with
+        // this edge's parent. If not, we've broken the chain somehow
+
+        // This unwrap is safe because even an "empty" chain will have the into-root
+        // edge.
+        let last_edge = self.full_chain.last().unwrap();
+        let last_edge_child = last_edge.child;
+        // This unwrap is safe because only the into-root edge will not have a parent
+        // and we never allow pushing the into-root edge in this method.
+        let this_edge_parent = edge.parent_index().unwrap();
+        assert_eq!(
+            last_edge_child, this_edge_parent,
+            "Incorrect edge pushed. Chain: {self:#?}, edge: {edge:?}"
+        );
+
         if matches!(edge.edge_w_parent, EdgeWithParent::AbsToBody(_)) {
             self.abstractions.push(edge);
         }
