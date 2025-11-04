@@ -726,22 +726,6 @@ impl RedexMut {
         }
     }
 
-    fn arg(&self) -> DoubleEndedEdge {
-        DoubleEndedEdge {
-            child: self.app_to_arg.child,
-            adjust: self.parent_to_app.adjust,
-            edge_w_parent: EdgeWithParent::AppToArg(self.parent_to_app.child),
-        }
-    }
-
-    fn abs(&self) -> DoubleEndedEdge {
-        DoubleEndedEdge {
-            child: self.app_to_abs.child,
-            adjust: self.parent_to_app.adjust,
-            edge_w_parent: EdgeWithParent::AppToFunc(self.parent_to_app.child),
-        }
-    }
-
     fn arg_ctx(&self) -> ActionCtx {
         let edge_w_parent = EdgeWithParent::AppToArg(self.parent_to_app.child);
         let child = self.app_to_arg.child;
@@ -858,15 +842,6 @@ pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
     //  VV
     // [various copies of arg]
     repoint_node(root, redex.parent_to_app.edge_w_parent, new_body);
-}
-
-fn add(a: Adjustment, b: Adjustment) -> Adjustment {
-    match (a, b) {
-        (None, None) => None,
-        (None, Some(b)) => Some(b),
-        (Some(a), None) => Some(a),
-        (Some(a), Some(b)) => Some(a + b),
-    }
 }
 
 // Updates the usages of the parent chain.
@@ -1142,11 +1117,6 @@ fn up_by(root: &mut FlatRoot, ctx: &mut ActionCtx, up_by: DebruijnDepth) {
 //       n + up_by otherwise
 // ↑ λ t = λ (↑ t) where up_by -> up_by and cutoff -> cutoff + 1
 // ↑ (t1 t2) = (↑ t1) (↑ t2)
-
-/// MEMORY: Modifies in place, does not allocate or create garbage.
-fn down_one(root: &mut FlatRoot, ctx: &mut ActionCtx) {
-    shift_cutoff(root, ctx, -1, 1)
-}
 
 /// Shift the indicies for all terms up by an amount. Indicies below the cutoff are not modified
 /// This is useful during beta reduction because we need to "drop out" an abstraction.
