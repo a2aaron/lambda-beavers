@@ -3,7 +3,33 @@
 use std::str::FromStr;
 
 use clap::Parser;
-use lambda_beavers::{debruijn::Debruijn, graphviz::Args, parse, reduce::Reducer};
+use lambda_beavers::{debruijn::Debruijn, graphviz::GraphvizArgs, parse, reduce::Reducer};
+
+#[derive(Parser, Debug)]
+#[command(about, long_about = None)]
+pub struct Args {
+    /// Term to parse. This can be a classic or Debruijn term
+    pub term: String,
+
+    /// Output file for the graphviz representation
+    #[arg(short, long("out"), default_value = "out.dot")]
+    pub output: String,
+
+    #[arg(long)]
+    pub reductions: usize,
+
+    #[arg(long, default_value = "false")]
+    pub normalized: bool,
+
+    #[arg(long, default_value = "false")]
+    pub no_garbage: bool,
+
+    #[arg(long, default_value = "false")]
+    pub no_color_abs: bool,
+
+    #[arg(long, default_value = "false")]
+    pub no_color_redex: bool,
+}
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
     let args = Args::parse();
@@ -30,7 +56,12 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         reducer.root
     };
 
-    let graph = lambda_beavers::graphviz::to_graph(&root, None, &args);
+    let graph_args = GraphvizArgs {
+        no_garbage: args.no_garbage,
+        no_color_abs: args.no_color_abs,
+        no_color_redex: args.no_color_redex,
+    };
+    let graph = lambda_beavers::graphviz::to_graph(&root, None, &graph_args);
     std::fs::write(args.output.clone(), graph.to_string())?;
     Ok(())
 }

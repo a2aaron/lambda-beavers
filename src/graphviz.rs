@@ -1,7 +1,5 @@
 use std::{collections::HashMap, ops::ControlFlow, process::Command};
 
-use clap::Parser;
-
 use crate::{
     debruijn_flat::{
         BackingIndex, DebruijnEdge, DebruijnIndex, DebruijnNode, FlatRoot, RedexMut, Usage,
@@ -16,11 +14,7 @@ pub fn debug_write_to_file(root: &FlatRoot, name: &str) {
     _debug_write_to_file_ctx(root, None, name);
 }
 fn _debug_write_to_file_ctx(root: &FlatRoot, ctx: Option<&ActionCtx>, name: &str) {
-    let args = Args {
-        term: String::new(),
-        output: String::new(),
-        reductions: 999,
-        normalized: false,
+    let args = GraphvizArgs {
         no_garbage: false,
         no_color_abs: false,
         no_color_redex: false,
@@ -41,33 +35,13 @@ fn _debug_write_to_file_ctx(root: &FlatRoot, ctx: Option<&ActionCtx>, name: &str
     std::fs::write(image_file, image_data).expect("Failed to run graphviz command");
 }
 
-#[derive(Parser, Debug)]
-#[command(about, long_about = None)]
-pub struct Args {
-    /// Term to parse. This can be a classic or Debruijn term
-    pub term: String,
-
-    /// Output file for the graphviz representation
-    #[arg(short, long("out"), default_value = "out.dot")]
-    pub output: String,
-
-    #[arg(long)]
-    pub reductions: usize,
-
-    #[arg(long, default_value = "false")]
-    pub normalized: bool,
-
-    #[arg(long, default_value = "false")]
+pub struct GraphvizArgs {
     pub no_garbage: bool,
-
-    #[arg(long, default_value = "false")]
     pub no_color_abs: bool,
-
-    #[arg(long, default_value = "false")]
     pub no_color_redex: bool,
 }
 
-pub fn to_graph(root: &FlatRoot, ctx: Option<&ActionCtx>, args: &Args) -> Graph {
+pub fn to_graph(root: &FlatRoot, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -> Graph {
     let mut graph = Graph::default();
     let info_vec = get_info_array(root);
 
@@ -326,7 +300,7 @@ impl GraphvizEdge {
     }
 }
 
-fn get_edges(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> Vec<GraphvizEdge> {
+fn get_edges(args: &GraphvizArgs, node: &DebruijnNode, node_info: NodeInfo) -> Vec<GraphvizEdge> {
     let mut edges = vec![];
     let mut edge_attribs = Attributes::new();
     edge_attribs.set("color", NORMAL_COLOR);
@@ -382,7 +356,7 @@ fn add_if_edge_has_adjust(edge_attribs: &mut Attributes, term: DebruijnEdge) {
     }
 }
 
-fn make_node(args: &Args, node: &DebruijnNode, node_info: NodeInfo) -> GraphvizNode {
+fn make_node(args: &GraphvizArgs, node: &DebruijnNode, node_info: NodeInfo) -> GraphvizNode {
     let mut attribs = Attributes::new();
     attribs
         .set("label", to_node_label(*node))
