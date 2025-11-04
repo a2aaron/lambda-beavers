@@ -376,4 +376,27 @@ mod test {
         reducer.reduce_one();
         assert_usage(&reducer);
     }
+
+    #[test]
+    fn fuzzer6() {
+        let testcase = "(λ λ 1) 99 λ (λ λ 1 3) 99 99";
+        let root = Debruijn::from_str(testcase).unwrap();
+        let mut reducer = Reducer::new(&root);
+
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+        reducer.reduce_one();
+        assert_usage(&reducer);
+    }
 }

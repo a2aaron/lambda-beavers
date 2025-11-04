@@ -7,6 +7,7 @@ use std::{
 
 use crate::{
     debruijn::Debruijn,
+    graphviz,
     treewalk::{ActionCtx, ChildResults},
 };
 
@@ -39,7 +40,7 @@ impl FlatRoot {
 
     pub fn is_bnf(&self) -> bool {
         let result = self.preorder_walk(|root, ctx| {
-            if RedexMut::is_redex(root, ctx.term.child) {
+            if RedexMut::is_redex(root, ctx.term) {
                 ControlFlow::Break(false)
             } else {
                 ControlFlow::Continue(())
@@ -63,7 +64,7 @@ impl FlatRoot {
         let mut new_root = FlatRoot::new();
         let root_node = self.postorder_walk(|_root, ctx, result| match result {
             ChildResults::Index(idx) => {
-                let index = idx.get(ctx.chain);
+                let index = idx.get(&ctx.chain);
                 new_root.alloc(DebruijnNode::idx(index))
             }
             ChildResults::Abstraction { abs, body_result } => {
@@ -85,7 +86,7 @@ impl FlatRoot {
                 let expected = compute_usage_flat(root, ctx);
                 let actual = abs.usage;
                 if actual != expected {
-                    return ControlFlow::Break((ctx.term.child, actual, expected));
+                    return ControlFlow::Break((ctx.term, actual, expected));
                 }
             };
             ControlFlow::Continue(())
@@ -221,7 +222,7 @@ impl From<&Debruijn> for FlatRoot {
 impl From<&FlatRoot> for Debruijn {
     fn from(root: &FlatRoot) -> Self {
         root.postorder_walk(|_root, ctx, child_results| match child_results {
-            ChildResults::Index(idx) => Debruijn::Index(idx.get(ctx.chain)),
+            ChildResults::Index(idx) => Debruijn::Index(idx.get(&ctx.chain)),
             ChildResults::Abstraction { body_result, .. } => Debruijn::Abstraction {
                 body: Box::new(body_result),
             },
@@ -269,7 +270,7 @@ pub fn compute_usage_flat(root: &FlatRoot, ctx: &mut ActionCtx) -> Usage {
     root.preorder_walk_at(ctx, |root, ctx| {
         if let DebruijnNode::Index(index) = root[ctx.term] {
             let depth_relative_to_arg = ctx.chain.debruijn_depth() - init_depth;
-            let (calculated_index, err) = index.get_failable(ctx.chain);
+            let (calculated_index, err) = index.get_failable(&ctx.chain);
             if let Some(err) = err {
                 println!("=== compute_usage_flat - get_failable ===");
                 println!("{root:#?}");
@@ -345,14 +346,14 @@ impl DebruijnIndex {
         for edge in chain.full_chain.iter().rev().cloned() {
             let ghost_lambdas = -edge.adjust.unwrap_or(0) as usize;
             if ghost_lambdas >= remaining_index {
+                let raw_index = self.get_raw();
                 let error = format!(
-                    "Expected {remaining_index} to be greater than {ghost_lambdas} in index: {}, chain: {chain:#?}",
-                    self.get_raw()
+                    "Expected {remaining_index} to be greater than {ghost_lambdas} in index. raw_index = {raw_index}, chain: {chain:#?}",
                 );
                 err = Some(error);
             }
             remaining_index -= ghost_lambdas;
-            // assert!(remaining_index >= 1);
+            // assert!(remaining_index >= 1, "{}", err.unwrap());
 
             if matches!(edge.edge_w_parent, EdgeWithParent::AbsToBody(_)) {
                 normal_lambdas += 1;
@@ -373,6 +374,17 @@ impl DebruijnIndex {
     pub fn get(&self, chain: &ParentChain) -> usize {
         let (calculated_index, err) = self.get_failable(chain);
         if let Some(err) = err {
+            panic!("{err}");
+        };
+        calculated_index
+    }
+
+    #[track_caller]
+    fn get_dbg(&self, chain: &ParentChain, root: &mut FlatRoot) -> usize {
+        let (calculated_index, err) = self.get_failable(chain);
+        if let Some(err) = err {
+            graphviz::debug_write_to_file(root, "get_fail");
+            println!("{root}");
             panic!("{err}");
         };
         calculated_index
@@ -536,7 +548,7 @@ impl Abstraction {
     // Returns a double ended edge for this Abstraction
     // abs --> body
     // abs_index should be the index of the abstraction node.
-    pub fn body(&self, abs_index: BackingIndex) -> DoubleEndedEdge {
+    pub fn abs_to_body(&self, abs_index: BackingIndex) -> DoubleEndedEdge {
         DoubleEndedEdge {
             child: self.body.child,
             adjust: self.body.adjust,
@@ -692,9 +704,14 @@ impl RedexMut {
         match root[ctx.term] {
             DebruijnNode::Application(app) => match root[app.func] {
                 DebruijnNode::Abstraction(abs) => {
-                    let body = abs.body(app.func.child);
+                    let parent_to_app = DoubleEndedEdge {
+                        edge_w_parent: ctx.parent_to_term,
+                        child: ctx.term,
+                        adjust: ctx.adjust,
+                    };
+                    let body = abs.abs_to_body(app.func.child);
                     let redex = RedexMut {
-                        parent_to_app: ctx.term,
+                        parent_to_app: parent_to_app,
                         app_to_abs: app.func,
                         abs_to_body: body,
                         app_to_arg: app.arg,
@@ -725,17 +742,44 @@ impl RedexMut {
         }
     }
 
-    fn arg_ctx(&'_ mut self) -> ActionCtx<'_> {
+    fn arg_ctx(&self) -> ActionCtx {
+        let edge_w_parent = EdgeWithParent::AppToArg(self.parent_to_app.child);
+        let child = self.app_to_arg.child;
+        let adjust = self.app_to_arg.adjust;
+
+        let mut chain = self.parent_chain.clone();
+        let edge = DoubleEndedEdge {
+            edge_w_parent,
+            child,
+            adjust,
+        };
+        chain.push(edge);
+
         ActionCtx {
-            term: self.arg(),
-            chain: &mut self.parent_chain,
+            chain,
+            parent_to_term: edge_w_parent,
+            adjust,
+            term: child,
         }
     }
 
-    fn func_ctx(&'_ mut self) -> ActionCtx<'_> {
+    fn func_ctx(&self) -> ActionCtx {
+        let adjust = self.app_to_abs.adjust;
+        let child = self.app_to_abs.child;
+        let edge_w_parent = EdgeWithParent::AppToFunc(self.parent_to_app.child);
+
+        let mut chain = self.parent_chain.clone();
+        let edge = DoubleEndedEdge {
+            edge_w_parent,
+            child,
+            adjust,
+        };
+        chain.push(edge);
         ActionCtx {
-            term: self.abs(),
-            chain: &mut self.parent_chain,
+            term: child,
+            chain,
+            parent_to_term: edge_w_parent,
+            adjust,
         }
     }
 }
@@ -874,7 +918,7 @@ fn get_usage_by_depth(root: &FlatRoot, ctx: &mut ActionCtx) -> Vec<Usage> {
             let depth_relative_to_arg = ctx.chain.debruijn_depth() - init_depth;
             // We need to account for the fact that we may be inside an abstraction in the argument
             // If we are, we should skip if this is a bound variable.
-            let is_bound = index.get(ctx.chain) <= depth_relative_to_arg;
+            let is_bound = index.get(&ctx.chain) <= depth_relative_to_arg;
             if is_bound {
                 return;
             }
@@ -893,7 +937,7 @@ fn get_usage_by_depth(root: &FlatRoot, ctx: &mut ActionCtx) -> Vec<Usage> {
 
             // SAFETY: subtraction is safe because we just checked that index <= depth_relative_to_arg
             // and return in the case that this happens.
-            let index_relative_to_parent = index.get(ctx.chain) - depth_relative_to_arg;
+            let index_relative_to_parent = index.get(&ctx.chain) - depth_relative_to_arg;
 
             // In the case of an open term - eg: λ (λ 1 1) 99
             // it is possible for an index to actually point to an implict parent which
@@ -999,18 +1043,23 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
     let mut substitution_i = 0;
     let init_depth = redex.parent_chain.debruijn_depth();
 
-    let mut redex2 = redex.clone();
-    let arg_ctx = &mut redex2.arg_ctx();
+    let arg_ctx = &mut redex.arg_ctx();
+    let func_ctx = &mut redex.func_ctx();
+
     let redex_arg = redex.app_to_arg;
     let body_usage = redex.body_usage;
     let app_to_abs_adjustment = redex.app_to_abs.adjust;
-    root.preorder_walk_at_mut(&mut redex.func_ctx(), |root, ctx| {
+    println!("Current parent chain: {:?}", redex.parent_chain);
+    println!("Walking at func_ctx: {func_ctx:?}");
+    graphviz::debug_write_to_file(root, "before_substitute");
+    root.preorder_walk_at_mut(func_ctx, |root, ctx| {
         let term = ctx.term;
         let chain = &ctx.chain;
         if let DebruijnNode::Index(debruijn_index) = root[term] {
             let depth_relative_to_arg = chain.debruijn_depth() - init_depth;
             // Note that the depth here is 0-indexed, while debruijn_index is 1-indexed
-            let calculated_index = debruijn_index.get(chain);
+
+            let calculated_index = debruijn_index.get_dbg(chain, root);
             let is_substituting = calculated_index == depth_relative_to_arg;
             if is_substituting {
                 // Total adjustment from the app -> abs node. This is a negative value, so we need to
@@ -1029,11 +1078,16 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
                     clone_subtree_and_fix_up_fused(root, arg_ctx, up_by_amount)
                 };
                 // Point parent to the newly created subtree
-                repoint_node(root, term.edge_w_parent, new_arg);
+                graphviz::debug_write_to_file_ctx(root, ctx, "before_repoint");
+                println!("Current chain: {:?}", ctx.chain);
+                println!("Repoint {:?} to {}", ctx.parent_to_term, new_arg);
+                repoint_node(root, ctx.parent_to_term, new_arg);
+                graphviz::debug_write_to_file_ctx(root, ctx, "after_repoint");
                 substitution_i += 1;
             }
         }
     });
+    graphviz::debug_write_to_file(root, "after_substitute");
     assert_eq!(
         substitution_i, redex.body_usage,
         "Expected substitution count ({}) to equal usage ({})!",
@@ -1101,7 +1155,7 @@ fn down_one(root: &mut FlatRoot, ctx: &mut ActionCtx) {
 fn shift_cutoff(root: &mut FlatRoot, ctx: &mut ActionCtx, up_by: isize, depth: DebruijnDepth) {
     let init_depth = ctx.chain.debruijn_depth();
     root.preorder_walk_at_mut(ctx, |root, ctx| {
-        let term = ctx.term.child;
+        let term = ctx.term;
         let chain = &ctx.chain;
         if let DebruijnNode::Index(term_index) = root[term] {
             let depth_relative_to_term = chain.debruijn_depth() + depth - init_depth;
@@ -1137,10 +1191,7 @@ mod test {
     }
 
     fn redex_from_root(root: &FlatRoot) -> RedexMut {
-        let mut ctx = ActionCtx {
-            term: DoubleEndedEdge::root(root),
-            chain: &mut ParentChain::new(root),
-        };
+        let mut ctx = ActionCtx::from_root(root);
         RedexMut::try_get(root, &mut ctx).unwrap()
     }
 

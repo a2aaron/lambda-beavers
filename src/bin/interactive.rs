@@ -22,7 +22,7 @@ struct Args {
 
 fn print_highlighted<'a>(root: &'a FlatRoot, highlighted: BackingIndex) -> String {
     let printable_terms = root.postorder_walk(|_root, ctx, results| match results {
-        ChildResults::Index(index) => PrintableTerm::Leaf(format!("{}", index.get(ctx.chain))),
+        ChildResults::Index(index) => PrintableTerm::Leaf(format!("{}", index.get(&ctx.chain))),
         ChildResults::Abstraction { body_result, .. } => PrintableTerm::Abstraction {
             body_head: "λ ".to_string(),
             body: Box::new(body_result),
@@ -32,7 +32,7 @@ fn print_highlighted<'a>(root: &'a FlatRoot, highlighted: BackingIndex) -> Strin
             arg_result,
             ..
         } => {
-            let highlight = ctx.term.child == highlighted;
+            let highlight = ctx.term == highlighted;
 
             PrintableTerm::Application {
                 highlight,
