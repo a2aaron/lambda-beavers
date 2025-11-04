@@ -14,11 +14,7 @@ pub fn debug_write_to_file(root: &FlatRoot, name: &str) {
     _debug_write_to_file_ctx(root, None, name);
 }
 fn _debug_write_to_file_ctx(root: &FlatRoot, ctx: Option<&ActionCtx>, name: &str) {
-    let args = GraphvizArgs {
-        no_garbage: false,
-        no_color_abs: false,
-        no_color_redex: false,
-    };
+    let args = GraphvizArgs { no_garbage: false };
     let graph = to_graph(root, ctx, &args);
     let filename = format!("debug/{name}");
     let graphviz_file = format!("{filename}.dot");
@@ -37,8 +33,6 @@ fn _debug_write_to_file_ctx(root: &FlatRoot, ctx: Option<&ActionCtx>, name: &str
 
 pub struct GraphvizArgs {
     pub no_garbage: bool,
-    pub no_color_abs: bool,
-    pub no_color_redex: bool,
 }
 
 pub fn to_graph(root: &FlatRoot, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -> Graph {
@@ -52,13 +46,13 @@ pub fn to_graph(root: &FlatRoot, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -
             continue;
         }
 
-        let mut graph_node = make_node(args, node, node_info);
+        let mut graph_node = make_node(node, node_info);
 
         if ctx.is_some_and(|ctx| ctx.term == index) {
             graph_node.attribs.set("color", "green");
         }
 
-        let mut edges = get_edges(args, node, node_info);
+        let mut edges = get_edges(node, node_info);
 
         if let DebruijnNode::Application(app) = node
             && !node_info.is_garbage
@@ -300,7 +294,7 @@ impl GraphvizEdge {
     }
 }
 
-fn get_edges(args: &GraphvizArgs, node: &DebruijnNode, node_info: NodeInfo) -> Vec<GraphvizEdge> {
+fn get_edges(node: &DebruijnNode, node_info: NodeInfo) -> Vec<GraphvizEdge> {
     let mut edges = vec![];
     let mut edge_attribs = Attributes::new();
     edge_attribs.set("color", NORMAL_COLOR);
@@ -312,9 +306,7 @@ fn get_edges(args: &GraphvizArgs, node: &DebruijnNode, node_info: NodeInfo) -> V
     }
     match node {
         DebruijnNode::Index(_) => {
-            if let AbstractionBinding::BoundTo { abstraction, .. } = node_info.abs_binding
-                && !args.no_color_abs
-            {
+            if let AbstractionBinding::BoundTo { abstraction, .. } = node_info.abs_binding {
                 let color = get_random_color(abstraction, 1.0);
                 edge_attribs
                     .set("color", color)
@@ -356,7 +348,7 @@ fn add_if_edge_has_adjust(edge_attribs: &mut Attributes, term: DebruijnEdge) {
     }
 }
 
-fn make_node(args: &GraphvizArgs, node: &DebruijnNode, node_info: NodeInfo) -> GraphvizNode {
+fn make_node(node: &DebruijnNode, node_info: NodeInfo) -> GraphvizNode {
     let mut attribs = Attributes::new();
     attribs
         .set("label", to_node_label(*node))
@@ -371,14 +363,12 @@ fn make_node(args: &GraphvizArgs, node: &DebruijnNode, node_info: NodeInfo) -> G
     }
 
     let is_abstraction = matches!(node, DebruijnNode::Abstraction(_));
-    if is_abstraction && !args.no_color_abs {
+    if is_abstraction {
         let bg_color = get_random_color(node_info.index, 0.5);
         attribs.set("fillcolor", bg_color).set("style", "filled");
     }
 
-    if let Some(info) = node_info.redex_info
-        && !args.no_color_redex
-    {
+    if let Some(info) = node_info.redex_info {
         let color1 = get_random_color(info.abs.child, 0.5);
         let color2 = get_random_color(info.arg.child, 0.5);
         let bg_color = format!("{};0.5:{}", color1, color2);

@@ -58,8 +58,6 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     let graph_args = GraphvizArgs {
         no_garbage: args.no_garbage,
-        no_color_abs: args.no_color_abs,
-        no_color_redex: args.no_color_redex,
     };
     let graph = lambda_beavers::graphviz::to_graph(&root, None, &graph_args);
     std::fs::write(args.output.clone(), graph.to_string())?;
