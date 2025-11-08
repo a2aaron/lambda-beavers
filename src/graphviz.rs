@@ -54,10 +54,20 @@ pub fn to_graph(root: &FlatRoot, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -
 
         let mut edges = get_edges(node, node_info);
 
-        // if let Some(root_edge) = node_info.is_root {
-        //     let edge = GraphvizEdge::from_debruijn_edge(root_edge, &node_info);
-        //     edges.push(edge);
-        // }
+        if let Some(root_edge) = node_info.is_root {
+            let mut edge = GraphvizEdge::from_debruijn_edge(root_edge, &node_info);
+            // Use an invisible node to represent the "into root" edge
+            let mut invis_root_attribs = Attributes::new();
+            invis_root_attribs.set("style", "invis");
+
+            let node = GraphvizNode {
+                name: "invis_root".to_string(),
+                attribs: invis_root_attribs,
+            };
+            edge.0 = "invis_root".to_string();
+            edges.push(edge);
+            graph.nodes.push(node)
+        }
 
         if let DebruijnNode::Application(app) = node
             && !node_info.is_garbage
@@ -360,13 +370,6 @@ fn get_edges(node: &DebruijnNode, node_info: NodeInfo) -> Vec<GraphvizEdge> {
     edges
 }
 
-fn add_if_edge_has_adjust(edge_attribs: &mut Attributes, term: DebruijnEdge) {
-    if let Some(adjust) = term.adjust {
-        edge_attribs.set("penwidth", "5");
-        edge_attribs.set("label", format!("adj = {adjust}"));
-    }
-}
-
 fn make_node(node: &DebruijnNode, node_info: NodeInfo) -> GraphvizNode {
     let mut attribs = Attributes::new();
     attribs
@@ -399,9 +402,6 @@ fn make_node(node: &DebruijnNode, node_info: NodeInfo) -> GraphvizNode {
 
     if let Some(root) = node_info.is_root {
         attribs.set("penwidth", 2.0);
-        if let Some(adjust) = root.adjust {
-            attribs.append_label(format!("adj = {:?}", adjust));
-        }
     }
 
     match node_info.abs_binding {
