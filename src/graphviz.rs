@@ -64,7 +64,7 @@ pub fn to_graph(root: &FlatRoot, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -
                 name: "invis_root".to_string(),
                 attribs: invis_root_attribs,
             };
-            edge.0 = "invis_root".to_string();
+            edge.head = "invis_root".to_string();
             edges.push(edge);
             graph.nodes.push(node)
         }
@@ -273,7 +273,12 @@ impl Graph {
             output.push(format!("{} [{}]", node.name, node.attribs.bake()))
         }
 
-        for GraphvizEdge(head, tail, attribs) in &self.edges {
+        for GraphvizEdge {
+            head,
+            tail,
+            attributes: attribs,
+        } in &self.edges
+        {
             let attribs = &attribs.bake();
             output.push(format!("{head} -> {tail} [{attribs}]"));
         }
@@ -302,10 +307,18 @@ impl GraphvizNode {
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
-struct GraphvizEdge(String, String, Attributes);
+struct GraphvizEdge {
+    head: String,
+    tail: String,
+    attributes: Attributes,
+}
 impl GraphvizEdge {
     fn new(head: usize, tail: usize, attributes: &Attributes) -> GraphvizEdge {
-        GraphvizEdge(head.to_string(), tail.to_string(), attributes.clone())
+        GraphvizEdge {
+            head: head.to_string(),
+            tail: tail.to_string(),
+            attributes: attributes.clone(),
+        }
     }
 
     fn from_debruijn_edge(edge: DebruijnEdge, node_info: &NodeInfo) -> GraphvizEdge {
@@ -363,7 +376,7 @@ fn get_edges(node: &DebruijnNode, node_info: NodeInfo) -> Vec<GraphvizEdge> {
             edges.push(edge);
 
             let mut edge = GraphvizEdge::from_debruijn_edge(app.arg, &node_info);
-            edge.2.set("arrowhead", "onormal");
+            edge.attributes.set("arrowhead", "onormal");
             edges.push(edge);
         }
     };
