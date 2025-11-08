@@ -54,6 +54,11 @@ pub fn to_graph(root: &FlatRoot, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -
 
         let mut edges = get_edges(node, node_info);
 
+        // if let Some(root_edge) = node_info.is_root {
+        //     let edge = GraphvizEdge::from_debruijn_edge(root_edge, &node_info);
+        //     edges.push(edge);
+        // }
+
         if let DebruijnNode::Application(app) = node
             && !node_info.is_garbage
         {
@@ -292,6 +297,26 @@ impl GraphvizEdge {
     fn new(head: usize, tail: usize, attributes: &Attributes) -> GraphvizEdge {
         GraphvizEdge(head.to_string(), tail.to_string(), attributes.clone())
     }
+
+    fn from_debruijn_edge(edge: DebruijnEdge, node_info: &NodeInfo) -> GraphvizEdge {
+        let mut attributes = Attributes::new();
+        attributes.set("color", NORMAL_COLOR);
+
+        if node_info.is_garbage {
+            // attributes.set("constraint", "false");
+            attributes.set("color", GARBAGE_COLOR);
+            attributes.set("fontcolor", GARBAGE_COLOR);
+        }
+
+        if let Some(adjust) = edge.adjust {
+            attributes.set("penwidth", "5");
+            attributes.set("label", format!("adj = {adjust}"));
+        }
+
+        let head = node_info.index;
+        let tail = edge.child;
+        GraphvizEdge::new(head, tail, &attributes)
+    }
 }
 
 fn get_edges(node: &DebruijnNode, node_info: NodeInfo) -> Vec<GraphvizEdge> {
@@ -320,22 +345,16 @@ fn get_edges(node: &DebruijnNode, node_info: NodeInfo) -> Vec<GraphvizEdge> {
             }
         }
         DebruijnNode::Abstraction(abs) => {
-            let body = abs.body.child;
-            add_if_edge_has_adjust(&mut edge_attribs, abs.body);
-            edges.push(GraphvizEdge::new(node_info.index, body, &edge_attribs));
+            let edge = GraphvizEdge::from_debruijn_edge(abs.body, &node_info);
+            edges.push(edge);
         }
         DebruijnNode::Application(app) => {
-            let func = app.func.child;
-            let arg = app.arg.child;
+            let edge = GraphvizEdge::from_debruijn_edge(app.func, &node_info);
+            edges.push(edge);
 
-            let mut func_attribs = edge_attribs.clone();
-            add_if_edge_has_adjust(&mut func_attribs, app.func);
-            edges.push(GraphvizEdge::new(node_info.index, func, &func_attribs));
-
-            let mut arg_attribs = edge_attribs.clone();
-            add_if_edge_has_adjust(&mut arg_attribs, app.arg);
-            arg_attribs.set("arrowhead", "onormal");
-            edges.push(GraphvizEdge::new(node_info.index, arg, &arg_attribs));
+            let mut edge = GraphvizEdge::from_debruijn_edge(app.arg, &node_info);
+            edge.2.set("arrowhead", "onormal");
+            edges.push(edge);
         }
     };
     edges
