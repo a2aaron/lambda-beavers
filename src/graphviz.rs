@@ -1,4 +1,10 @@
-use std::{collections::HashMap, ops::ControlFlow, process::Command};
+use std::{
+    collections::HashMap,
+    ops::ControlFlow,
+    process::Command,
+    sync::{LazyLock, atomic::AtomicUsize},
+    time::SystemTime,
+};
 
 use crate::{
     debruijn_flat::{
@@ -7,6 +13,15 @@ use crate::{
     },
     treewalk::ActionCtx,
 };
+
+static COUNTER: AtomicUsize = AtomicUsize::new(0);
+static TIMESTAMP: LazyLock<u64> = LazyLock::new(|| {
+    SystemTime::now()
+        .duration_since(SystemTime::UNIX_EPOCH)
+        .unwrap()
+        .as_secs()
+});
+
 pub fn debug_write_to_file_ctx(root: &FlatRoot, ctx: &ActionCtx, name: &str) {
     _debug_write_to_file_ctx(root, Some(ctx), name);
 }
@@ -16,10 +31,14 @@ pub fn debug_write_to_file(root: &FlatRoot, name: &str) {
 fn _debug_write_to_file_ctx(root: &FlatRoot, ctx: Option<&ActionCtx>, name: &str) {
     let args = GraphvizArgs { no_garbage: false };
     let graph = to_graph(root, ctx, &args);
-    let filename = format!("debug/{name}");
-    let graphviz_file = format!("{filename}.dot");
-    let image_file = format!("{filename}.png");
-    std::fs::create_dir_all(format!("debug/")).unwrap();
+
+    let timestamp = *TIMESTAMP;
+    let folder = &format!("debug/{timestamp}");
+    std::fs::create_dir_all(folder).unwrap();
+
+    let value = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let graphviz_file = format!("{folder}/{value}_{name}.dot");
+    let image_file = format!("{folder}/{value}_{name}.png");
     std::fs::write(graphviz_file.clone(), graph.to_string()).expect("Failed to write dot file");
     // dot -Tpng out.dot > out_2.png
     let command = Command::new("dot")
