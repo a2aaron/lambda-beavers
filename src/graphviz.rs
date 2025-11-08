@@ -88,6 +88,123 @@ pub fn to_graph(root: &FlatRoot, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -
     graph
 }
 
+fn make_node(node: &DebruijnNode, node_info: NodeInfo) -> GraphvizNode {
+    let mut attribs = Attributes::new();
+    attribs
+        .set("label", to_node_label(*node))
+        .set("xlabel", node_info.index)
+        .set("color", NORMAL_COLOR)
+        .set("fontcolor", NORMAL_COLOR);
+
+    if node_info.is_garbage {
+        attribs
+            .set("color", GARBAGE_COLOR)
+            .set("fontcolor", GARBAGE_COLOR);
+    }
+
+    let is_abstraction = matches!(node, DebruijnNode::Abstraction(_));
+    if is_abstraction {
+        let bg_color = get_random_color(node_info.index, 0.5);
+        attribs.set("fillcolor", bg_color).set("style", "filled");
+    }
+
+    if let Some(info) = node_info.redex_info {
+        let color1 = get_random_color(info.abs.child, 0.5);
+        let color2 = get_random_color(info.arg.child, 0.5);
+        let bg_color = format!("{};0.5:{}", color1, color2);
+        attribs
+            .set("shape", "diamond")
+            .set("fillcolor", bg_color)
+            .set("style", "filled");
+    }
+
+    if node_info.is_root.is_some() {
+        attribs.set("penwidth", 2.0);
+    }
+
+    match node_info.abs_binding {
+        AbstractionBinding::NotLeaf => (),
+        AbstractionBinding::BindingMissing {
+            index,
+            calculated_index,
+        } => {
+            attribs.set("fillcolor", "red").set("style", "filled");
+            attribs.append_label(format!(
+                "NO BINDING - raw: {}, calc: {}",
+                index.get_raw(),
+                calculated_index
+            ));
+        }
+        AbstractionBinding::FreeVariable {
+            calculated_index, ..
+        } => attribs.append_label(format!("(free, calc: {})", calculated_index)),
+        AbstractionBinding::BoundTo {
+            calculated_index,
+            abstraction,
+            ..
+        } => attribs.append_label(format!(
+            "(bound @ {}, calc: {})",
+            abstraction, calculated_index
+        )),
+    }
+
+    if let DebruijnNode::Abstraction(abs) = *node
+        && let Some(computed_usage) = node_info.computed_usage
+        && abs.usage != computed_usage
+    {
+        attribs.set("fillcolor", "red");
+        attribs.set("style", "filled");
+        attribs.append_label(format!(
+            "WRONG USAGE - claimed: {}, actual: {} ",
+            abs.usage, computed_usage
+        ));
+    }
+
+    let graph_node = GraphvizNode::new(node_info.index, &attribs);
+    graph_node
+}
+
+fn get_edges(node: &DebruijnNode, node_info: NodeInfo) -> Vec<GraphvizEdge> {
+    let mut edges = vec![];
+    let mut edge_attribs = Attributes::new();
+    edge_attribs.set("color", NORMAL_COLOR);
+
+    if node_info.is_garbage {
+        edge_attribs.set("constraint", "false");
+        edge_attribs.set("color", GARBAGE_COLOR);
+        edge_attribs.set("fontcolor", GARBAGE_COLOR);
+    }
+    match node {
+        DebruijnNode::Index(_) => {
+            if let AbstractionBinding::BoundTo { abstraction, .. } = node_info.abs_binding {
+                let color = get_random_color(abstraction, 1.0);
+                edge_attribs
+                    .set("color", color)
+                    .set("style", "dashed")
+                    .set("constraint", "false");
+                edges.push(GraphvizEdge::new(
+                    node_info.index,
+                    abstraction,
+                    &edge_attribs,
+                ));
+            }
+        }
+        DebruijnNode::Abstraction(abs) => {
+            let edge = GraphvizEdge::from_debruijn_edge(abs.body, &node_info);
+            edges.push(edge);
+        }
+        DebruijnNode::Application(app) => {
+            let edge = GraphvizEdge::from_debruijn_edge(app.func, &node_info);
+            edges.push(edge);
+
+            let mut edge = GraphvizEdge::from_debruijn_edge(app.arg, &node_info);
+            edge.attributes.set("arrowhead", "onormal");
+            edges.push(edge);
+        }
+    };
+    edges
+}
+
 #[derive(Debug, Clone, Copy)]
 enum AbstractionBinding {
     NotLeaf,
@@ -340,123 +457,6 @@ impl GraphvizEdge {
         let tail = edge.child;
         GraphvizEdge::new(head, tail, &attributes)
     }
-}
-
-fn get_edges(node: &DebruijnNode, node_info: NodeInfo) -> Vec<GraphvizEdge> {
-    let mut edges = vec![];
-    let mut edge_attribs = Attributes::new();
-    edge_attribs.set("color", NORMAL_COLOR);
-
-    if node_info.is_garbage {
-        edge_attribs.set("constraint", "false");
-        edge_attribs.set("color", GARBAGE_COLOR);
-        edge_attribs.set("fontcolor", GARBAGE_COLOR);
-    }
-    match node {
-        DebruijnNode::Index(_) => {
-            if let AbstractionBinding::BoundTo { abstraction, .. } = node_info.abs_binding {
-                let color = get_random_color(abstraction, 1.0);
-                edge_attribs
-                    .set("color", color)
-                    .set("style", "dashed")
-                    .set("constraint", "false");
-                edges.push(GraphvizEdge::new(
-                    node_info.index,
-                    abstraction,
-                    &edge_attribs,
-                ));
-            }
-        }
-        DebruijnNode::Abstraction(abs) => {
-            let edge = GraphvizEdge::from_debruijn_edge(abs.body, &node_info);
-            edges.push(edge);
-        }
-        DebruijnNode::Application(app) => {
-            let edge = GraphvizEdge::from_debruijn_edge(app.func, &node_info);
-            edges.push(edge);
-
-            let mut edge = GraphvizEdge::from_debruijn_edge(app.arg, &node_info);
-            edge.attributes.set("arrowhead", "onormal");
-            edges.push(edge);
-        }
-    };
-    edges
-}
-
-fn make_node(node: &DebruijnNode, node_info: NodeInfo) -> GraphvizNode {
-    let mut attribs = Attributes::new();
-    attribs
-        .set("label", to_node_label(*node))
-        .set("xlabel", node_info.index)
-        .set("color", NORMAL_COLOR)
-        .set("fontcolor", NORMAL_COLOR);
-
-    if node_info.is_garbage {
-        attribs
-            .set("color", GARBAGE_COLOR)
-            .set("fontcolor", GARBAGE_COLOR);
-    }
-
-    let is_abstraction = matches!(node, DebruijnNode::Abstraction(_));
-    if is_abstraction {
-        let bg_color = get_random_color(node_info.index, 0.5);
-        attribs.set("fillcolor", bg_color).set("style", "filled");
-    }
-
-    if let Some(info) = node_info.redex_info {
-        let color1 = get_random_color(info.abs.child, 0.5);
-        let color2 = get_random_color(info.arg.child, 0.5);
-        let bg_color = format!("{};0.5:{}", color1, color2);
-        attribs
-            .set("shape", "diamond")
-            .set("fillcolor", bg_color)
-            .set("style", "filled");
-    }
-
-    if node_info.is_root.is_some() {
-        attribs.set("penwidth", 2.0);
-    }
-
-    match node_info.abs_binding {
-        AbstractionBinding::NotLeaf => (),
-        AbstractionBinding::BindingMissing {
-            index,
-            calculated_index,
-        } => {
-            attribs.set("fillcolor", "red").set("style", "filled");
-            attribs.append_label(format!(
-                "NO BINDING - raw: {}, calc: {}",
-                index.get_raw(),
-                calculated_index
-            ));
-        }
-        AbstractionBinding::FreeVariable {
-            calculated_index, ..
-        } => attribs.append_label(format!("(free, calc: {})", calculated_index)),
-        AbstractionBinding::BoundTo {
-            calculated_index,
-            abstraction,
-            ..
-        } => attribs.append_label(format!(
-            "(bound @ {}, calc: {})",
-            abstraction, calculated_index
-        )),
-    }
-
-    if let DebruijnNode::Abstraction(abs) = *node
-        && let Some(computed_usage) = node_info.computed_usage
-        && abs.usage != computed_usage
-    {
-        attribs.set("fillcolor", "red");
-        attribs.set("style", "filled");
-        attribs.append_label(format!(
-            "WRONG USAGE - claimed: {}, actual: {} ",
-            abs.usage, computed_usage
-        ));
-    }
-
-    let graph_node = GraphvizNode::new(node_info.index, &attribs);
-    graph_node
 }
 
 fn get_random_color(term: usize, saturation: f32) -> String {
