@@ -413,7 +413,7 @@ fn make_node(node: &DebruijnNode, node_info: NodeInfo) -> GraphvizNode {
             .set("style", "filled");
     }
 
-    if let Some(root) = node_info.is_root {
+    if node_info.is_root.is_some() {
         attribs.set("penwidth", 2.0);
     }
 
