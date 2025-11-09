@@ -8,8 +8,8 @@ use std::{
 
 use crate::{
     debruijn_flat::{
-        Adjustment, BackingIndex, DebruijnEdge, DebruijnIndex, DebruijnNode, FlatRoot, RedexMut,
-        Usage, compute_usage_flat,
+        Adjustment, BackingIndex, DebruijnEdge, DebruijnIndex, DebruijnNode, DoubleEndedEdge,
+        FlatRoot, RedexMut, Usage, compute_usage_flat,
     },
     treewalk::ActionCtx,
 };
@@ -73,36 +73,24 @@ pub fn to_graph(root: &FlatRoot, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -
 
     if let Some(ctx) = ctx {
         for edge in &ctx.chain.full_chain {
-            update_or_add_ctx_edge(
-                &mut graph,
-                edge.parent_index(),
-                edge.child,
-                edge.adjust,
-                "darkgreen",
-                "darkred",
-            );
+            update_or_add_ctx_edge(&mut graph, *edge, "darkgreen", "darkred");
         }
 
-        update_or_add_ctx_edge(
-            &mut graph,
-            ctx.parent_to_term.backing_index(),
-            ctx.term,
-            ctx.adjust,
-            "green",
-            "red",
-        );
+        update_or_add_ctx_edge(&mut graph, ctx.current_edge(), "green", "red");
     }
     graph
 }
 
 fn update_or_add_ctx_edge(
     graph: &mut Graph,
-    start: Option<BackingIndex>,
-    end: BackingIndex,
-    adjust: Adjustment,
+    edge: DoubleEndedEdge,
     ok_color: &str,
     err_color: &str,
 ) {
+    let start = edge.edge_w_parent.backing_index();
+    let end = edge.child;
+    let adjust = edge.adjust;
+
     let start = match start {
         Some(parent) => parent.to_string(),
         None => INTO_ROOT.to_string(),
@@ -358,7 +346,7 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
         .map(|index| NodeInfo::garbage(root, index))
         .collect();
     root.preorder_walk(|root, ctx| {
-        let abs_bound = match root[ctx.term] {
+        let abs_bound = match root[ctx.current_index()] {
             DebruijnNode::Index(index) => {
                 let chain = &ctx.chain;
                 let depth = ctx.chain.debruijn_depth();
@@ -392,15 +380,15 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
             None => None,
         };
 
-        let is_root = root.root.child == ctx.term;
+        let is_root = root.root.child == ctx.current_index();
 
-        let index = ctx.term;
+        let index = ctx.current_index();
         info_vec[index].is_root = if is_root { Some(root.root) } else { None };
         info_vec[index].is_garbage = false;
         info_vec[index].abs_binding = abs_bound;
         info_vec[index].redex_info = redex_info;
 
-        if matches!(root[ctx.term], DebruijnNode::Abstraction(_)) {
+        if matches!(root[ctx.current_index()], DebruijnNode::Abstraction(_)) {
             info_vec[index].computed_usage = Some(compute_usage_flat(root, ctx));
         }
         ControlFlow::Continue::<()>(())

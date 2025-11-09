@@ -26,45 +26,31 @@ pub struct ActionCtx {
     // Edge W Parent: C -> parent-side edge
     // The chain here will always be non-empty (at minimum it contains the into-root edge)
     pub chain: ParentChain,
-    // The parent half of the parent -> term edge
-    pub parent_to_term: EdgeWithParent,
-    // The adjustement for the parent -> term edge
-    pub adjust: Adjustment,
-    pub term: BackingIndex,
 }
 
 impl ActionCtx {
     pub fn from_root(root: &FlatRoot) -> ActionCtx {
         ActionCtx {
-            parent_to_term: EdgeWithParent::IntoRoot,
-            adjust: root.root.adjust,
-            term: root.root.child,
             chain: ParentChain::new(root),
         }
     }
 
     fn push_edge(&mut self, edge: DoubleEndedEdge) -> DoubleEndedEdge {
-        let old_edge = self.term_as_edge();
-        self.term = edge.child;
-        self.adjust = edge.adjust;
-        self.parent_to_term = edge.edge_w_parent;
+        let old_edge = self.current_edge();
         self.chain.push(edge);
         old_edge
     }
 
     fn pop_edge(&mut self, edge: DoubleEndedEdge, old_edge: DoubleEndedEdge) {
-        self.term = old_edge.child;
-        self.adjust = old_edge.adjust;
-        self.parent_to_term = old_edge.edge_w_parent;
         self.chain.pop(edge);
     }
 
-    fn term_as_edge(&self) -> DoubleEndedEdge {
-        DoubleEndedEdge {
-            edge_w_parent: self.parent_to_term,
-            child: self.term,
-            adjust: self.adjust,
-        }
+    pub fn current_edge(&self) -> DoubleEndedEdge {
+        *self.chain.full_chain.last().unwrap()
+    }
+
+    pub fn current_index(&self) -> BackingIndex {
+        self.current_edge().child
     }
 }
 
@@ -148,16 +134,16 @@ pub fn postorder_walk<T>(
         ctx.pop_edge(edge, old_edge);
         result
     }
-    let child_results = match root[ctx.term] {
+    let child_results = match root[ctx.current_index()] {
         DebruijnNode::Index(idx) => ChildResults::Index(idx),
         DebruijnNode::Abstraction(abs) => {
-            let body = abs.abs_to_body(ctx.term);
+            let body = abs.abs_to_body(ctx.current_index());
             let body_result = run_action(root, ctx, action, body);
             ChildResults::Abstraction { abs, body_result }
         }
         DebruijnNode::Application(app) => {
-            let func = app.func(ctx.term);
-            let arg = app.arg(ctx.term);
+            let func = app.func(ctx.current_index());
+            let arg = app.arg(ctx.current_index());
 
             let func_result = run_action(root, ctx, action, func);
             let arg_result = run_action(root, ctx, action, arg);
@@ -189,16 +175,16 @@ pub fn postorder_walk_mut<T>(
         ctx.pop_edge(edge, old_edge);
         result
     }
-    let child_results = match root[ctx.term] {
+    let child_results = match root[ctx.current_index()] {
         DebruijnNode::Index(idx) => ChildResults::Index(idx),
         DebruijnNode::Abstraction(abs) => {
-            let body = abs.abs_to_body(ctx.term);
+            let body = abs.abs_to_body(ctx.current_index());
             let body_result = run_action(root, ctx, action, body);
             ChildResults::Abstraction { abs, body_result }
         }
         DebruijnNode::Application(app) => {
-            let func = app.func(ctx.term);
-            let arg = app.arg(ctx.term);
+            let func = app.func(ctx.current_index());
+            let arg = app.arg(ctx.current_index());
 
             let func_result = run_action(root, ctx, action, func);
             let arg_result = run_action(root, ctx, action, arg);
@@ -234,15 +220,15 @@ pub fn preorder_walk<T>(
 
     action(root, ctx)?;
 
-    match root[ctx.term] {
+    match root[ctx.current_index()] {
         DebruijnNode::Index(_) => (),
         DebruijnNode::Abstraction(abs) => {
-            let body = abs.abs_to_body(ctx.term);
+            let body = abs.abs_to_body(ctx.current_index());
             run_action(root, ctx, action, body)?;
         }
         DebruijnNode::Application(app) => {
-            let func = app.func(ctx.term);
-            let arg = app.arg(ctx.term);
+            let func = app.func(ctx.current_index());
+            let arg = app.arg(ctx.current_index());
             run_action(root, ctx, action, func)?;
             run_action(root, ctx, action, arg)?;
         }
@@ -269,15 +255,15 @@ pub fn preorder_walk_mut<T>(
 
     action(root, ctx)?;
 
-    match root[ctx.term] {
+    match root[ctx.current_index()] {
         DebruijnNode::Index(_) => (),
         DebruijnNode::Abstraction(abs) => {
-            let body = abs.abs_to_body(ctx.term);
+            let body = abs.abs_to_body(ctx.current_index());
             run_action(root, ctx, action, body)?;
         }
         DebruijnNode::Application(app) => {
-            let func = app.func(ctx.term);
-            let arg = app.arg(ctx.term);
+            let func = app.func(ctx.current_index());
+            let arg = app.arg(ctx.current_index());
             run_action(root, ctx, action, func)?;
             run_action(root, ctx, action, arg)?;
         }
@@ -388,7 +374,7 @@ mod test {
 
         let mut actual = vec![];
         test_data.root.preorder_walk(|_root, ctx| {
-            actual.push(ctx.term);
+            actual.push(ctx.current_index());
             ControlFlow::Continue::<()>(())
         });
         let actual_pretty = test_data.into_string(&actual);
@@ -434,9 +420,10 @@ mod test {
             let expected = expected_depths[node_index];
             let actual = ctx.chain.debruijn_depth();
             assert_eq!(
-                expected, actual,
+                expected,
+                actual,
                 "expected depth of {expected} got {actual} at {node_index} ({:?})",
-                ctx.term
+                ctx.current_index()
             );
             node_index += 1;
             ControlFlow::Continue::<()>(())
@@ -475,7 +462,7 @@ mod test {
         root.preorder_walk(|root, ctx| {
             let mut inner_walk_index = 0;
             root.preorder_walk_at(ctx, |_root, ctx| {
-                let actual = ctx.term;
+                let actual = ctx.current_index();
                 let expected = expected_nodes[outer_walk_index][inner_walk_index].child;
                 assert_eq!(expected, actual, "expected TermIndex {expected}, got {actual} at {outer_walk_index},{inner_walk_index}");
 
@@ -509,8 +496,8 @@ mod test {
                 let actual = ctx.chain.debruijn_depth();
                 assert_eq!(
                     expected, actual,
-                    "expected depth of {expected} got {actual} at {outer_walk_index},{inner_walk_index}\n(ctx.term: {:?}, ter: {:?})",
-                    ctx.term, root[ctx.term]
+                    "expected depth of {expected} got {actual} at {outer_walk_index},{inner_walk_index}\n(ctx.current_index(): {:?}, ter: {:?})",
+                    ctx.current_index(), root[ctx.current_index()]
                 );
 
                 inner_walk_index += 1;
@@ -527,15 +514,17 @@ mod test {
 
         root.preorder_walk(|root, ctx| {
             let old_chain = ctx.chain.clone();
-            let old_term = ctx.term.clone();
+            let old_term = ctx.current_index().clone();
 
             root.preorder_walk_at(ctx, |_root, _ctx| {});
 
             assert_eq!(old_chain, ctx.chain);
             assert_eq!(
-                old_term, ctx.term,
+                old_term,
+                ctx.current_index(),
                 "Expected {:?} to equal {:?}",
-                old_term, ctx.term
+                old_term,
+                ctx.current_index()
             );
             ControlFlow::Continue::<()>(())
         });
@@ -547,15 +536,17 @@ mod test {
 
         root.preorder_walk_mut(|root, ctx| {
             let old_chain = ctx.chain.clone();
-            let old_term = ctx.term.clone();
+            let old_term = ctx.current_index().clone();
 
             root.preorder_walk_at_mut(ctx, |_root, _ctx| {});
 
             assert_eq!(old_chain, ctx.chain);
             assert_eq!(
-                old_term, ctx.term,
+                old_term,
+                ctx.current_index(),
                 "Expected {:?} to equal {:?}",
-                old_term, ctx.term
+                old_term,
+                ctx.current_index()
             );
             ControlFlow::Continue::<()>(())
         });
@@ -568,15 +559,17 @@ mod test {
 
         root.preorder_walk(|root, ctx| {
             let old_chain = ctx.chain.clone();
-            let old_term = ctx.term.clone();
+            let old_term = ctx.current_index().clone();
 
             postorder_walk(root, ctx, &mut |_root, _ctx, _results| {});
 
             assert_eq!(old_chain, ctx.chain);
             assert_eq!(
-                old_term, ctx.term,
+                old_term,
+                ctx.current_index(),
                 "Expected {:?} to equal {:?}",
-                old_term, ctx.term
+                old_term,
+                ctx.current_index()
             );
             ControlFlow::Continue::<()>(())
         });
@@ -589,15 +582,17 @@ mod test {
 
         root.preorder_walk_mut(|root, ctx| {
             let old_chain = ctx.chain.clone();
-            let old_term = ctx.term.clone();
+            let old_term = ctx.current_index().clone();
 
             postorder_walk_mut(root, ctx, &mut |_root, _ctx, _results| {});
 
             assert_eq!(old_chain, ctx.chain);
             assert_eq!(
-                old_term, ctx.term,
+                old_term,
+                ctx.current_index(),
                 "Expected {:?} to equal {:?}",
-                old_term, ctx.term
+                old_term,
+                ctx.current_index()
             );
             ControlFlow::Continue::<()>(())
         });

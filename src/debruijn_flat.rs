@@ -40,7 +40,7 @@ impl FlatRoot {
 
     pub fn is_bnf(&self) -> bool {
         let result = self.preorder_walk(|root, ctx| {
-            if RedexMut::is_redex(root, ctx.term) {
+            if RedexMut::is_redex(root, ctx.current_index()) {
                 ControlFlow::Break(false)
             } else {
                 ControlFlow::Continue(())
@@ -82,11 +82,11 @@ impl FlatRoot {
 
     pub fn check_usage(&self) -> Result<(), (BackingIndex, Usage, Usage)> {
         let result = self.preorder_walk(|root, ctx| {
-            if let DebruijnNode::Abstraction(abs) = root[ctx.term] {
+            if let DebruijnNode::Abstraction(abs) = root[ctx.current_index()] {
                 let expected = compute_usage_flat(root, ctx);
                 let actual = abs.usage;
                 if actual != expected {
-                    return ControlFlow::Break((ctx.term, actual, expected));
+                    return ControlFlow::Break((ctx.current_index(), actual, expected));
                 }
             };
             ControlFlow::Continue(())
@@ -268,7 +268,7 @@ pub fn compute_usage_flat(root: &FlatRoot, ctx: &mut ActionCtx) -> Usage {
     let init_depth = ctx.chain.debruijn_depth();
 
     root.preorder_walk_at(ctx, |root, ctx| {
-        if let DebruijnNode::Index(index) = root[ctx.term] {
+        if let DebruijnNode::Index(index) = root[ctx.current_index()] {
             let depth_relative_to_arg = ctx.chain.debruijn_depth() - init_depth;
             let (calculated_index, err) = index.get_failable(&ctx.chain);
             if let Some(err) = err {
@@ -701,17 +701,12 @@ impl RedexMut {
     }
 
     pub fn try_get(root: &FlatRoot, ctx: &mut ActionCtx) -> Option<RedexMut> {
-        match root[ctx.term] {
+        match root[ctx.current_index()] {
             DebruijnNode::Application(app) => match root[app.func] {
                 DebruijnNode::Abstraction(abs) => {
-                    let parent_to_app = DoubleEndedEdge {
-                        edge_w_parent: ctx.parent_to_term,
-                        child: ctx.term,
-                        adjust: ctx.adjust,
-                    };
                     let body = abs.abs_to_body(app.func.child);
                     let redex = RedexMut {
-                        parent_to_app: parent_to_app,
+                        parent_to_app: ctx.current_edge(),
                         app_to_abs: app.func,
                         abs_to_body: body,
                         app_to_arg: app.arg,
@@ -739,12 +734,7 @@ impl RedexMut {
         };
         chain.push(edge);
 
-        ActionCtx {
-            chain,
-            parent_to_term: edge_w_parent,
-            adjust,
-            term: child,
-        }
+        ActionCtx { chain }
     }
 
     fn func_ctx(&self) -> ActionCtx {
@@ -759,12 +749,7 @@ impl RedexMut {
             adjust,
         };
         chain.push(edge);
-        ActionCtx {
-            term: child,
-            chain,
-            parent_to_term: edge_w_parent,
-            adjust,
-        }
+        ActionCtx { chain }
     }
 }
 
@@ -889,7 +874,7 @@ fn get_usage_by_depth(root: &FlatRoot, ctx: &mut ActionCtx) -> Vec<Usage> {
     let init_depth = ctx.chain.debruijn_depth();
     let mut usages = vec![0; init_depth];
     root.preorder_walk_at(ctx, |root, ctx| {
-        if let DebruijnNode::Index(index) = root[ctx.term] {
+        if let DebruijnNode::Index(index) = root[ctx.current_index()] {
             let depth_relative_to_arg = ctx.chain.debruijn_depth() - init_depth;
             // We need to account for the fact that we may be inside an abstraction in the argument
             // If we are, we should skip if this is a bound variable.
@@ -1026,7 +1011,7 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
     let app_to_abs_adjustment = redex.app_to_abs.adjust;
 
     root.preorder_walk_at_mut(func_ctx, |root, ctx| {
-        let term = ctx.term;
+        let term = ctx.current_index();
         let chain = &ctx.chain;
         if let DebruijnNode::Index(debruijn_index) = root[term] {
             let depth_relative_to_arg = chain.debruijn_depth() - init_depth;
@@ -1051,7 +1036,7 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
                     clone_subtree_and_fix_up_fused(root, arg_ctx, up_by_amount)
                 };
                 // Point parent to the newly created subtree
-                repoint_node(root, ctx.parent_to_term, new_arg);
+                repoint_node(root, ctx.current_edge().edge_w_parent, new_arg);
                 substitution_i += 1;
             }
         }
@@ -1118,7 +1103,7 @@ fn up_by(root: &mut FlatRoot, ctx: &mut ActionCtx, up_by: DebruijnDepth) {
 fn shift_cutoff(root: &mut FlatRoot, ctx: &mut ActionCtx, up_by: isize, depth: DebruijnDepth) {
     let init_depth = ctx.chain.debruijn_depth();
     root.preorder_walk_at_mut(ctx, |root, ctx| {
-        let term = ctx.term;
+        let term = ctx.current_index();
         let chain = &ctx.chain;
         if let DebruijnNode::Index(term_index) = root[term] {
             let depth_relative_to_term = chain.debruijn_depth() + depth - init_depth;

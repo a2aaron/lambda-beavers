@@ -32,7 +32,7 @@ fn print_highlighted<'a>(root: &'a FlatRoot, highlighted: BackingIndex) -> Strin
             arg_result,
             ..
         } => {
-            let highlight = ctx.term == highlighted;
+            let highlight = ctx.current_index() == highlighted;
 
             PrintableTerm::Application {
                 highlight,
