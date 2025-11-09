@@ -8,11 +8,13 @@ use std::{
 
 use crate::{
     debruijn_flat::{
-        BackingIndex, DebruijnEdge, DebruijnIndex, DebruijnNode, FlatRoot, RedexMut, Usage,
-        compute_usage_flat,
+        Adjustment, BackingIndex, DebruijnEdge, DebruijnIndex, DebruijnNode, FlatRoot, RedexMut,
+        Usage, compute_usage_flat,
     },
     treewalk::ActionCtx,
 };
+
+const DEBUG: bool = false;
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 static TIMESTAMP: LazyLock<u64> = LazyLock::new(|| {
@@ -29,6 +31,9 @@ pub fn debug_write_to_file(root: &FlatRoot, name: &str) {
     _debug_write_to_file_ctx(root, None, name);
 }
 fn _debug_write_to_file_ctx(root: &FlatRoot, ctx: Option<&ActionCtx>, name: &str) {
+    if !DEBUG {
+        return;
+    }
     let args = GraphvizArgs { no_garbage: false };
     let graph = to_graph(root, ctx, &args);
 
@@ -37,7 +42,7 @@ fn _debug_write_to_file_ctx(root: &FlatRoot, ctx: Option<&ActionCtx>, name: &str
     std::fs::create_dir_all(folder).unwrap();
 
     let value = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
-    let graphviz_file = format!("{folder}/{value}_{name}.dot");
+    let graphviz_file = format!("{folder}/_{value}_{name}.dot");
     let image_file = format!("{folder}/{value}_{name}.png");
     std::fs::write(graphviz_file.clone(), graph.to_string()).expect("Failed to write dot file");
     // dot -Tpng out.dot > out_2.png
@@ -63,27 +68,80 @@ pub fn to_graph(root: &FlatRoot, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -
             continue;
         }
 
-        process_node(&mut graph, ctx, node_info);
+        process_node(&mut graph, node_info);
+    }
+
+    if let Some(ctx) = ctx {
+        for edge in &ctx.chain.full_chain {
+            update_or_add_ctx_edge(
+                &mut graph,
+                edge.parent_index(),
+                edge.child,
+                edge.adjust,
+                "darkgreen",
+                "darkred",
+            );
+        }
+
+        update_or_add_ctx_edge(
+            &mut graph,
+            ctx.parent_to_term.backing_index(),
+            ctx.term,
+            ctx.adjust,
+            "green",
+            "red",
+        );
     }
     graph
 }
 
-fn process_node(graph: &mut Graph, ctx: Option<&ActionCtx>, node_info: NodeInfo) {
-    let graph_node = make_node(ctx, node_info);
+fn update_or_add_ctx_edge(
+    graph: &mut Graph,
+    start: Option<BackingIndex>,
+    end: BackingIndex,
+    adjust: Adjustment,
+    ok_color: &str,
+    err_color: &str,
+) {
+    let start = match start {
+        Some(parent) => parent.to_string(),
+        None => INTO_ROOT.to_string(),
+    };
+    let end = end.to_string();
+
+    let ok = graph.get_edge(&start, &end).is_some();
+
+    let mut attributes = Attributes::new();
+    attributes.set("style", "dotted");
+    attributes.set("constraint", "false");
+
+    if ok {
+        attributes.set("color", ok_color);
+        attributes.set("fontcolor", ok_color);
+    } else {
+        attributes.set("color", err_color);
+        attributes.set("fontcolor", err_color);
+    }
+
+    if let Some(adj) = adjust {
+        attributes.append_label(format!("adj = {adj}"));
+    }
+
+    let edge = GraphvizEdge {
+        start,
+        end,
+        attributes,
+    };
+    graph.edges.push(edge);
+}
+
+fn process_node(graph: &mut Graph, node_info: NodeInfo) {
+    let graph_node = make_node(node_info);
 
     let mut edges = get_edges(node_info);
 
     if let Some(root_edge) = node_info.is_root {
-        let mut edge = GraphvizEdge::from_debruijn_edge(root_edge, &node_info);
-        // Use an invisible node to represent the "into root" edge
-        let mut invis_root_attribs = Attributes::new();
-        invis_root_attribs.set("style", "invis");
-
-        let node = GraphvizNode {
-            name: "invis_root".to_string(),
-            attributes: invis_root_attribs,
-        };
-        edge.start = "invis_root".to_string();
+        let (edge, node) = make_into_root_edge(node_info, root_edge);
         edges.push(edge);
         graph.nodes.push(node)
     }
@@ -91,21 +149,44 @@ fn process_node(graph: &mut Graph, ctx: Option<&ActionCtx>, node_info: NodeInfo)
     if let DebruijnNode::Application(app) = node_info.node
         && !node_info.is_garbage
     {
-        let mut edge_attribs = Attributes::new();
-        edge_attribs.set("style", "invis");
-        let edge = GraphvizEdge::new(app.func.child, app.arg.child, &edge_attribs);
-        let mut same_rank = Graph::default();
-        same_rank.edges.push(edge);
-        same_rank.attribs.set("rank", "same");
-        same_rank.attribs.set("rankdir", "LR");
-        graph.subgraphs.push(same_rank);
+        add_subgraph_for_application_edge(graph, app);
     }
 
     graph.nodes.push(graph_node);
     graph.edges.append(&mut edges);
 }
 
-fn make_node(ctx: Option<&ActionCtx>, node_info: NodeInfo) -> GraphvizNode {
+fn make_into_root_edge(
+    node_info: NodeInfo,
+    root_edge: DebruijnEdge,
+) -> (GraphvizEdge, GraphvizNode) {
+    // Use an invisible node to represent the "into root" edge
+    let mut invis_root_attribs = Attributes::new();
+    invis_root_attribs.set("style", "invis");
+
+    let node = GraphvizNode {
+        name: INTO_ROOT.to_string(),
+        attributes: invis_root_attribs,
+    };
+
+    let mut edge = GraphvizEdge::from_debruijn_edge(root_edge, &node_info);
+    edge.start = INTO_ROOT.to_string();
+
+    (edge, node)
+}
+
+fn add_subgraph_for_application_edge(graph: &mut Graph, app: crate::debruijn_flat::Application) {
+    let mut edge_attribs = Attributes::new();
+    edge_attribs.set("style", "invis");
+    let edge = GraphvizEdge::new(app.func.child, app.arg.child, &edge_attribs);
+    let mut same_rank = Graph::default();
+    same_rank.edges.push(edge);
+    same_rank.attribs.set("rank", "same");
+    same_rank.attribs.set("rankdir", "LR");
+    graph.subgraphs.push(same_rank);
+}
+
+fn make_node(node_info: NodeInfo) -> GraphvizNode {
     let mut attributes = Attributes::new();
     // Set basic info
     attributes
@@ -181,11 +262,6 @@ fn make_node(ctx: Option<&ActionCtx>, node_info: NodeInfo) -> GraphvizNode {
             "WRONG USAGE - claimed: {}, actual: {} ",
             abs.usage, computed_usage
         ));
-    }
-
-    // Highlight the current ctx node
-    if ctx.is_some_and(|ctx| ctx.term == node_info.index) {
-        attributes.set("color", "green");
     }
 
     let graph_node = GraphvizNode::new(node_info.index, attributes);
@@ -341,6 +417,8 @@ fn to_node_label(term: DebruijnNode) -> String {
     }
 }
 
+const INTO_ROOT: &str = "into_root";
+
 const GARBAGE_COLOR: &str = "lightgrey";
 const NORMAL_COLOR: &str = "black";
 
@@ -425,6 +503,12 @@ impl Graph {
         output.push(format!("}}"));
         output.join("\n")
     }
+
+    fn get_edge(&mut self, start: &str, end: &str) -> Option<&mut GraphvizEdge> {
+        self.edges
+            .iter_mut()
+            .find(|edge| edge.start == start && edge.end == end)
+    }
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
@@ -467,23 +551,26 @@ impl GraphvizEdge {
     }
 
     fn from_debruijn_edge(edge: DebruijnEdge, node_info: &NodeInfo) -> GraphvizEdge {
+        let start = node_info.index;
+        let end = edge.child;
+
         let mut attributes = Attributes::new();
         attributes.set("color", NORMAL_COLOR);
 
+        // Grey out edge if it is part of garbage
         if node_info.is_garbage {
             // attributes.set("constraint", "false");
             attributes.set("color", GARBAGE_COLOR);
             attributes.set("fontcolor", GARBAGE_COLOR);
         }
 
+        // Highlight edge if it has an adjustment
         if let Some(adjust) = edge.adjust {
             attributes.set("penwidth", "5");
             attributes.set("label", format!("adj = {adjust}"));
         }
 
-        let head = node_info.index;
-        let tail = edge.child;
-        GraphvizEdge::new(head, tail, &attributes)
+        GraphvizEdge::new(start, end, &attributes)
     }
 }
 
