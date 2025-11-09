@@ -1,7 +1,7 @@
 use std::ops::ControlFlow;
 
 use crate::debruijn_flat::{
-    Abstraction, Application, BackingIndex, DebruijnIndex, DebruijnNode, DoubleEndedEdge, FlatRoot,
+    Abstraction, Application, BackingIndex, DebruijnIndex, DebruijnNode, DoubleEndedEdge, FlatTree,
     ParentChain,
 };
 
@@ -29,9 +29,9 @@ pub struct ActionCtx {
 }
 
 impl ActionCtx {
-    pub fn from_root(root: &FlatRoot) -> ActionCtx {
+    pub fn new(tree: &FlatTree) -> ActionCtx {
         ActionCtx {
-            chain: ParentChain::new(root),
+            chain: ParentChain::new(tree),
         }
     }
 
@@ -52,44 +52,44 @@ impl ActionCtx {
     }
 }
 
-pub trait ActionMut<T> = FnMut(&mut FlatRoot, &mut ActionCtx) -> ControlFlow<T>;
-pub trait Action<T> = FnMut(&FlatRoot, &mut ActionCtx) -> ControlFlow<T>;
+pub trait ActionMut<T> = FnMut(&mut FlatTree, &mut ActionCtx) -> ControlFlow<T>;
+pub trait Action<T> = FnMut(&FlatTree, &mut ActionCtx) -> ControlFlow<T>;
 
-impl FlatRoot {
+impl FlatTree {
     pub fn preorder_walk<T>(&self, mut action: impl Action<T>) -> Option<T> {
-        let mut ctx = ActionCtx::from_root(self);
+        let mut ctx = ActionCtx::new(self);
         preorder_walk(self, &mut ctx, &mut action).break_value()
     }
 
     pub fn preorder_walk_at(
         &self,
         ctx: &mut ActionCtx,
-        mut action: impl FnMut(&FlatRoot, &mut ActionCtx),
+        mut action: impl FnMut(&FlatTree, &mut ActionCtx),
     ) {
-        let _ = preorder_walk(self, ctx, &mut |root, ctx| {
-            action(root, ctx);
+        let _ = preorder_walk(self, ctx, &mut |tree, ctx| {
+            action(tree, ctx);
             ControlFlow::Continue::<()>(())
         });
     }
 
     pub fn preorder_walk_mut<T>(&mut self, mut action: impl ActionMut<T>) -> Option<T> {
-        let mut ctx = ActionCtx::from_root(self);
+        let mut ctx = ActionCtx::new(self);
         preorder_walk_mut(self, &mut ctx, &mut action).break_value()
     }
 
     pub fn preorder_walk_at_mut(
         &mut self,
         ctx: &mut ActionCtx,
-        mut action: impl FnMut(&mut FlatRoot, &mut ActionCtx),
+        mut action: impl FnMut(&mut FlatTree, &mut ActionCtx),
     ) {
-        let _ = preorder_walk_mut(self, ctx, &mut |root, ctx| {
-            action(root, ctx);
+        let _ = preorder_walk_mut(self, ctx, &mut |tree, ctx| {
+            action(tree, ctx);
             ControlFlow::Continue::<()>(())
         });
     }
 
     pub fn postorder_walk<T>(&self, mut action: impl PostOrderAction<T>) -> T {
-        let mut ctx = ActionCtx::from_root(self);
+        let mut ctx = ActionCtx::new(self);
         postorder_walk(self, &mut ctx, &mut action)
     }
 
@@ -102,8 +102,8 @@ impl FlatRoot {
     }
 }
 
-pub trait PostOrderAction<T> = FnMut(&FlatRoot, &ActionCtx, ChildResults<T>) -> T;
-pub trait PostOrderActionMut<T> = FnMut(&mut FlatRoot, &ActionCtx, ChildResults<T>) -> T;
+pub trait PostOrderAction<T> = FnMut(&FlatTree, &ActionCtx, ChildResults<T>) -> T;
+pub trait PostOrderActionMut<T> = FnMut(&mut FlatTree, &ActionCtx, ChildResults<T>) -> T;
 pub enum ChildResults<T> {
     Index(DebruijnIndex),
     Abstraction {
@@ -117,34 +117,34 @@ pub enum ChildResults<T> {
     },
 }
 pub fn postorder_walk<T>(
-    root: &FlatRoot,
+    tree: &FlatTree,
     ctx: &mut ActionCtx,
     action: &mut impl PostOrderAction<T>,
 ) -> T {
     fn run_action<T>(
-        root: &FlatRoot,
+        tree: &FlatTree,
         ctx: &mut ActionCtx,
         action: &mut impl PostOrderAction<T>,
         edge: DoubleEndedEdge,
     ) -> T {
         ctx.push_edge(edge);
-        let result = postorder_walk(root, ctx, action);
+        let result = postorder_walk(tree, ctx, action);
         ctx.pop_edge(edge);
         result
     }
-    let child_results = match root[ctx.current_index()] {
+    let child_results = match tree[ctx.current_index()] {
         DebruijnNode::Index(idx) => ChildResults::Index(idx),
         DebruijnNode::Abstraction(abs) => {
             let body = abs.abs_to_body(ctx.current_index());
-            let body_result = run_action(root, ctx, action, body);
+            let body_result = run_action(tree, ctx, action, body);
             ChildResults::Abstraction { abs, body_result }
         }
         DebruijnNode::Application(app) => {
             let func = app.func(ctx.current_index());
             let arg = app.arg(ctx.current_index());
 
-            let func_result = run_action(root, ctx, action, func);
-            let arg_result = run_action(root, ctx, action, arg);
+            let func_result = run_action(tree, ctx, action, func);
+            let arg_result = run_action(tree, ctx, action, arg);
             ChildResults::Application {
                 app,
                 func_result,
@@ -153,39 +153,39 @@ pub fn postorder_walk<T>(
         }
     };
 
-    let result = action(root, ctx, child_results);
+    let result = action(tree, ctx, child_results);
     result
 }
 
 pub fn postorder_walk_mut<T>(
-    root: &mut FlatRoot,
+    tree: &mut FlatTree,
     ctx: &mut ActionCtx,
     action: &mut impl PostOrderActionMut<T>,
 ) -> T {
     fn run_action<T>(
-        root: &mut FlatRoot,
+        tree: &mut FlatTree,
         ctx: &mut ActionCtx,
         action: &mut impl PostOrderActionMut<T>,
         edge: DoubleEndedEdge,
     ) -> T {
         ctx.push_edge(edge);
-        let result = postorder_walk_mut(root, ctx, action);
+        let result = postorder_walk_mut(tree, ctx, action);
         ctx.pop_edge(edge);
         result
     }
-    let child_results = match root[ctx.current_index()] {
+    let child_results = match tree[ctx.current_index()] {
         DebruijnNode::Index(idx) => ChildResults::Index(idx),
         DebruijnNode::Abstraction(abs) => {
             let body = abs.abs_to_body(ctx.current_index());
-            let body_result = run_action(root, ctx, action, body);
+            let body_result = run_action(tree, ctx, action, body);
             ChildResults::Abstraction { abs, body_result }
         }
         DebruijnNode::Application(app) => {
             let func = app.func(ctx.current_index());
             let arg = app.arg(ctx.current_index());
 
-            let func_result = run_action(root, ctx, action, func);
-            let arg_result = run_action(root, ctx, action, arg);
+            let func_result = run_action(tree, ctx, action, func);
+            let arg_result = run_action(tree, ctx, action, arg);
 
             ChildResults::Application {
                 app,
@@ -195,75 +195,75 @@ pub fn postorder_walk_mut<T>(
         }
     };
 
-    let result = action(root, &ctx, child_results);
+    let result = action(tree, &ctx, child_results);
     result
 }
 
 pub fn preorder_walk<T>(
-    root: &FlatRoot,
+    tree: &FlatTree,
     ctx: &mut ActionCtx,
     action: &mut impl Action<T>,
 ) -> ControlFlow<T> {
     fn run_action<T>(
-        root: &FlatRoot,
+        tree: &FlatTree,
         ctx: &mut ActionCtx,
         action: &mut impl Action<T>,
         edge: DoubleEndedEdge,
     ) -> ControlFlow<T> {
         ctx.push_edge(edge);
-        let result = preorder_walk(root, ctx, action);
+        let result = preorder_walk(tree, ctx, action);
         ctx.pop_edge(edge);
         result
     }
 
-    action(root, ctx)?;
+    action(tree, ctx)?;
 
-    match root[ctx.current_index()] {
+    match tree[ctx.current_index()] {
         DebruijnNode::Index(_) => (),
         DebruijnNode::Abstraction(abs) => {
             let body = abs.abs_to_body(ctx.current_index());
-            run_action(root, ctx, action, body)?;
+            run_action(tree, ctx, action, body)?;
         }
         DebruijnNode::Application(app) => {
             let func = app.func(ctx.current_index());
             let arg = app.arg(ctx.current_index());
-            run_action(root, ctx, action, func)?;
-            run_action(root, ctx, action, arg)?;
+            run_action(tree, ctx, action, func)?;
+            run_action(tree, ctx, action, arg)?;
         }
     }
     ControlFlow::Continue(())
 }
 
 pub fn preorder_walk_mut<T>(
-    root: &mut FlatRoot,
+    tree: &mut FlatTree,
     ctx: &mut ActionCtx,
     action: &mut impl ActionMut<T>,
 ) -> ControlFlow<T> {
     fn run_action<T>(
-        root: &mut FlatRoot,
+        tree: &mut FlatTree,
         ctx: &mut ActionCtx,
         action: &mut impl ActionMut<T>,
         edge: DoubleEndedEdge,
     ) -> ControlFlow<T> {
         ctx.push_edge(edge);
-        let result = preorder_walk_mut(root, ctx, action);
+        let result = preorder_walk_mut(tree, ctx, action);
         ctx.pop_edge(edge);
         result
     }
 
-    action(root, ctx)?;
+    action(tree, ctx)?;
 
-    match root[ctx.current_index()] {
+    match tree[ctx.current_index()] {
         DebruijnNode::Index(_) => (),
         DebruijnNode::Abstraction(abs) => {
             let body = abs.abs_to_body(ctx.current_index());
-            run_action(root, ctx, action, body)?;
+            run_action(tree, ctx, action, body)?;
         }
         DebruijnNode::Application(app) => {
             let func = app.func(ctx.current_index());
             let arg = app.arg(ctx.current_index());
-            run_action(root, ctx, action, func)?;
-            run_action(root, ctx, action, arg)?;
+            run_action(tree, ctx, action, func)?;
+            run_action(tree, ctx, action, arg)?;
         }
     }
     ControlFlow::Continue(())
@@ -275,7 +275,7 @@ mod test {
     use std::{collections::HashMap, ops::ControlFlow, str::FromStr};
 
     use crate::{
-        debruijn_flat::{BackingIndex, DebruijnEdge, DebruijnNode, FlatRoot},
+        debruijn_flat::{BackingIndex, DebruijnEdge, DebruijnNode, FlatTree},
         treewalk::{postorder_walk, postorder_walk_mut},
     };
 
@@ -295,7 +295,7 @@ mod test {
     type NameToNode = HashMap<String, BackingIndex>;
 
     struct TestData {
-        root: FlatRoot,
+        tree: FlatTree,
         node_to_name: NodeToName,
         name_to_node: NameToNode,
     }
@@ -309,7 +309,7 @@ mod test {
         //    / \    \
         //   C   E    H
         fn new() -> TestData {
-            let root = FlatRoot::from(vec![
+            let tree = FlatTree::from(vec![
                 call(1, 6), // 0 | F -> B, G
                 call(2, 3), // 1 | B -> A, D
                 idx(0),     // 2 | A
@@ -347,7 +347,7 @@ mod test {
             TestData {
                 node_to_name,
                 name_to_node,
-                root,
+                tree,
             }
         }
 
@@ -371,7 +371,7 @@ mod test {
         let expected = test_data.from_string(&expected_pretty);
 
         let mut actual = vec![];
-        test_data.root.preorder_walk(|_root, ctx| {
+        test_data.tree.preorder_walk(|_tree, ctx| {
             actual.push(ctx.current_index());
             ControlFlow::Continue::<()>(())
         });
@@ -392,12 +392,12 @@ mod test {
 
     #[test]
     fn test_preorder_chain_depth_1() {
-        let root = FlatRoot::from_str("λ λ 1").unwrap();
+        let tree = FlatTree::from_str("λ λ 1").unwrap();
 
         let mut node_index = 0;
         let expected_depths = [0, 1, 2];
 
-        root.preorder_walk(|_root, ctx| {
+        tree.preorder_walk(|_tree, ctx| {
             let expected = expected_depths[node_index];
             let actual = ctx.chain.debruijn_depth();
             assert_eq!(actual, expected);
@@ -414,7 +414,7 @@ mod test {
         //                                 F  B  A  D  C  E  G  I, H
         let expected_depths = [0, 0, 0, 0, 0, 0, 0, 1, 2];
 
-        test_data.root.preorder_walk(|_root, ctx| {
+        test_data.tree.preorder_walk(|_tree, ctx| {
             let expected = expected_depths[node_index];
             let actual = ctx.chain.debruijn_depth();
             assert_eq!(
@@ -435,16 +435,16 @@ mod test {
         // B - λ
         //     |
         // C - 1
-        let root = FlatRoot::from_str("λ λ 1").unwrap();
-        let node_a = root.root;
+        let tree = FlatTree::from_str("λ λ 1").unwrap();
+        let node_a = tree.root;
         let node_b = {
-            let DebruijnNode::Abstraction(abs) = root[node_a] else {
+            let DebruijnNode::Abstraction(abs) = tree[node_a] else {
                 unreachable!()
             };
             abs.body
         };
         let node_c = {
-            let DebruijnNode::Abstraction(abs) = root[node_b] else {
+            let DebruijnNode::Abstraction(abs) = tree[node_b] else {
                 unreachable!()
             };
             abs.body
@@ -457,9 +457,9 @@ mod test {
         ];
 
         let mut outer_walk_index = 0;
-        root.preorder_walk(|root, ctx| {
+        tree.preorder_walk(|tree, ctx| {
             let mut inner_walk_index = 0;
-            root.preorder_walk_at(ctx, |_root, ctx| {
+            tree.preorder_walk_at(ctx, |_tree, ctx| {
                 let actual = ctx.current_index();
                 let expected = expected_nodes[outer_walk_index][inner_walk_index].child;
                 assert_eq!(expected, actual, "expected TermIndex {expected}, got {actual} at {outer_walk_index},{inner_walk_index}");
@@ -478,7 +478,7 @@ mod test {
         // B - λ
         //     |
         // C - 1
-        let root = FlatRoot::from_str("λ λ 1").unwrap();
+        let tree = FlatTree::from_str("λ λ 1").unwrap();
         // outer walk: A, B, C
         let expected_depths = [
             vec![0, 1, 2], // A B C
@@ -487,15 +487,15 @@ mod test {
         ];
 
         let mut outer_walk_index = 0;
-        root.preorder_walk(|root, ctx| {
+        tree.preorder_walk(|tree, ctx| {
             let mut inner_walk_index = 0;
-            root.preorder_walk_at(ctx, |_root, ctx| {
+            tree.preorder_walk_at(ctx, |_tree, ctx| {
                 let expected = expected_depths[outer_walk_index][inner_walk_index];
                 let actual = ctx.chain.debruijn_depth();
                 assert_eq!(
                     expected, actual,
                     "expected depth of {expected} got {actual} at {outer_walk_index},{inner_walk_index}\n(ctx.current_index(): {:?}, ter: {:?})",
-                    ctx.current_index(), root[ctx.current_index()]
+                    ctx.current_index(), tree[ctx.current_index()]
                 );
 
                 inner_walk_index += 1;
@@ -507,14 +507,14 @@ mod test {
 
     #[test]
     fn test_preorder_immutability() {
-        let root =
-            FlatRoot::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
+        let tree =
+            FlatTree::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
 
-        root.preorder_walk(|root, ctx| {
+        tree.preorder_walk(|tree, ctx| {
             let old_chain = ctx.chain.clone();
             let old_term = ctx.current_index().clone();
 
-            root.preorder_walk_at(ctx, |_root, _ctx| {});
+            tree.preorder_walk_at(ctx, |_tree, _ctx| {});
 
             assert_eq!(old_chain, ctx.chain);
             assert_eq!(
@@ -529,14 +529,14 @@ mod test {
     }
     #[test]
     fn test_preorder_mut_immutability() {
-        let mut root =
-            FlatRoot::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
+        let mut tree =
+            FlatTree::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
 
-        root.preorder_walk_mut(|root, ctx| {
+        tree.preorder_walk_mut(|tree, ctx| {
             let old_chain = ctx.chain.clone();
             let old_term = ctx.current_index().clone();
 
-            root.preorder_walk_at_mut(ctx, |_root, _ctx| {});
+            tree.preorder_walk_at_mut(ctx, |_tree, _ctx| {});
 
             assert_eq!(old_chain, ctx.chain);
             assert_eq!(
@@ -552,14 +552,14 @@ mod test {
 
     #[test]
     fn test_postorder_immutability() {
-        let root =
-            FlatRoot::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
+        let tree =
+            FlatTree::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
 
-        root.preorder_walk(|root, ctx| {
+        tree.preorder_walk(|tree, ctx| {
             let old_chain = ctx.chain.clone();
             let old_term = ctx.current_index().clone();
 
-            postorder_walk(root, ctx, &mut |_root, _ctx, _results| {});
+            postorder_walk(tree, ctx, &mut |_tree, _ctx, _results| {});
 
             assert_eq!(old_chain, ctx.chain);
             assert_eq!(
@@ -575,14 +575,14 @@ mod test {
 
     #[test]
     fn test_postorder_mut_immutability() {
-        let mut root =
-            FlatRoot::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
+        let mut tree =
+            FlatTree::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
 
-        root.preorder_walk_mut(|root, ctx| {
+        tree.preorder_walk_mut(|tree, ctx| {
             let old_chain = ctx.chain.clone();
             let old_term = ctx.current_index().clone();
 
-            postorder_walk_mut(root, ctx, &mut |_root, _ctx, _results| {});
+            postorder_walk_mut(tree, ctx, &mut |_tree, _ctx, _results| {});
 
             assert_eq!(old_chain, ctx.chain);
             assert_eq!(

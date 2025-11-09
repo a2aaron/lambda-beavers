@@ -6,10 +6,10 @@ use lambda_beavers::{debruijn::Debruijn, reduce::Reducer};
 
 #[track_caller]
 fn assert_usage(reducer: &Reducer) {
-    if let Err((failing_term, actual, expected)) = reducer.root.check_usage() {
+    if let Err((failing_term, actual, expected)) = reducer.tree.check_usage() {
         panic!(
             "Expected usage to be {expected} but got {actual} for node {failing_term} in {}",
-            reducer.root
+            reducer.tree
         );
     }
 }

@@ -12,15 +12,15 @@ use crate::{
 };
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
-pub struct FlatRoot {
+pub struct FlatTree {
     pub backing: Vec<DebruijnNode>,
     // The into-root edge, which has no parent and whose child is the root node itself
     // --> root
     pub root: DebruijnEdge,
 }
-impl FlatRoot {
-    fn new() -> FlatRoot {
-        FlatRoot {
+impl FlatTree {
+    fn new() -> FlatTree {
+        FlatTree {
             backing: vec![],
             root: DebruijnEdge {
                 child: 0,
@@ -39,8 +39,8 @@ impl FlatRoot {
     }
 
     pub fn is_bnf(&self) -> bool {
-        let result = self.preorder_walk(|root, ctx| {
-            if RedexMut::is_redex(root, ctx.current_index()) {
+        let result = self.preorder_walk(|tree, ctx| {
+            if RedexMut::is_redex(tree, ctx.current_index()) {
                 ControlFlow::Break(false)
             } else {
                 ControlFlow::Continue(())
@@ -51,8 +51,8 @@ impl FlatRoot {
 
     pub fn get_redexes(&self) -> Vec<RedexMut> {
         let mut redexes = vec![];
-        self.preorder_walk(|root, ctx| {
-            if let Some(redex) = RedexMut::try_get(root, ctx) {
+        self.preorder_walk(|tree, ctx| {
+            if let Some(redex) = RedexMut::try_get(tree, ctx) {
                 redexes.push(redex);
             }
             ControlFlow::Continue::<()>(())
@@ -60,30 +60,30 @@ impl FlatRoot {
         redexes
     }
 
-    pub fn normalized(&self) -> FlatRoot {
-        let mut new_root = FlatRoot::new();
-        let root_node = self.postorder_walk(|_root, ctx, result| match result {
+    pub fn normalized(&self) -> FlatTree {
+        let mut new_tree = FlatTree::new();
+        let root_node = self.postorder_walk(|_tree, ctx, result| match result {
             ChildResults::Index(idx) => {
                 let index = idx.get(&ctx.chain);
-                new_root.alloc(DebruijnNode::idx(index))
+                new_tree.alloc(DebruijnNode::idx(index))
             }
             ChildResults::Abstraction { abs, body_result } => {
-                new_root.alloc(DebruijnNode::abs(body_result, abs.usage))
+                new_tree.alloc(DebruijnNode::abs(body_result, abs.usage))
             }
             ChildResults::Application {
                 func_result,
                 arg_result,
                 ..
-            } => new_root.alloc(DebruijnNode::app(func_result, arg_result)),
+            } => new_tree.alloc(DebruijnNode::app(func_result, arg_result)),
         });
-        new_root.root = root_node;
-        new_root
+        new_tree.root = root_node;
+        new_tree
     }
 
     pub fn check_usage(&self) -> Result<(), (BackingIndex, Usage, Usage)> {
-        let result = self.preorder_walk(|root, ctx| {
-            if let DebruijnNode::Abstraction(abs) = root[ctx.current_index()] {
-                let expected = compute_usage_flat(root, ctx);
+        let result = self.preorder_walk(|tree, ctx| {
+            if let DebruijnNode::Abstraction(abs) = tree[ctx.current_index()] {
+                let expected = compute_usage_flat(tree, ctx);
                 let actual = abs.usage;
                 if actual != expected {
                     return ControlFlow::Break((ctx.current_index(), actual, expected));
@@ -118,27 +118,27 @@ impl FlatRoot {
     }
 }
 
-impl FromStr for FlatRoot {
+impl FromStr for FlatTree {
     type Err = <Debruijn as FromStr>::Err;
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
-        Ok(FlatRoot::from(&Debruijn::from_str(s)?))
+        Ok(FlatTree::from(&Debruijn::from_str(s)?))
     }
 }
 
-impl Display for FlatRoot {
+impl Display for FlatTree {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         Display::fmt(&Debruijn::from(self), f)
     }
 }
 
-impl Binary for FlatRoot {
+impl Binary for FlatTree {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         Binary::fmt(&Debruijn::from(self), f)
     }
 }
 
-impl Index<BackingIndex> for FlatRoot {
+impl Index<BackingIndex> for FlatTree {
     type Output = DebruijnNode;
 
     fn index(&self, index: BackingIndex) -> &Self::Output {
@@ -146,13 +146,13 @@ impl Index<BackingIndex> for FlatRoot {
     }
 }
 
-impl IndexMut<BackingIndex> for FlatRoot {
+impl IndexMut<BackingIndex> for FlatTree {
     fn index_mut(&mut self, index: BackingIndex) -> &mut Self::Output {
         &mut self.backing[index]
     }
 }
 
-impl Index<DebruijnEdge> for FlatRoot {
+impl Index<DebruijnEdge> for FlatTree {
     type Output = DebruijnNode;
 
     fn index(&self, index: DebruijnEdge) -> &Self::Output {
@@ -160,13 +160,13 @@ impl Index<DebruijnEdge> for FlatRoot {
     }
 }
 
-impl IndexMut<DebruijnEdge> for FlatRoot {
+impl IndexMut<DebruijnEdge> for FlatTree {
     fn index_mut(&mut self, index: DebruijnEdge) -> &mut Self::Output {
         &mut self[index.child]
     }
 }
 
-impl Index<DoubleEndedEdge> for FlatRoot {
+impl Index<DoubleEndedEdge> for FlatTree {
     type Output = DebruijnNode;
 
     fn index(&self, index: DoubleEndedEdge) -> &Self::Output {
@@ -174,54 +174,54 @@ impl Index<DoubleEndedEdge> for FlatRoot {
     }
 }
 
-impl IndexMut<DoubleEndedEdge> for FlatRoot {
+impl IndexMut<DoubleEndedEdge> for FlatTree {
     fn index_mut(&mut self, index: DoubleEndedEdge) -> &mut Self::Output {
         &mut self[index.child]
     }
 }
 
-impl From<Vec<DebruijnNode>> for FlatRoot {
+impl From<Vec<DebruijnNode>> for FlatTree {
     fn from(backing: Vec<DebruijnNode>) -> Self {
-        FlatRoot {
+        FlatTree {
             backing,
             root: DebruijnEdge::new(0),
         }
     }
 }
 
-impl From<Debruijn> for FlatRoot {
+impl From<Debruijn> for FlatTree {
     fn from(value: Debruijn) -> Self {
-        FlatRoot::from(&value)
+        FlatTree::from(&value)
     }
 }
 
-impl From<&Debruijn> for FlatRoot {
+impl From<&Debruijn> for FlatTree {
     fn from(term: &Debruijn) -> Self {
-        fn flatten(root: &mut FlatRoot, term: &Debruijn) -> DebruijnEdge {
+        fn flatten(tree: &mut FlatTree, term: &Debruijn) -> DebruijnEdge {
             match term {
-                Debruijn::Index(index) => root.alloc(DebruijnNode::idx(*index)),
+                Debruijn::Index(index) => tree.alloc(DebruijnNode::idx(*index)),
                 Debruijn::Abstraction { body } => {
                     let usage = compute_usage(&body);
-                    let body = flatten(root, body);
-                    root.alloc(DebruijnNode::abs(body, usage))
+                    let body = flatten(tree, body);
+                    tree.alloc(DebruijnNode::abs(body, usage))
                 }
                 Debruijn::Application { func, arg } => {
-                    let func = flatten(root, func);
-                    let arg = flatten(root, arg);
-                    root.alloc(DebruijnNode::app(func, arg))
+                    let func = flatten(tree, func);
+                    let arg = flatten(tree, arg);
+                    tree.alloc(DebruijnNode::app(func, arg))
                 }
             }
         }
 
-        let mut root = FlatRoot::new();
-        root.root = flatten(&mut root, term);
-        root
+        let mut tree = FlatTree::new();
+        tree.root = flatten(&mut tree, term);
+        tree
     }
 }
 
-impl From<&FlatRoot> for Debruijn {
-    fn from(root: &FlatRoot) -> Self {
-        root.postorder_walk(|_root, ctx, child_results| match child_results {
+impl From<&FlatTree> for Debruijn {
+    fn from(tree: &FlatTree) -> Self {
+        tree.postorder_walk(|_tree, ctx, child_results| match child_results {
             ChildResults::Index(idx) => Debruijn::Index(idx.get(&ctx.chain)),
             ChildResults::Abstraction { body_result, .. } => Debruijn::Abstraction {
                 body: Box::new(body_result),
@@ -263,17 +263,17 @@ fn compute_usage(body: &Debruijn) -> Usage {
 /// (that is to say, this function computes the number times the input variable appears in the
 /// eg: in λ 1 λ 2 λ 3, we have that 1, 2, and 3 all refer to the same variable, so the usage is 3
 /// Note that ctx needs to be pointing at an abstraction!
-pub fn compute_usage_flat(root: &FlatRoot, ctx: &mut ActionCtx) -> Usage {
+pub fn compute_usage_flat(tree: &FlatTree, ctx: &mut ActionCtx) -> Usage {
     let mut usage = 0;
     let init_depth = ctx.chain.debruijn_depth();
 
-    root.preorder_walk_at(ctx, |root, ctx| {
-        if let DebruijnNode::Index(index) = root[ctx.current_index()] {
+    tree.preorder_walk_at(ctx, |tree, ctx| {
+        if let DebruijnNode::Index(index) = tree[ctx.current_index()] {
             let depth_relative_to_arg = ctx.chain.debruijn_depth() - init_depth;
             let (calculated_index, err) = index.get_failable(&ctx.chain);
             if let Some(err) = err {
                 println!("=== compute_usage_flat - get_failable ===");
-                println!("{root:#?}");
+                println!("{tree:#?}");
                 println!("{err}");
                 println!("======");
             }
@@ -380,11 +380,11 @@ impl DebruijnIndex {
     }
 
     #[track_caller]
-    fn get_dbg(&self, chain: &ParentChain, root: &mut FlatRoot) -> usize {
+    fn get_dbg(&self, chain: &ParentChain, tree: &mut FlatTree) -> usize {
         let (calculated_index, err) = self.get_failable(chain);
         if let Some(err) = err {
-            graphviz::debug_write_to_file(root, "get_fail");
-            println!("{root}");
+            graphviz::debug_write_to_file(tree, "get_fail");
+            println!("{tree}");
             panic!("{err}");
         };
         calculated_index
@@ -397,7 +397,7 @@ impl DebruijnIndex {
 
 // The number of times a variable is used in an abstraction.
 pub type Usage = usize;
-/// A pointer to a given DebruijnNode within a FlatRoot
+/// A pointer to a given DebruijnNode within a FlatTree
 pub type BackingIndex = usize;
 pub type Adjustment = Option<isize>;
 
@@ -412,7 +412,7 @@ pub type Adjustment = Option<isize>;
 /// It does not contain the parent index, use EdgeWithParent for that.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct DebruijnEdge {
-    /// An index into the backing vector of a FlatRoot.
+    /// An index into the backing vector of a FlatTree.
     pub child: BackingIndex,
     /// An "adjustment" value. All DebruijnNode::Index nodes are implictly increased or decreased by
     /// this amount. Note that this is cumulative.
@@ -490,11 +490,11 @@ pub struct DoubleEndedEdge {
     pub adjust: Adjustment,
 }
 impl DoubleEndedEdge {
-    pub fn root(root: &FlatRoot) -> DoubleEndedEdge {
+    pub fn root(tree: &FlatTree) -> DoubleEndedEdge {
         DoubleEndedEdge {
             edge_w_parent: EdgeWithParent::IntoRoot,
-            child: root.root.child,
-            adjust: root.root.adjust,
+            child: tree.root.child,
+            adjust: tree.root.adjust,
         }
     }
 
@@ -632,10 +632,10 @@ pub struct ParentChain {
 }
 
 impl ParentChain {
-    pub fn new(root: &FlatRoot) -> ParentChain {
+    pub fn new(tree: &FlatTree) -> ParentChain {
         ParentChain {
             abstractions: vec![],
-            full_chain: vec![DoubleEndedEdge::root(root)],
+            full_chain: vec![DoubleEndedEdge::root(tree)],
         }
     }
     #[track_caller]
@@ -690,9 +690,9 @@ pub struct RedexMut {
 }
 
 impl RedexMut {
-    pub fn is_redex(root: &FlatRoot, term: BackingIndex) -> bool {
-        match root[term] {
-            DebruijnNode::Application(app) => match root[app.func] {
+    pub fn is_redex(tree: &FlatTree, term: BackingIndex) -> bool {
+        match tree[term] {
+            DebruijnNode::Application(app) => match tree[app.func] {
                 DebruijnNode::Abstraction { .. } => true,
                 _ => false,
             },
@@ -700,9 +700,9 @@ impl RedexMut {
         }
     }
 
-    pub fn try_get(root: &FlatRoot, ctx: &mut ActionCtx) -> Option<RedexMut> {
-        match root[ctx.current_index()] {
-            DebruijnNode::Application(app) => match root[app.func] {
+    pub fn try_get(tree: &FlatTree, ctx: &mut ActionCtx) -> Option<RedexMut> {
+        match tree[ctx.current_index()] {
+            DebruijnNode::Application(app) => match tree[app.func] {
                 DebruijnNode::Abstraction(abs) => {
                     let body = abs.abs_to_body(app.func.child);
                     let redex = RedexMut {
@@ -753,7 +753,7 @@ impl RedexMut {
     }
 }
 
-pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
+pub fn beta_reduce(tree: &mut FlatTree, mut redex: RedexMut) {
     // Before this, we have the following shape of tree:
     //   parent
     //     |
@@ -791,13 +791,13 @@ pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
     // is easier to reason aboout, so we do it first.)
     let body_usage = redex.body_usage;
     let mut ctx = redex.arg_ctx();
-    update_parent_chain_usage(root, &mut ctx, body_usage);
+    update_parent_chain_usage(tree, &mut ctx, body_usage);
 
     // This is the following tree fragment
     // --> new_body
     // Note that body may have been re-allocated--this happens when the body consists of a single
     // leaf node that gets substituted--aka: the abstraction node looks like λ 1
-    let mut new_body = substitute_and_shift_fused(root, &mut redex);
+    let mut new_body = substitute_and_shift_fused(tree, &mut redex);
     // Adjust down by one.
     // Add an adjustment of -1. This represents the effect of the redex abstraction drop out
     // (in other words, this is being logically applied to the abs -> body edge).
@@ -826,13 +826,13 @@ pub fn beta_reduce(root: &mut FlatRoot, mut redex: RedexMut) {
     //  ||
     //  VV
     // [various copies of arg]
-    repoint_node(root, redex.parent_to_app.edge_w_parent, new_body);
+    repoint_node(tree, redex.parent_to_app.edge_w_parent, new_body);
 }
 
 // Updates the usages of the parent chain.
 // MEMORY: Modifies in place, does not allocate or make garbage.
 fn update_parent_chain_usage(
-    root: &mut FlatRoot,
+    tree: &mut FlatTree,
     ctx: &mut ActionCtx,
     // Number of times body is used
     body_usage: Usage,
@@ -843,17 +843,17 @@ fn update_parent_chain_usage(
         return;
     }
 
-    let usages_of_page_in_arg = get_usage_by_depth(root, ctx);
+    let usages_of_page_in_arg = get_usage_by_depth(tree, ctx);
     for (depth, edge) in ctx.chain.abstractions.iter().enumerate() {
         // Unwrap is safe here because all of the values in the ctx.chain.abstractions iterator
         // are AbsToBody values.
         let parent = edge.parent_index().unwrap();
-        let abs = root.get_abs(parent);
+        let abs = tree.get_abs(parent);
 
         let usage_of_parent_in_arg = usages_of_page_in_arg[depth];
         let usage_delta: isize = (body_usage as isize - 1) * usage_of_parent_in_arg as isize;
         let usage = abs.usage.checked_add_signed(usage_delta).unwrap();
-        root[parent] = DebruijnNode::abs(abs.body, usage)
+        tree[parent] = DebruijnNode::abs(abs.body, usage)
     }
 }
 
@@ -870,11 +870,11 @@ fn update_parent_chain_usage(
 // Note that the unbound variable is not included (we could talk about it's usage, but since there's
 // no abstraction term to bind it to, we will ignore it), and we also ignore the arg-bound term of c
 // since that won't get updated.
-fn get_usage_by_depth(root: &FlatRoot, ctx: &mut ActionCtx) -> Vec<Usage> {
+fn get_usage_by_depth(tree: &FlatTree, ctx: &mut ActionCtx) -> Vec<Usage> {
     let init_depth = ctx.chain.debruijn_depth();
     let mut usages = vec![0; init_depth];
-    root.preorder_walk_at(ctx, |root, ctx| {
-        if let DebruijnNode::Index(index) = root[ctx.current_index()] {
+    tree.preorder_walk_at(ctx, |tree, ctx| {
+        if let DebruijnNode::Index(index) = tree[ctx.current_index()] {
             let depth_relative_to_arg = ctx.chain.debruijn_depth() - init_depth;
             // We need to account for the fact that we may be inside an abstraction in the argument
             // If we are, we should skip if this is a bound variable.
@@ -931,23 +931,23 @@ fn get_usage_by_depth(root: &FlatRoot, ctx: &mut ActionCtx) -> Vec<Usage> {
 /// child                  old child <- garbage
 ///
 /// MEMORY: Old child becomes garbage after repointing.
-fn repoint_node(root: &mut FlatRoot, parent: EdgeWithParent, child: DebruijnEdge) {
+fn repoint_node(tree: &mut FlatTree, parent: EdgeWithParent, child: DebruijnEdge) {
     match parent {
         EdgeWithParent::AbsToBody(parent) => {
-            let abs = root.get_abs(parent);
-            root[parent] = DebruijnNode::abs(child, abs.usage);
+            let abs = tree.get_abs(parent);
+            tree[parent] = DebruijnNode::abs(child, abs.usage);
         }
         EdgeWithParent::AppToFunc(parent) => {
-            let app = root.get_app(parent);
-            root[parent] = DebruijnNode::app(child, app.arg);
+            let app = tree.get_app(parent);
+            tree[parent] = DebruijnNode::app(child, app.arg);
         }
         EdgeWithParent::AppToArg(parent) => {
-            let app = root.get_app(parent);
-            root[parent] = DebruijnNode::app(app.func, child);
+            let app = tree.get_app(parent);
+            tree[parent] = DebruijnNode::app(app.func, child);
         }
         // Root
         EdgeWithParent::IntoRoot => {
-            root.root = child;
+            tree.root = child;
         }
     }
 }
@@ -977,7 +977,7 @@ fn repoint_node(root: &mut FlatRoot, parent: EdgeWithParent, child: DebruijnEdge
 // - Potentially invalidates redex.body (may repoint redex.abs's body in the case that body consists of a single leaf node that gets substituted)
 // - Potentially invalidates redex.arg (becomes garbage in the zero usage case, may be altered in non-zero usage case)
 // - Potentially alters redex.parent pointer
-fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &mut RedexMut) -> DebruijnEdge {
+fn substitute_and_shift_fused(tree: &mut FlatTree, redex: &mut RedexMut) -> DebruijnEdge {
     if redex.body_usage == 0 {
         // No need to do anything with the argument because it is never used in the body
         // (Since the argument is not used, the entire arg subtree is garbage now.)
@@ -991,15 +991,15 @@ fn substitute_and_shift_fused(root: &mut FlatRoot, redex: &mut RedexMut) -> Debr
         // Perform the actual substition on body.
         // This method actually fuses the fixing down/up that needs to happen for the whole body
         // in addition to performing substitutions.
-        substitute_shift_fused_nonzero_usage(root, redex);
+        substitute_shift_fused_nonzero_usage(tree, redex);
 
         // The body of abs may get repointed if the redex body consists of a single leaf node that gets substituted.
         // Hence, we need to check for this and get the actually new body.
-        root.get_abs(redex.app_to_abs.child).body
+        tree.get_abs(redex.app_to_abs.child).body
     }
 }
 
-fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMut) {
+fn substitute_shift_fused_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMut) {
     let mut substitution_i = 0;
     let init_depth = redex.parent_chain.debruijn_depth();
 
@@ -1010,14 +1010,14 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
     let body_usage = redex.body_usage;
     let app_to_abs_adjustment = redex.app_to_abs.adjust;
 
-    root.preorder_walk_at_mut(func_ctx, |root, ctx| {
+    tree.preorder_walk_at_mut(func_ctx, |tree, ctx| {
         let term = ctx.current_index();
         let chain = &ctx.chain;
-        if let DebruijnNode::Index(debruijn_index) = root[term] {
+        if let DebruijnNode::Index(debruijn_index) = tree[term] {
             let depth_relative_to_arg = chain.debruijn_depth() - init_depth;
             // Note that the depth here is 0-indexed, while debruijn_index is 1-indexed
 
-            let calculated_index = debruijn_index.get_dbg(chain, root);
+            let calculated_index = debruijn_index.get_dbg(chain, tree);
             let is_substituting = calculated_index == depth_relative_to_arg;
             if is_substituting {
                 // Total adjustment from the app -> abs node. This is a negative value, so we need to
@@ -1030,13 +1030,13 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
                 let last_arg_allocation = substitution_i == body_usage - 1;
                 let new_arg = if last_arg_allocation {
                     // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
-                    up_by(root, arg_ctx, up_by_amount);
+                    up_by(tree, arg_ctx, up_by_amount);
                     redex_arg
                 } else {
-                    clone_subtree_and_fix_up_fused(root, arg_ctx, up_by_amount)
+                    clone_subtree_and_fix_up_fused(tree, arg_ctx, up_by_amount)
                 };
                 // Point parent to the newly created subtree
-                repoint_node(root, ctx.current_edge().edge_w_parent, new_arg);
+                repoint_node(tree, ctx.current_edge().edge_w_parent, new_arg);
                 substitution_i += 1;
             }
         }
@@ -1053,12 +1053,12 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
 ///
 /// MEMORY: Allocates new subtree, returned value is the newly allocated tree
 fn clone_subtree_and_fix_up_fused(
-    root: &mut FlatRoot,
+    tree: &mut FlatTree,
     ctx: &mut ActionCtx,
     up_by: DebruijnDepth,
 ) -> DebruijnEdge {
     let init_depth = ctx.chain.debruijn_depth();
-    root.postorder_walk_at_mut(ctx, |root, ctx, result| {
+    tree.postorder_walk_at_mut(ctx, |tree, ctx, result| {
         let chain = &ctx.chain;
         match result {
             ChildResults::Index(index) => {
@@ -1072,23 +1072,23 @@ fn clone_subtree_and_fix_up_fused(
                 } else {
                     index.get_raw()
                 };
-                root.alloc(DebruijnNode::idx(index))
+                tree.alloc(DebruijnNode::idx(index))
             }
             ChildResults::Abstraction { abs, body_result } => {
-                root.alloc(DebruijnNode::abs(body_result, abs.usage))
+                tree.alloc(DebruijnNode::abs(body_result, abs.usage))
             }
             ChildResults::Application {
                 func_result,
                 arg_result,
                 ..
-            } => root.alloc(DebruijnNode::app(func_result, arg_result)),
+            } => tree.alloc(DebruijnNode::app(func_result, arg_result)),
         }
     })
 }
 
 /// MEMORY: Modifies in place, does not allocate or create garbage.
-fn up_by(root: &mut FlatRoot, ctx: &mut ActionCtx, up_by: DebruijnDepth) {
-    shift_cutoff(root, ctx, up_by as isize, 1)
+fn up_by(tree: &mut FlatTree, ctx: &mut ActionCtx, up_by: DebruijnDepth) {
+    shift_cutoff(tree, ctx, up_by as isize, 1)
 }
 
 // ↑ n = n         if n < cutoff
@@ -1100,12 +1100,12 @@ fn up_by(root: &mut FlatRoot, ctx: &mut ActionCtx, up_by: DebruijnDepth) {
 /// This is useful during beta reduction because we need to "drop out" an abstraction.
 ///
 /// MEMORY: Modifies in place, does not allocate or create garbage.
-fn shift_cutoff(root: &mut FlatRoot, ctx: &mut ActionCtx, up_by: isize, depth: DebruijnDepth) {
+fn shift_cutoff(tree: &mut FlatTree, ctx: &mut ActionCtx, up_by: isize, depth: DebruijnDepth) {
     let init_depth = ctx.chain.debruijn_depth();
-    root.preorder_walk_at_mut(ctx, |root, ctx| {
+    tree.preorder_walk_at_mut(ctx, |tree, ctx| {
         let term = ctx.current_index();
         let chain = &ctx.chain;
-        if let DebruijnNode::Index(term_index) = root[term] {
+        if let DebruijnNode::Index(term_index) = tree[term] {
             let depth_relative_to_term = chain.debruijn_depth() + depth - init_depth;
             // Recall that an index starts at 1, so if depth is set to 1, then this branch will always be taken.
             let is_free = term_index.get(chain) >= depth_relative_to_term;
@@ -1115,7 +1115,7 @@ fn shift_cutoff(root: &mut FlatRoot, ctx: &mut ActionCtx, up_by: isize, depth: D
                 // for example, if the raw index is 3, and the calculated index is 1, and up_by is 2
                 // then we need the raw index to be 5, and the calculated index will then be 2
                 let new_index = term_index.get_raw().checked_add_signed(up_by).unwrap();
-                root[term] = DebruijnNode::idx(new_index);
+                tree[term] = DebruijnNode::idx(new_index);
             }
         };
     });
@@ -1134,19 +1134,19 @@ mod test {
     mario!();
     use crate::debruijn::Debruijn;
 
-    fn compile(term: &str) -> FlatRoot {
-        FlatRoot::from(&Debruijn::from_str(term).unwrap())
+    fn compile(term: &str) -> FlatTree {
+        FlatTree::from(&Debruijn::from_str(term).unwrap())
     }
 
-    fn redex_from_root(root: &FlatRoot) -> RedexMut {
-        let mut ctx = ActionCtx::from_root(root);
-        RedexMut::try_get(root, &mut ctx).unwrap()
+    fn redex_at_root(tree: &FlatTree) -> RedexMut {
+        let mut ctx = ActionCtx::new(tree);
+        RedexMut::try_get(tree, &mut ctx).unwrap()
     }
 
     #[test]
     fn round_trip() {
         let original = Debruijn::from("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2");
-        let flat = FlatRoot::from(&original);
+        let flat = FlatTree::from(&original);
         let roundtripped = Debruijn::from(&flat);
 
         assert_eq!(
@@ -1160,7 +1160,7 @@ mod test {
         let original = Debruijn::from("(((λ (λ ((2 1) 2))) (λ (λ 2))) (λ (λ 1)))");
         let original2 = Debruijn::from("(λ λ 2 1 2) (λ λ 2) λ λ 1");
         assert_eq!(original, original2);
-        let flat = FlatRoot::from(&original).normalized();
+        let flat = FlatTree::from(&original).normalized();
         let roundtripped = Debruijn::from(&flat);
 
         assert_eq!(
@@ -1171,80 +1171,80 @@ mod test {
 
     #[test]
     fn usage_zero() {
-        let mut root = compile("(λ 2) (λ 50)");
+        let mut tree = compile("(λ 2) (λ 50)");
 
-        let redex = redex_from_root(&root);
+        let redex = redex_at_root(&tree);
         assert_eq!(redex.body_usage, 0);
 
-        beta_reduce(&mut root, redex);
+        beta_reduce(&mut tree, redex);
 
         let expected = compile("1");
 
-        let actual = Debruijn::from(&root);
+        let actual = Debruijn::from(&tree);
         let expected = Debruijn::from(&expected);
         assert_eq!(actual, expected, "Expected {expected}, got {actual}");
     }
 
     #[test]
     fn usage_one() {
-        let mut root = compile("(λ 1) (λ 50)");
+        let mut tree = compile("(λ 1) (λ 50)");
 
-        let redex = redex_from_root(&root);
+        let redex = redex_at_root(&tree);
         assert_eq!(redex.body_usage, 1);
 
-        beta_reduce(&mut root, redex);
+        beta_reduce(&mut tree, redex);
 
         let expected = compile("λ 50");
 
-        let actual = Debruijn::from(&root);
+        let actual = Debruijn::from(&tree);
         let expected = Debruijn::from(&expected);
         assert_eq!(actual, expected, "Expected {expected}, got {actual}");
     }
 
     #[test]
     fn body_is_leaf() {
-        let mut root = compile("(λ 1) (1 2 3 4)");
+        let mut tree = compile("(λ 1) (1 2 3 4)");
 
-        let redex = redex_from_root(&root);
+        let redex = redex_at_root(&tree);
         assert_eq!(redex.body_usage, 1);
 
-        beta_reduce(&mut root, redex);
+        beta_reduce(&mut tree, redex);
 
         let expected = compile("1 2 3 4");
 
-        let actual = Debruijn::from(&root);
+        let actual = Debruijn::from(&tree);
         let expected = Debruijn::from(&expected);
         assert_eq!(actual, expected, "Expected {expected}, got {actual}");
     }
 
     #[test]
     fn body_is_not_leaf() {
-        let mut root = compile("(λ λ 2) (1 2 3 4)");
+        let mut tree = compile("(λ λ 2) (1 2 3 4)");
 
-        let redex = redex_from_root(&root);
+        let redex = redex_at_root(&tree);
         assert_eq!(redex.body_usage, 1);
 
-        beta_reduce(&mut root, redex);
+        beta_reduce(&mut tree, redex);
 
         let expected = compile("λ 2 3 4 5");
 
-        let actual = Debruijn::from(&root);
+        let actual = Debruijn::from(&tree);
         let expected = Debruijn::from(&expected);
         assert_eq!(actual, expected, "Expected {expected}, got {actual}");
     }
 
     #[test]
     fn usage_many() {
-        let mut root = compile("(λ 1 λ 2 λ 3 λ 4) 100");
+        let mut tree = compile("(λ 1 λ 2 λ 3 λ 4) 100");
 
-        let redex = redex_from_root(&root);
+        let redex = redex_at_root(&tree);
         assert_eq!(redex.body_usage, 4);
 
-        beta_reduce(&mut root, redex);
+        beta_reduce(&mut tree, redex);
 
         let expected = compile("100 λ 101 λ 102 λ 103");
 
-        let actual = Debruijn::from(&root);
+        let actual = Debruijn::from(&tree);
         let expected = Debruijn::from(&expected);
         assert_eq!(actual, expected, "Expected {expected}, got {actual}");
     }

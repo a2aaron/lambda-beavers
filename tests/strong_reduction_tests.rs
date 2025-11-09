@@ -3,7 +3,7 @@
 
 use lambda_beavers::{
     debruijn::Debruijn,
-    debruijn_flat::FlatRoot,
+    debruijn_flat::FlatTree,
     reduce::{Reducer, ReductionResult},
     term::Classic,
     utils::strong_reduction_test::{parse_line, reduce_with_timeout},
@@ -49,7 +49,7 @@ macro_rules! make_test_batch {
 
 fn assert_round_trip(test: &str, _: usize) {
     let (starting, _) = parse_line(test);
-    let flat = FlatRoot::from(&starting);
+    let flat = FlatTree::from(&starting);
     let roundtripped = Debruijn::from(&flat);
 
     assert_eq!(
@@ -64,11 +64,11 @@ fn assert_usage(test: &str, test_i: usize) {
     let mut reducer = Reducer::new(&starting);
     loop {
         let result = reducer.reduce_one();
-        if let Err((failing_term, actual, expected)) = reducer.root.check_usage() {
+        if let Err((failing_term, actual, expected)) = reducer.tree.check_usage() {
             println!("Failed test case #{test_i} - {test}: ({starting} -> {expected})");
             panic!(
                 "Expected usage to be {expected} but got {actual} for node {failing_term} in {} (original: {})",
-                reducer.root, starting
+                reducer.tree, starting
             );
         }
         match result {

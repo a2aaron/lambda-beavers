@@ -51,9 +51,9 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let root = if args.normalized {
-        reducer.root.normalized()
+        reducer.tree.normalized()
     } else {
-        reducer.root
+        reducer.tree
     };
 
     let graph_args = GraphvizArgs {

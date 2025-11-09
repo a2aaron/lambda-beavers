@@ -1,6 +1,6 @@
 use std::{fmt::Display, str::FromStr};
 
-use crate::{debruijn::Debruijn, debruijn_flat::FlatRoot, parse::term};
+use crate::{debruijn::Debruijn, debruijn_flat::FlatTree, parse::term};
 
 /// A literal
 /// TODO: This should eventually become more sophisticated, possibly containing
@@ -102,14 +102,14 @@ impl Context {
     }
 }
 
-impl From<FlatRoot> for Classic {
-    fn from(root: FlatRoot) -> Self {
-        Classic::from(Debruijn::from(&root))
+impl From<FlatTree> for Classic {
+    fn from(tree: FlatTree) -> Self {
+        Classic::from(Debruijn::from(&tree))
     }
 }
-impl From<&FlatRoot> for Classic {
-    fn from(root: &FlatRoot) -> Self {
-        Classic::from(Debruijn::from(root))
+impl From<&FlatTree> for Classic {
+    fn from(tree: &FlatTree) -> Self {
+        Classic::from(Debruijn::from(tree))
     }
 }
 impl From<Debruijn> for Classic {

@@ -4,7 +4,7 @@ use clap::Parser;
 use inquire::Select;
 use lambda_beavers::{
     debruijn::Debruijn,
-    debruijn_flat::{BackingIndex, FlatRoot, beta_reduce},
+    debruijn_flat::{BackingIndex, FlatTree, beta_reduce},
     parse,
     print::{NodeLabelType, PrintableTerm},
     treewalk::ChildResults,
@@ -20,8 +20,8 @@ struct Args {
     node_label: NodeLabelType,
 }
 
-fn print_highlighted<'a>(root: &'a FlatRoot, highlighted: BackingIndex) -> String {
-    let printable_terms = root.postorder_walk(|_root, ctx, results| match results {
+fn print_highlighted<'a>(tree: &'a FlatTree, highlighted: BackingIndex) -> String {
+    let printable_terms = tree.postorder_walk(|_tree, ctx, results| match results {
         ChildResults::Index(index) => PrintableTerm::Leaf(format!("{}", index.get(&ctx.chain))),
         ChildResults::Abstraction { body_result, .. } => PrintableTerm::Abstraction {
             body_head: "λ ".to_string(),
@@ -75,7 +75,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         },
     };
-    let mut current_term = FlatRoot::from(&current_term);
+    let mut current_term = FlatTree::from(&current_term);
 
     let mut history = vec![];
 

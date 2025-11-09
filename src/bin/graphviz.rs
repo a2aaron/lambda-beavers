@@ -1,7 +1,7 @@
 use std::str::FromStr;
 
 use clap::Parser;
-use lambda_beavers::{debruijn_flat::FlatRoot, print::NodeLabelType};
+use lambda_beavers::{debruijn_flat::FlatTree, print::NodeLabelType};
 
 use lambda_beavers::parse;
 use lambda_beavers::reduce::{ReductionStrategy, ReductionStrategyKind};
@@ -20,7 +20,7 @@ pub fn to_graphviz(graph: &ReductionGraph, node_label: NodeLabelType) -> String 
         output.push(bnf);
     }
     for (node, i) in graph.nodes() {
-        let label = node_label.to_string(&Debruijn::from(&node.root));
+        let label = node_label.to_string(&Debruijn::from(&node.tree));
         let node = format!("{} [label = \"{}\"];", i, label);
         output.push(node);
     }
@@ -124,12 +124,12 @@ fn main() {
             }
         },
     };
-    let term = FlatRoot::from(&term);
+    let term = FlatTree::from(&term);
     let max_reductions = args.max_reductions;
     let strategy = ReductionStrategy::from(args.strategy);
     let node_label = args.node_label;
     let stop_on_bnf = args.stop_on_bnf;
-    let mut graph = ReductionGraph::with_root(term);
+    let mut graph = ReductionGraph::with_tree(term);
 
     reduce_with_stats(&mut graph, strategy, max_reductions, stop_on_bnf);
     let graphviz = to_graphviz(&graph, node_label);

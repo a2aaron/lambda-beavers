@@ -4,26 +4,26 @@ use clap::ValueEnum;
 
 use crate::{
     debruijn::Debruijn,
-    debruijn_flat::{self, FlatRoot},
+    debruijn_flat::{self, FlatTree},
     graph::{NodeIndex, ReductionGraph},
     utils::Rng,
 };
 
 pub struct Reducer {
-    pub root: FlatRoot,
+    pub tree: FlatTree,
 }
 
 impl Reducer {
-    pub fn new(root: &Debruijn) -> Self {
+    pub fn new(term: &Debruijn) -> Self {
         Self {
-            root: FlatRoot::from(root),
+            tree: FlatTree::from(term),
         }
     }
 
     pub fn reduce_one(&mut self) -> Option<ReductionResult> {
-        let result = self.root.preorder_walk_mut(|root, ctx| {
-            if let Some(redex) = debruijn_flat::RedexMut::try_get(root, ctx) {
-                debruijn_flat::beta_reduce(root, redex);
+        let result = self.tree.preorder_walk_mut(|tree, ctx| {
+            if let Some(redex) = debruijn_flat::RedexMut::try_get(tree, ctx) {
+                debruijn_flat::beta_reduce(tree, redex);
                 ControlFlow::Break(())
             } else {
                 ControlFlow::Continue(())
@@ -32,7 +32,7 @@ impl Reducer {
         match result {
             Some(()) => None,
             // This clone is fine, it occurs at the end of all reductions
-            None => Some(ReductionResult::NormalForm(Debruijn::from(&self.root))),
+            None => Some(ReductionResult::NormalForm(Debruijn::from(&self.tree))),
         }
     }
 }
@@ -53,8 +53,8 @@ impl Display for ReductionResult {
     }
 }
 
-pub fn reduce(root: &Debruijn, max_reductions: usize) -> (ReductionResult, usize) {
-    let mut reducer = Reducer::new(root);
+pub fn reduce(term: &Debruijn, max_reductions: usize) -> (ReductionResult, usize) {
+    let mut reducer = Reducer::new(term);
     for i in 0..max_reductions {
         if let Some(value) = reducer.reduce_one() {
             return (value, i);
@@ -115,35 +115,35 @@ mod test {
 
     #[track_caller]
     fn assert_usage(reducer: &Reducer) {
-        if let Err((failing_term, actual, expected)) = reducer.root.check_usage() {
+        if let Err((failing_term, actual, expected)) = reducer.tree.check_usage() {
             panic!(
                 "Expected usage to be {expected} but got {actual} for node {failing_term} in {}",
-                reducer.root
+                reducer.tree
             );
         }
     }
 
     #[test]
     fn parent_usage_simplest() {
-        let root = Debruijn::from_str("λ (λ 1 1) (1 1)").unwrap();
-        let mut reducer = Reducer::new(&root);
+        let term = Debruijn::from_str("λ (λ 1 1) (1 1)").unwrap();
+        let mut reducer = Reducer::new(&term);
         reducer.reduce_one();
         assert_usage(&reducer);
     }
 
     #[test]
     fn parent_usage_open_terms() {
-        let root = Debruijn::from_str("λ (λ 1 1) 99").unwrap();
-        let mut reducer = Reducer::new(&root);
+        let term = Debruijn::from_str("λ (λ 1 1) 99").unwrap();
+        let mut reducer = Reducer::new(&term);
         reducer.reduce_one();
         assert_usage(&reducer);
     }
 
     #[test]
     fn parent_usage() {
-        let root =
+        let term =
             Debruijn::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
-        let mut reducer = Reducer::new(&root);
+        let mut reducer = Reducer::new(&term);
 
         assert_usage(&reducer);
         reducer.reduce_one();
@@ -164,8 +164,8 @@ mod test {
 
     #[test]
     fn parent_usage_another() {
-        let root = Debruijn::from_str("(λ λ 3 2) (λ λ 2)").unwrap();
-        let mut reducer = Reducer::new(&root);
+        let term = Debruijn::from_str("(λ λ 3 2) (λ λ 2)").unwrap();
+        let mut reducer = Reducer::new(&term);
 
         assert_usage(&reducer);
         reducer.reduce_one();
@@ -186,8 +186,8 @@ mod test {
 
     #[test]
     fn parent_usage2() {
-        let root = Debruijn::from_str("(λ λ 1) 10").unwrap();
-        let mut reducer = Reducer::new(&root);
+        let term = Debruijn::from_str("(λ λ 1) 10").unwrap();
+        let mut reducer = Reducer::new(&term);
 
         reducer.reduce_one();
         assert_usage(&reducer);
@@ -195,20 +195,20 @@ mod test {
 
     #[test]
     fn usage3() {
-        let root = Debruijn::from_str("λ λ λ λ (λ λ 6) 2 1").unwrap();
-        let mut reducer = Reducer::new(&root);
+        let term = Debruijn::from_str("λ λ λ λ (λ λ 6) 2 1").unwrap();
+        let mut reducer = Reducer::new(&term);
 
         reducer.reduce_one();
-        println!("{}", reducer.root);
+        println!("{}", reducer.tree);
         reducer.reduce_one();
-        println!("{}", reducer.root);
+        println!("{}", reducer.tree);
         assert_usage(&reducer);
     }
 
     #[test]
     fn usage4() {
-        let root = Debruijn::from_str("λ ((λ λ 1) 99) 1 99").unwrap();
-        let mut reducer = Reducer::new(&root);
+        let term = Debruijn::from_str("λ ((λ λ 1) 99) 1 99").unwrap();
+        let mut reducer = Reducer::new(&term);
 
         assert_usage(&reducer);
         reducer.reduce_one();
@@ -229,8 +229,8 @@ mod test {
 
     #[test]
     fn usage4_simpler() {
-        let root = Debruijn::from_str("λ ((λ λ 1) 99) 1").unwrap();
-        let mut reducer = Reducer::new(&root);
+        let term = Debruijn::from_str("λ ((λ λ 1) 99) 1").unwrap();
+        let mut reducer = Reducer::new(&term);
 
         assert_usage(&reducer);
         reducer.reduce_one();
@@ -251,8 +251,8 @@ mod test {
 
     #[test]
     fn parent_usage_simpler() {
-        let root = Debruijn::from_str("λ (λ λ λ 2) 100").unwrap();
-        let mut reducer = Reducer::new(&root);
+        let term = Debruijn::from_str("λ (λ λ λ 2) 100").unwrap();
+        let mut reducer = Reducer::new(&term);
 
         assert_usage(&reducer);
         reducer.reduce_one();
@@ -273,9 +273,9 @@ mod test {
 
     #[test]
     fn from_fuzzer() {
-        let root = "λ (λ 1 λ 1) λ λ 3";
-        let root = Debruijn::from_str(root).unwrap();
-        let mut reducer = Reducer::new(&root);
+        let term = "λ (λ 1 λ 1) λ λ 3";
+        let term = Debruijn::from_str(term).unwrap();
+        let mut reducer = Reducer::new(&term);
 
         assert_usage(&reducer);
         reducer.reduce_one();
@@ -296,9 +296,9 @@ mod test {
 
     #[test]
     fn from_fuzzer2() {
-        let root = "(λ 1 λ 3) λ 1";
-        let root = Debruijn::from_str(root).unwrap();
-        let mut reducer = Reducer::new(&root);
+        let term = "(λ 1 λ 3) λ 1";
+        let term = Debruijn::from_str(term).unwrap();
+        let mut reducer = Reducer::new(&term);
 
         assert_usage(&reducer);
         reducer.reduce_one();
@@ -319,9 +319,9 @@ mod test {
 
     #[test]
     fn from_fuzzer3() {
-        let root = "(λ λ 2 1) λ 1";
-        let root = Debruijn::from_str(root).unwrap();
-        let mut reducer = Reducer::new(&root);
+        let term = "(λ λ 2 1) λ 1";
+        let term = Debruijn::from_str(term).unwrap();
+        let mut reducer = Reducer::new(&term);
 
         assert_usage(&reducer);
         reducer.reduce_one();
@@ -342,16 +342,16 @@ mod test {
 
     #[test]
     fn parent_usage_simple_2() {
-        let root = Debruijn::from_str("λ (λ λ 1) 100").unwrap();
-        let mut reducer = Reducer::new(&root);
+        let term = Debruijn::from_str("λ (λ λ 1) 100").unwrap();
+        let mut reducer = Reducer::new(&term);
         reducer.reduce_one();
         assert_usage(&reducer);
     }
 
     #[test]
     fn fuzzer4() {
-        let root = Debruijn::from_str("2 1 λ λ (λ λ 1 20 2) 20 λ 2 λ λ λ 22 λ λ λ λ λ λ λ λ λ 22 λ 5 λ λ λ 5 λ λ (λ λ 1 20 2) 20 λ 2 λ 1 22").unwrap();
-        let mut reducer = Reducer::new(&root);
+        let term = Debruijn::from_str("2 1 λ λ (λ λ 1 20 2) 20 λ 2 λ λ λ 22 λ λ λ λ λ λ λ λ λ 22 λ 5 λ λ λ 5 λ λ (λ λ 1 20 2) 20 λ 2 λ 1 22").unwrap();
+        let mut reducer = Reducer::new(&term);
         assert_usage(&reducer);
         reducer.reduce_one();
         assert_usage(&reducer);
@@ -371,10 +371,10 @@ mod test {
 
     #[test]
     fn fuzzer5() {
-        let root = Debruijn::from_str(
+        let term = Debruijn::from_str(
             "λ λ λ (7 13) λ λ λ λ λ λ λ λ λ λ λ λ λ λ λ (λ λ λ λ λ λ λ λ λ λ λ λ λ 13 13) λ λ λ λ λ λ λ λ λ λ λ λ λ λ λ λ (λ λ λ λ λ λ λ λ λ λ λ λ λ λ λ 15 λ 15) 15 λ λ λ λ λ λ λ λ 255",
         ).unwrap();
-        let mut reducer = Reducer::new(&root);
+        let mut reducer = Reducer::new(&term);
 
         assert_usage(&reducer);
         reducer.reduce_one();
@@ -396,8 +396,8 @@ mod test {
     #[test]
     fn fuzzer6() {
         let testcase = "(λ λ 1) 99 λ (λ λ 1 3) 99 99";
-        let root = Debruijn::from_str(testcase).unwrap();
-        let mut reducer = Reducer::new(&root);
+        let term = Debruijn::from_str(testcase).unwrap();
+        let mut reducer = Reducer::new(&term);
 
         assert_usage(&reducer);
         reducer.reduce_one();

@@ -8,7 +8,7 @@ use std::{
 
 use crate::{
     debruijn_flat::{
-        BackingIndex, DebruijnEdge, DebruijnIndex, DebruijnNode, DoubleEndedEdge, FlatRoot,
+        BackingIndex, DebruijnEdge, DebruijnIndex, DebruijnNode, DoubleEndedEdge, FlatTree,
         RedexMut, Usage, compute_usage_flat,
     },
     treewalk::ActionCtx,
@@ -24,18 +24,18 @@ static TIMESTAMP: LazyLock<u64> = LazyLock::new(|| {
         .as_secs()
 });
 
-pub fn debug_write_to_file_ctx(root: &FlatRoot, ctx: &ActionCtx, name: &str) {
-    _debug_write_to_file_ctx(root, Some(ctx), name);
+pub fn debug_write_to_file_ctx(tree: &FlatTree, ctx: &ActionCtx, name: &str) {
+    _debug_write_to_file_ctx(tree, Some(ctx), name);
 }
-pub fn debug_write_to_file(root: &FlatRoot, name: &str) {
-    _debug_write_to_file_ctx(root, None, name);
+pub fn debug_write_to_file(tree: &FlatTree, name: &str) {
+    _debug_write_to_file_ctx(tree, None, name);
 }
-fn _debug_write_to_file_ctx(root: &FlatRoot, ctx: Option<&ActionCtx>, name: &str) {
+fn _debug_write_to_file_ctx(tree: &FlatTree, ctx: Option<&ActionCtx>, name: &str) {
     if !DEBUG {
         return;
     }
     let args = GraphvizArgs { no_garbage: false };
-    let graph = to_graph(root, ctx, &args);
+    let graph = to_graph(tree, ctx, &args);
 
     let timestamp = *TIMESTAMP;
     let folder = &format!("debug/{timestamp}");
@@ -59,9 +59,9 @@ pub struct GraphvizArgs {
     pub no_garbage: bool,
 }
 
-pub fn to_graph(root: &FlatRoot, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -> Graph {
+pub fn to_graph(tree: &FlatTree, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -> Graph {
     let mut graph = Graph::default();
-    let info_vec = get_info_array(root);
+    let info_vec = get_info_array(tree);
 
     for node_info in info_vec {
         if node_info.is_garbage && args.no_garbage {
@@ -312,7 +312,7 @@ struct NodeInfo {
 }
 
 impl NodeInfo {
-    fn garbage(root: &FlatRoot, index: BackingIndex) -> NodeInfo {
+    fn garbage(root: &FlatTree, index: BackingIndex) -> NodeInfo {
         let node = root[index];
         NodeInfo {
             node,
@@ -334,12 +334,12 @@ struct RedexInfo {
     arg: DebruijnEdge,
 }
 
-fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
-    let mut info_vec: Vec<NodeInfo> = (0..root.backing.len())
-        .map(|index| NodeInfo::garbage(root, index))
+fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
+    let mut info_vec: Vec<NodeInfo> = (0..tree.backing.len())
+        .map(|index| NodeInfo::garbage(tree, index))
         .collect();
-    root.preorder_walk(|root, ctx| {
-        let abs_bound = match root[ctx.current_index()] {
+    tree.preorder_walk(|tree, ctx| {
+        let abs_bound = match tree[ctx.current_index()] {
             DebruijnNode::Index(index) => {
                 let chain = &ctx.chain;
                 let depth = ctx.chain.debruijn_depth();
@@ -365,7 +365,7 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
             _ => AbstractionBinding::NotLeaf,
         };
 
-        let redex_info = match RedexMut::try_get(root, ctx) {
+        let redex_info = match RedexMut::try_get(tree, ctx) {
             Some(redex) => Some(RedexInfo {
                 abs: redex.app_to_abs,
                 arg: redex.app_to_arg,
@@ -373,16 +373,16 @@ fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
             None => None,
         };
 
-        let is_root = root.root.child == ctx.current_index();
+        let is_root = tree.root.child == ctx.current_index();
 
         let index = ctx.current_index();
-        info_vec[index].is_root = if is_root { Some(root.root) } else { None };
+        info_vec[index].is_root = if is_root { Some(tree.root) } else { None };
         info_vec[index].is_garbage = false;
         info_vec[index].abs_binding = abs_bound;
         info_vec[index].redex_info = redex_info;
 
-        if matches!(root[ctx.current_index()], DebruijnNode::Abstraction(_)) {
-            info_vec[index].computed_usage = Some(compute_usage_flat(root, ctx));
+        if matches!(tree[ctx.current_index()], DebruijnNode::Abstraction(_)) {
+            info_vec[index].computed_usage = Some(compute_usage_flat(tree, ctx));
         }
         ControlFlow::Continue::<()>(())
     });
