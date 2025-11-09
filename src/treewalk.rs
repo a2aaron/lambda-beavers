@@ -42,6 +42,30 @@ impl ActionCtx {
             chain: ParentChain::new(root),
         }
     }
+
+    fn push_edge(&mut self, edge: DoubleEndedEdge) -> DoubleEndedEdge {
+        let old_edge = self.term_as_edge();
+        self.term = edge.child;
+        self.adjust = edge.adjust;
+        self.parent_to_term = edge.edge_w_parent;
+        self.chain.push(edge);
+        old_edge
+    }
+
+    fn pop_edge(&mut self, edge: DoubleEndedEdge, old_edge: DoubleEndedEdge) {
+        self.term = old_edge.child;
+        self.adjust = old_edge.adjust;
+        self.parent_to_term = old_edge.edge_w_parent;
+        self.chain.pop(edge);
+    }
+
+    fn term_as_edge(&self) -> DoubleEndedEdge {
+        DoubleEndedEdge {
+            edge_w_parent: self.parent_to_term,
+            child: self.term,
+            adjust: self.adjust,
+        }
+    }
 }
 
 pub trait ActionMut<T> = FnMut(&mut FlatRoot, &mut ActionCtx) -> ControlFlow<T>;
@@ -117,14 +141,11 @@ pub fn postorder_walk<T>(
         root: &FlatRoot,
         ctx: &mut ActionCtx,
         action: &mut impl PostOrderAction<T>,
-        term: DoubleEndedEdge,
+        edge: DoubleEndedEdge,
     ) -> T {
-        let old_term = ctx.term;
-        ctx.term = term.child;
-        ctx.chain.push(term);
+        let old_edge = ctx.push_edge(edge);
         let result = postorder_walk(root, ctx, action);
-        ctx.chain.pop(term);
-        ctx.term = old_term;
+        ctx.pop_edge(edge, old_edge);
         result
     }
     let child_results = match root[ctx.term] {
@@ -161,14 +182,11 @@ pub fn postorder_walk_mut<T>(
         root: &mut FlatRoot,
         ctx: &mut ActionCtx,
         action: &mut impl PostOrderActionMut<T>,
-        term: DoubleEndedEdge,
+        edge: DoubleEndedEdge,
     ) -> T {
-        let old_term = ctx.term;
-        ctx.term = term.child;
-        ctx.chain.push(term);
+        let old_edge = ctx.push_edge(edge);
         let result = postorder_walk_mut(root, ctx, action);
-        ctx.chain.pop(term);
-        ctx.term = old_term;
+        ctx.pop_edge(edge, old_edge);
         result
     }
     let child_results = match root[ctx.term] {
@@ -206,14 +224,11 @@ pub fn preorder_walk<T>(
         root: &FlatRoot,
         ctx: &mut ActionCtx,
         action: &mut impl Action<T>,
-        term: DoubleEndedEdge,
+        edge: DoubleEndedEdge,
     ) -> ControlFlow<T> {
-        let old_term = ctx.term;
-        ctx.term = term.child;
-        ctx.chain.push(term);
+        let old_edge = ctx.push_edge(edge);
         let result = preorder_walk(root, ctx, action);
-        ctx.chain.pop(term);
-        ctx.term = old_term;
+        ctx.pop_edge(edge, old_edge);
         result
     }
 
@@ -246,12 +261,9 @@ pub fn preorder_walk_mut<T>(
         action: &mut impl ActionMut<T>,
         term: DoubleEndedEdge,
     ) -> ControlFlow<T> {
-        let old_term = ctx.term;
-        ctx.term = term.child;
-        ctx.chain.push(term);
+        let old_edge = ctx.push_edge(term);
         let result = preorder_walk_mut(root, ctx, action);
-        ctx.chain.pop(term);
-        ctx.term = old_term;
+        ctx.pop_edge(term, old_edge);
         result
     }
 

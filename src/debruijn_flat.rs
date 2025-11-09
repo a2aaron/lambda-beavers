@@ -469,7 +469,7 @@ pub enum EdgeWithParent {
     AppToArg(BackingIndex),
 }
 impl EdgeWithParent {
-    fn backing_index(&self) -> Option<BackingIndex> {
+    pub fn backing_index(&self) -> Option<BackingIndex> {
         match self {
             EdgeWithParent::IntoRoot => None,
             EdgeWithParent::AbsToBody(abs) => Some(*abs),
@@ -530,7 +530,7 @@ impl std::fmt::Debug for DoubleEndedEdge {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Abstraction {
     // The child edge for this Abstraction
     // abs --> body
@@ -628,7 +628,7 @@ impl std::fmt::Debug for DebruijnNode {
 pub struct ParentChain {
     // Every edge in this vector is a abs -> body edge
     pub abstractions: Vec<DoubleEndedEdge>,
-    full_chain: Vec<DoubleEndedEdge>,
+    pub full_chain: Vec<DoubleEndedEdge>,
 }
 
 impl ParentChain {
