@@ -1024,9 +1024,7 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
     let redex_arg = redex.app_to_arg;
     let body_usage = redex.body_usage;
     let app_to_abs_adjustment = redex.app_to_abs.adjust;
-    println!("Current parent chain: {:?}", redex.parent_chain);
-    println!("Walking at func_ctx: {func_ctx:?}");
-    graphviz::debug_write_to_file(root, "before_substitute");
+
     root.preorder_walk_at_mut(func_ctx, |root, ctx| {
         let term = ctx.term;
         let chain = &ctx.chain;
@@ -1053,16 +1051,11 @@ fn substitute_shift_fused_nonzero_usage(root: &mut FlatRoot, redex: &mut RedexMu
                     clone_subtree_and_fix_up_fused(root, arg_ctx, up_by_amount)
                 };
                 // Point parent to the newly created subtree
-                graphviz::debug_write_to_file_ctx(root, ctx, "before_repoint");
-                println!("Current chain: {:?}", ctx.chain);
-                println!("Repoint {:?} to {}", ctx.parent_to_term, new_arg);
                 repoint_node(root, ctx.parent_to_term, new_arg);
-                graphviz::debug_write_to_file_ctx(root, ctx, "after_repoint");
                 substitution_i += 1;
             }
         }
     });
-    graphviz::debug_write_to_file(root, "after_substitute");
     assert_eq!(
         substitution_i, redex.body_usage,
         "Expected substitution count ({}) to equal usage ({})!",
