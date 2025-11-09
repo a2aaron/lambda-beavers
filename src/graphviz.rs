@@ -8,8 +8,8 @@ use std::{
 
 use crate::{
     debruijn_flat::{
-        Adjustment, BackingIndex, DebruijnEdge, DebruijnIndex, DebruijnNode, DoubleEndedEdge,
-        FlatRoot, RedexMut, Usage, compute_usage_flat,
+        BackingIndex, DebruijnEdge, DebruijnIndex, DebruijnNode, DoubleEndedEdge, FlatRoot,
+        RedexMut, Usage, compute_usage_flat,
     },
     treewalk::ActionCtx,
 };
@@ -73,20 +73,13 @@ pub fn to_graph(root: &FlatRoot, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -
 
     if let Some(ctx) = ctx {
         for edge in &ctx.chain.full_chain {
-            update_or_add_ctx_edge(&mut graph, *edge, "darkgreen", "darkred");
+            update_or_add_ctx_edge(&mut graph, *edge);
         }
-
-        update_or_add_ctx_edge(&mut graph, ctx.current_edge(), "green", "red");
     }
     graph
 }
 
-fn update_or_add_ctx_edge(
-    graph: &mut Graph,
-    edge: DoubleEndedEdge,
-    ok_color: &str,
-    err_color: &str,
-) {
+fn update_or_add_ctx_edge(graph: &mut Graph, edge: DoubleEndedEdge) {
     let start = edge.edge_w_parent.backing_index();
     let end = edge.child;
     let adjust = edge.adjust;
@@ -104,11 +97,11 @@ fn update_or_add_ctx_edge(
     attributes.set("constraint", "false");
 
     if ok {
-        attributes.set("color", ok_color);
-        attributes.set("fontcolor", ok_color);
+        attributes.set("color", "green");
+        attributes.set("fontcolor", "green");
     } else {
-        attributes.set("color", err_color);
-        attributes.set("fontcolor", err_color);
+        attributes.set("color", "red");
+        attributes.set("fontcolor", "red");
     }
 
     if let Some(adj) = adjust {
