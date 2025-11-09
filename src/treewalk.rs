@@ -1,8 +1,8 @@
 use std::ops::ControlFlow;
 
 use crate::debruijn_flat::{
-    Abstraction, Adjustment, Application, BackingIndex, DebruijnIndex, DebruijnNode,
-    DoubleEndedEdge, EdgeWithParent, FlatRoot, ParentChain,
+    Abstraction, Application, BackingIndex, DebruijnIndex, DebruijnNode, DoubleEndedEdge, FlatRoot,
+    ParentChain,
 };
 
 // Important! All of these walk methods must treat ParentChain as "opaquely immutable". Basically,
@@ -35,13 +35,11 @@ impl ActionCtx {
         }
     }
 
-    fn push_edge(&mut self, edge: DoubleEndedEdge) -> DoubleEndedEdge {
-        let old_edge = self.current_edge();
+    fn push_edge(&mut self, edge: DoubleEndedEdge) {
         self.chain.push(edge);
-        old_edge
     }
 
-    fn pop_edge(&mut self, edge: DoubleEndedEdge, old_edge: DoubleEndedEdge) {
+    fn pop_edge(&mut self, edge: DoubleEndedEdge) {
         self.chain.pop(edge);
     }
 
@@ -129,9 +127,9 @@ pub fn postorder_walk<T>(
         action: &mut impl PostOrderAction<T>,
         edge: DoubleEndedEdge,
     ) -> T {
-        let old_edge = ctx.push_edge(edge);
+        ctx.push_edge(edge);
         let result = postorder_walk(root, ctx, action);
-        ctx.pop_edge(edge, old_edge);
+        ctx.pop_edge(edge);
         result
     }
     let child_results = match root[ctx.current_index()] {
@@ -170,9 +168,9 @@ pub fn postorder_walk_mut<T>(
         action: &mut impl PostOrderActionMut<T>,
         edge: DoubleEndedEdge,
     ) -> T {
-        let old_edge = ctx.push_edge(edge);
+        ctx.push_edge(edge);
         let result = postorder_walk_mut(root, ctx, action);
-        ctx.pop_edge(edge, old_edge);
+        ctx.pop_edge(edge);
         result
     }
     let child_results = match root[ctx.current_index()] {
@@ -212,9 +210,9 @@ pub fn preorder_walk<T>(
         action: &mut impl Action<T>,
         edge: DoubleEndedEdge,
     ) -> ControlFlow<T> {
-        let old_edge = ctx.push_edge(edge);
+        ctx.push_edge(edge);
         let result = preorder_walk(root, ctx, action);
-        ctx.pop_edge(edge, old_edge);
+        ctx.pop_edge(edge);
         result
     }
 
@@ -245,11 +243,11 @@ pub fn preorder_walk_mut<T>(
         root: &mut FlatRoot,
         ctx: &mut ActionCtx,
         action: &mut impl ActionMut<T>,
-        term: DoubleEndedEdge,
+        edge: DoubleEndedEdge,
     ) -> ControlFlow<T> {
-        let old_edge = ctx.push_edge(term);
+        ctx.push_edge(edge);
         let result = preorder_walk_mut(root, ctx, action);
-        ctx.pop_edge(term, old_edge);
+        ctx.pop_edge(edge);
         result
     }
 
