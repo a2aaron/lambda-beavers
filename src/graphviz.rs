@@ -58,97 +58,100 @@ pub fn to_graph(root: &FlatRoot, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -
     let mut graph = Graph::default();
     let info_vec = get_info_array(root);
 
-    for (index, node) in root.backing.iter().enumerate() {
-        let node_info = info_vec[index];
-
+    for node_info in info_vec {
         if node_info.is_garbage && args.no_garbage {
             continue;
         }
 
-        let mut graph_node = make_node(node, node_info);
-
-        if ctx.is_some_and(|ctx| ctx.term == index) {
-            graph_node.attribs.set("color", "green");
-        }
-
-        let mut edges = get_edges(node, node_info);
-
-        if let Some(root_edge) = node_info.is_root {
-            let mut edge = GraphvizEdge::from_debruijn_edge(root_edge, &node_info);
-            // Use an invisible node to represent the "into root" edge
-            let mut invis_root_attribs = Attributes::new();
-            invis_root_attribs.set("style", "invis");
-
-            let node = GraphvizNode {
-                name: "invis_root".to_string(),
-                attribs: invis_root_attribs,
-            };
-            edge.head = "invis_root".to_string();
-            edges.push(edge);
-            graph.nodes.push(node)
-        }
-
-        if let DebruijnNode::Application(app) = node
-            && !node_info.is_garbage
-        {
-            let mut edge_attribs = Attributes::new();
-            edge_attribs.set("style", "invis");
-            let edge = GraphvizEdge::new(app.func.child, app.arg.child, &edge_attribs);
-            let mut same_rank = Graph::default();
-            same_rank.edges.push(edge);
-            same_rank.attribs.set("rank", "same");
-            same_rank.attribs.set("rankdir", "LR");
-            graph.subgraphs.push(same_rank);
-        }
-
-        graph.nodes.push(graph_node);
-        graph.edges.append(&mut edges);
+        process_node(&mut graph, ctx, node_info);
     }
     graph
 }
 
-fn make_node(node: &DebruijnNode, node_info: NodeInfo) -> GraphvizNode {
-    let mut attribs = Attributes::new();
-    attribs
-        .set("label", to_node_label(*node))
+fn process_node(graph: &mut Graph, ctx: Option<&ActionCtx>, node_info: NodeInfo) {
+    let graph_node = make_node(ctx, node_info);
+
+    let mut edges = get_edges(node_info);
+
+    if let Some(root_edge) = node_info.is_root {
+        let mut edge = GraphvizEdge::from_debruijn_edge(root_edge, &node_info);
+        // Use an invisible node to represent the "into root" edge
+        let mut invis_root_attribs = Attributes::new();
+        invis_root_attribs.set("style", "invis");
+
+        let node = GraphvizNode {
+            name: "invis_root".to_string(),
+            attributes: invis_root_attribs,
+        };
+        edge.start = "invis_root".to_string();
+        edges.push(edge);
+        graph.nodes.push(node)
+    }
+
+    if let DebruijnNode::Application(app) = node_info.node
+        && !node_info.is_garbage
+    {
+        let mut edge_attribs = Attributes::new();
+        edge_attribs.set("style", "invis");
+        let edge = GraphvizEdge::new(app.func.child, app.arg.child, &edge_attribs);
+        let mut same_rank = Graph::default();
+        same_rank.edges.push(edge);
+        same_rank.attribs.set("rank", "same");
+        same_rank.attribs.set("rankdir", "LR");
+        graph.subgraphs.push(same_rank);
+    }
+
+    graph.nodes.push(graph_node);
+    graph.edges.append(&mut edges);
+}
+
+fn make_node(ctx: Option<&ActionCtx>, node_info: NodeInfo) -> GraphvizNode {
+    let mut attributes = Attributes::new();
+    // Set basic info
+    attributes
+        .set("label", to_node_label(node_info.node))
         .set("xlabel", node_info.index)
         .set("color", NORMAL_COLOR)
         .set("fontcolor", NORMAL_COLOR);
 
+    // Set color for garbage
     if node_info.is_garbage {
-        attribs
+        attributes
             .set("color", GARBAGE_COLOR)
             .set("fontcolor", GARBAGE_COLOR);
     }
 
-    let is_abstraction = matches!(node, DebruijnNode::Abstraction(_));
+    // Set color for abstraction
+    let is_abstraction = matches!(node_info.node, DebruijnNode::Abstraction(_));
     if is_abstraction {
         let bg_color = get_random_color(node_info.index, 0.5);
-        attribs.set("fillcolor", bg_color).set("style", "filled");
+        attributes.set("fillcolor", bg_color).set("style", "filled");
     }
 
+    // Set shape and color for redex application
     if let Some(info) = node_info.redex_info {
         let color1 = get_random_color(info.abs.child, 0.5);
         let color2 = get_random_color(info.arg.child, 0.5);
         let bg_color = format!("{};0.5:{}", color1, color2);
-        attribs
+        attributes
             .set("shape", "diamond")
             .set("fillcolor", bg_color)
             .set("style", "filled");
     }
 
     if node_info.is_root.is_some() {
-        attribs.set("penwidth", 2.0);
+        attributes.set("penwidth", 2.0);
     }
 
+    // Set up binding information
     match node_info.abs_binding {
         AbstractionBinding::NotLeaf => (),
         AbstractionBinding::BindingMissing {
             index,
             calculated_index,
         } => {
-            attribs.set("fillcolor", "red").set("style", "filled");
-            attribs.append_label(format!(
+            attributes.set("fillcolor", "red").set("style", "filled");
+            attributes.append_label(format!(
                 "NO BINDING - raw: {}, calc: {}",
                 index.get_raw(),
                 calculated_index
@@ -156,58 +159,50 @@ fn make_node(node: &DebruijnNode, node_info: NodeInfo) -> GraphvizNode {
         }
         AbstractionBinding::FreeVariable {
             calculated_index, ..
-        } => attribs.append_label(format!("(free, calc: {})", calculated_index)),
+        } => attributes.append_label(format!("(free, calc: {})", calculated_index)),
         AbstractionBinding::BoundTo {
             calculated_index,
             abstraction,
             ..
-        } => attribs.append_label(format!(
+        } => attributes.append_label(format!(
             "(bound @ {}, calc: {})",
             abstraction, calculated_index
         )),
     }
 
-    if let DebruijnNode::Abstraction(abs) = *node
+    // Usage mismatch between claimed and actual usage
+    if let DebruijnNode::Abstraction(abs) = node_info.node
         && let Some(computed_usage) = node_info.computed_usage
         && abs.usage != computed_usage
     {
-        attribs.set("fillcolor", "red");
-        attribs.set("style", "filled");
-        attribs.append_label(format!(
+        attributes.set("fillcolor", "red");
+        attributes.set("style", "filled");
+        attributes.append_label(format!(
             "WRONG USAGE - claimed: {}, actual: {} ",
             abs.usage, computed_usage
         ));
     }
 
-    let graph_node = GraphvizNode::new(node_info.index, &attribs);
+    // Highlight the current ctx node
+    if ctx.is_some_and(|ctx| ctx.term == node_info.index) {
+        attributes.set("color", "green");
+    }
+
+    let graph_node = GraphvizNode::new(node_info.index, attributes);
     graph_node
 }
 
-fn get_edges(node: &DebruijnNode, node_info: NodeInfo) -> Vec<GraphvizEdge> {
+fn get_edges(node_info: NodeInfo) -> Vec<GraphvizEdge> {
     let mut edges = vec![];
-    let mut edge_attribs = Attributes::new();
-    edge_attribs.set("color", NORMAL_COLOR);
-
-    if node_info.is_garbage {
-        edge_attribs.set("constraint", "false");
-        edge_attribs.set("color", GARBAGE_COLOR);
-        edge_attribs.set("fontcolor", GARBAGE_COLOR);
-    }
-    match node {
+    match node_info.node {
         DebruijnNode::Index(_) => {
+            // Add binding edge
             if let AbstractionBinding::BoundTo { abstraction, .. } = node_info.abs_binding {
-                let color = get_random_color(abstraction, 1.0);
-                edge_attribs
-                    .set("color", color)
-                    .set("style", "dashed")
-                    .set("constraint", "false");
-                edges.push(GraphvizEdge::new(
-                    node_info.index,
-                    abstraction,
-                    &edge_attribs,
-                ));
+                let binding_edge = GraphvizEdge::from_binding_edge(node_info.index, abstraction);
+                edges.push(binding_edge);
             }
         }
+        // Add normal edges
         DebruijnNode::Abstraction(abs) => {
             let edge = GraphvizEdge::from_debruijn_edge(abs.body, &node_info);
             edges.push(edge);
@@ -242,8 +237,10 @@ enum AbstractionBinding {
 
 #[derive(Debug, Clone, Copy)]
 struct NodeInfo {
+    node: DebruijnNode,
     is_root: Option<DebruijnEdge>,
-    index: usize,
+    // Backing index of the node
+    index: BackingIndex,
     // If true, the this DebruijNode is garbage
     is_garbage: bool,
     // If not None, then this DebruijNode is a non-garbage Index node
@@ -258,8 +255,10 @@ struct NodeInfo {
 }
 
 impl NodeInfo {
-    fn garbage(index: usize) -> NodeInfo {
+    fn garbage(root: &FlatRoot, index: BackingIndex) -> NodeInfo {
+        let node = root[index];
         NodeInfo {
+            node,
             index,
             is_root: None,
             is_garbage: true,
@@ -280,7 +279,7 @@ struct RedexInfo {
 
 fn get_info_array(root: &FlatRoot) -> Vec<NodeInfo> {
     let mut info_vec: Vec<NodeInfo> = (0..root.backing.len())
-        .map(|index| NodeInfo::garbage(index))
+        .map(|index| NodeInfo::garbage(root, index))
         .collect();
     root.preorder_walk(|root, ctx| {
         let abs_bound = match root[ctx.term] {
@@ -406,17 +405,17 @@ impl Graph {
         output.push("node [shape=box]".to_string());
 
         for node in &self.nodes {
-            output.push(format!("{} [{}]", node.name, node.attribs.bake()))
+            output.push(format!("{} [{}]", node.name, node.attributes.bake()))
         }
 
         for GraphvizEdge {
-            head,
-            tail,
-            attributes: attribs,
+            start,
+            end,
+            attributes,
         } in &self.edges
         {
-            let attribs = &attribs.bake();
-            output.push(format!("{head} -> {tail} [{attribs}]"));
+            let attributes = &attributes.bake();
+            output.push(format!("{start} -> {end} [{attributes}]"));
         }
 
         for graph in &self.subgraphs {
@@ -431,30 +430,40 @@ impl Graph {
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
 struct GraphvizNode {
     name: String,
-    attribs: Attributes,
+    attributes: Attributes,
 }
 impl GraphvizNode {
-    fn new(name: usize, attributes: &Attributes) -> GraphvizNode {
+    fn new(index: BackingIndex, attributes: Attributes) -> GraphvizNode {
         GraphvizNode {
-            name: name.to_string(),
-            attribs: attributes.clone(),
+            name: index.to_string(),
+            attributes,
         }
     }
 }
 
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
 struct GraphvizEdge {
-    head: String,
-    tail: String,
+    start: String,
+    end: String,
     attributes: Attributes,
 }
 impl GraphvizEdge {
-    fn new(head: usize, tail: usize, attributes: &Attributes) -> GraphvizEdge {
+    fn new(start: BackingIndex, end: BackingIndex, attributes: &Attributes) -> GraphvizEdge {
         GraphvizEdge {
-            head: head.to_string(),
-            tail: tail.to_string(),
+            start: start.to_string(),
+            end: end.to_string(),
             attributes: attributes.clone(),
         }
+    }
+
+    fn from_binding_edge(index: BackingIndex, abstraction: BackingIndex) -> GraphvizEdge {
+        let color = get_random_color(abstraction, 1.0);
+        let mut edge_attribs = Attributes::new();
+        edge_attribs
+            .set("color", color)
+            .set("style", "dashed")
+            .set("constraint", "false");
+        GraphvizEdge::new(index, abstraction, &edge_attribs)
     }
 
     fn from_debruijn_edge(edge: DebruijnEdge, node_info: &NodeInfo) -> GraphvizEdge {
