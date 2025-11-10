@@ -2,7 +2,10 @@ use std::{
     collections::HashMap,
     ops::ControlFlow,
     process::Command,
-    sync::{LazyLock, atomic::AtomicUsize},
+    sync::{
+        LazyLock,
+        atomic::{AtomicBool, AtomicUsize, Ordering},
+    },
     time::SystemTime,
 };
 
@@ -14,7 +17,9 @@ use crate::{
     treewalk::ActionCtx,
 };
 
-const DEBUG: bool = false;
+const DEBUG: bool = true;
+
+static CURRENTLY_WRITING_GRAPH: AtomicBool = AtomicBool::new(false);
 
 static COUNTER: AtomicUsize = AtomicUsize::new(0);
 static TIMESTAMP: LazyLock<u64> = LazyLock::new(|| {
@@ -34,6 +39,15 @@ fn _debug_write_to_file_ctx(tree: &FlatTree, ctx: Option<&ActionCtx>, name: &str
     if !DEBUG {
         return;
     }
+
+    if CURRENTLY_WRITING_GRAPH.load(Ordering::Relaxed) {
+        println!("Not writing graph for {name} because one is already in progress...");
+        println!("{}", std::backtrace::Backtrace::force_capture());
+        return;
+    }
+    CURRENTLY_WRITING_GRAPH.store(true, Ordering::Relaxed);
+    let value = COUNTER.fetch_add(1, Ordering::Relaxed);
+
     let args = GraphvizArgs { no_garbage: false };
     let graph = to_graph(tree, ctx, &args);
 
@@ -41,7 +55,6 @@ fn _debug_write_to_file_ctx(tree: &FlatTree, ctx: Option<&ActionCtx>, name: &str
     let folder = &format!("debug/{timestamp}");
     std::fs::create_dir_all(folder).unwrap();
 
-    let value = COUNTER.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
     let graphviz_file = format!("{folder}/_{value}_{name}.dot");
     let image_file = format!("{folder}/{value}_{name}.png");
     std::fs::write(graphviz_file.clone(), graph.to_string()).expect("Failed to write dot file");
@@ -53,6 +66,8 @@ fn _debug_write_to_file_ctx(tree: &FlatTree, ctx: Option<&ActionCtx>, name: &str
         .unwrap();
     let image_data = command.stdout;
     std::fs::write(image_file, image_data).expect("Failed to run graphviz command");
+
+    CURRENTLY_WRITING_GRAPH.store(false, Ordering::Relaxed);
 }
 
 pub struct GraphvizArgs {
@@ -338,6 +353,7 @@ fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
     let mut info_vec: Vec<NodeInfo> = (0..tree.backing.len())
         .map(|index| NodeInfo::garbage(tree, index))
         .collect();
+
     tree.preorder_walk(|tree, ctx| {
         let abs_bound = match tree[ctx.current_index()] {
             DebruijnNode::Index(index) => {
