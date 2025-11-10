@@ -340,11 +340,12 @@ impl DebruijnIndex {
         //    if they are present for binding purposes. There are infinitely many free lambdas
         //    that are above the root and they are all valid targets for binding.
         let mut normal_lambdas = 0;
-        let mut remaining_index = self.get_raw();
+        let mut remaining_index = self.get_raw() as isize;
         let mut err = None;
 
         for edge in chain.full_chain.iter().rev().cloned() {
-            let ghost_lambdas = -edge.adjust.unwrap_or(0) as usize;
+            let ghost_lambdas = -edge.adjust.unwrap_or(0);
+            // Sanity check
             if ghost_lambdas >= remaining_index {
                 let raw_index = self.get_raw();
                 let error = format!(
@@ -366,7 +367,7 @@ impl DebruijnIndex {
         }
 
         let free_lambdas = remaining_index;
-        let calculated_index = normal_lambdas + free_lambdas;
+        let calculated_index = (normal_lambdas + free_lambdas) as usize;
         (calculated_index, err)
     }
 
@@ -795,9 +796,11 @@ pub fn beta_reduce(tree: &mut FlatTree, mut redex: RedexMut) {
 
     // This is the following tree fragment
     // --> new_body
+    // (the parent to this edge is supposed to be abs, although this will change later in this methods)
     // Note that body may have been re-allocated--this happens when the body consists of a single
     // leaf node that gets substituted--aka: the abstraction node looks like λ 1
     let mut new_body = substitute_and_shift_fused(tree, &mut redex);
+
     // Adjust down by one.
     // Add an adjustment of -1. This represents the effect of the redex abstraction drop out
     // (in other words, this is being logically applied to the abs -> body edge).
@@ -806,7 +809,10 @@ pub fn beta_reduce(tree: &mut FlatTree, mut redex: RedexMut) {
     // parent -> body, we need to add all of the adjustments that were on those edges.
     let parent_app_adjust = redex.parent_to_app.adjust.unwrap_or(0);
     let app_abs_adjust = redex.app_to_abs.adjust.unwrap_or(0);
-    let abs_body_adjust = redex.abs_to_body.adjust.unwrap_or(0);
+    // Note that the abs -> body edge in the redex struct is going to be potentially at this point
+    // due to substitute_and_shift_fused (in particular if the body is substituted)
+    // So instead we use the adjustment on the new_body
+    let abs_body_adjust = new_body.adjust.unwrap_or(0);
     let adjust = adjust + parent_app_adjust + app_abs_adjust + abs_body_adjust;
 
     new_body.adjust = Some(adjust);
@@ -932,6 +938,10 @@ fn get_usage_by_depth(tree: &FlatTree, ctx: &mut ActionCtx) -> Vec<Usage> {
 ///
 /// MEMORY: Old child becomes garbage after repointing.
 fn repoint_node(tree: &mut FlatTree, parent: EdgeWithParent, child: DebruijnEdge) {
+    if parent.backing_index() == Some(child.child) {
+        graphviz::debug_write_to_file(tree, "bad_repoint");
+        panic!("attempt to repoint {parent:?} to {child} which would cause a loop (tree: {tree:?}");
+    }
     match parent {
         EdgeWithParent::AbsToBody(parent) => {
             let abs = tree.get_abs(parent);
@@ -1006,7 +1016,6 @@ fn substitute_shift_fused_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMu
     let arg_ctx = &mut redex.arg_ctx();
     let func_ctx = &mut redex.func_ctx();
 
-    let redex_arg = redex.app_to_arg;
     let body_usage = redex.body_usage;
     let app_to_abs_adjustment = redex.app_to_abs.adjust;
 
@@ -1024,19 +1033,21 @@ fn substitute_shift_fused_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMu
                 // mulitply by -1 in order to know how many 'ghost abstractions' are actually present
                 // Note that depth_relative_to_arg is only tracking the number of *non-ghost* abstractions
                 // are present!
-                let adj_amount = (-app_to_abs_adjustment.unwrap_or(0)) as usize;
-                let up_by_amount = adj_amount + depth_relative_to_arg;
+                let adj_amount = -app_to_abs_adjustment.unwrap_or(0);
+                let up_by_amount = (adj_amount + depth_relative_to_arg as isize) as usize;
 
                 let last_arg_allocation = substitution_i == body_usage - 1;
-                let new_arg = if last_arg_allocation {
+                let new_child = if last_arg_allocation {
                     // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
                     up_by(tree, arg_ctx, up_by_amount);
+                    let redex_arg = redex.app_to_arg;
                     redex_arg
                 } else {
                     clone_subtree_and_fix_up_fused(tree, arg_ctx, up_by_amount)
                 };
                 // Point parent to the newly created subtree
-                repoint_node(tree, ctx.current_edge().edge_w_parent, new_arg);
+                let parent = ctx.current_edge().edge_w_parent;
+                repoint_node(tree, parent, new_child);
                 substitution_i += 1;
             }
         }

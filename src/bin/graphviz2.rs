@@ -32,6 +32,9 @@ pub struct Args {
 }
 
 fn main() -> Result<(), Box<dyn std::error::Error>> {
+    // For debugging only, shouldn't be enabled in benchmarks
+    // unsafe { backtrace_on_stack_overflow::enable() };
+
     let args = Args::parse();
 
     let term = args.term.clone();
@@ -50,7 +53,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         reducer.reduce_one();
     }
 
-    let root = if args.normalized {
+    let tree = if args.normalized {
         reducer.tree.normalized()
     } else {
         reducer.tree
@@ -59,7 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let graph_args = GraphvizArgs {
         no_garbage: args.no_garbage,
     };
-    let graph = lambda_beavers::graphviz::to_graph(&root, None, &graph_args);
+    let graph = lambda_beavers::graphviz::to_graph(&tree, None, &graph_args);
     std::fs::write(args.output.clone(), graph.to_string())?;
     Ok(())
 }
