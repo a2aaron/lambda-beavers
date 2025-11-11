@@ -252,10 +252,11 @@ fn make_node(node_info: NodeInfo) -> GraphvizNode {
         && let Some(computed_usage) = node_info.computed_usage
         && abs.usage != computed_usage
     {
-        attributes.set("fillcolor", "red");
+        attributes.set("color", "red");
+        attributes.set("fontcolor", "darkred");
         attributes.set("style", "filled");
         attributes.append_label(format!(
-            "WRONG USAGE - claimed: {}, actual: {} ",
+            "WRONG USAGE\nclaimed: {}, actual: {} ",
             abs.usage, computed_usage
         ));
     }
