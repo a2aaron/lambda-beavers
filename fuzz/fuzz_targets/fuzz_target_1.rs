@@ -1,8 +1,17 @@
 #![no_main]
 
-use libfuzzer_sys::fuzz_target;
+use libfuzzer_sys::{arbitrary::Arbitrary, fuzz_target};
 
 use lambda_beavers::{debruijn::Debruijn, reduce::Reducer};
+
+#[derive(Arbitrary)]
+struct DebruijnWrapper(Debruijn);
+
+impl std::fmt::Debug for DebruijnWrapper {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
 
 #[track_caller]
 fn assert_usage(reducer: &Reducer) {
@@ -27,12 +36,12 @@ fn is_valid(debruijn: &Debruijn, max_depth: usize) -> bool {
     }
 }
 
-fuzz_target!(|debruijn: Debruijn| {
-    if !is_valid(&debruijn, 10) {
+fuzz_target!(|debruijn: DebruijnWrapper| {
+    if !is_valid(&debruijn.0, 10) {
         return;
     }
-    // println!("{debruijn}");
-    let mut reducer = Reducer::new(&debruijn);
+    // println!("TEST CASE = {debruijn}");
+    let mut reducer = Reducer::new(&debruijn.0);
 
     assert_usage(&reducer);
     reducer.reduce_one();
