@@ -146,20 +146,28 @@ impl FlatTree {
     }
 
     pub fn check_usage(&self) -> Result<(), (BackingIndex, Usage, Usage)> {
-        let result = self.preorder_walk(|tree, ctx| {
-            if let DebruijnNode::Abstraction(abs) = tree[ctx.current_index()] {
-                let expected = compute_usage_flat(tree, ctx.current_index());
-                let actual = abs.usage;
-                if actual != expected {
-                    return ControlFlow::Break((ctx.current_index(), actual, expected));
+        fn _check_usage(
+            tree: &FlatTree,
+            index: BackingIndex,
+        ) -> Result<(), (BackingIndex, Usage, Usage)> {
+            match tree[index] {
+                DebruijnNode::Index(_) => (),
+                DebruijnNode::Abstraction(abstraction) => {
+                    let expected = compute_usage_flat(tree, index);
+                    let actual = abstraction.usage;
+                    if actual != expected {
+                        return Err((index, actual, expected));
+                    }
+                    _check_usage(tree, abstraction.body)?;
                 }
-            };
-            ControlFlow::Continue(())
-        });
-        match result {
-            Some(bad) => Err(bad),
-            None => Ok(()),
+                DebruijnNode::Application(application) => {
+                    _check_usage(tree, application.func)?;
+                    _check_usage(tree, application.arg)?;
+                }
+            }
+            Ok(())
         }
+        _check_usage(self, self.root)
     }
 
     fn get_abs(&self, term: BackingIndex) -> Abstraction {
