@@ -987,11 +987,6 @@ fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
         old_abstraction_chain: Vec<BackingIndex>,
         new_abstraction_chain: Vec<BackingIndex>,
     }
-    let mut context = Context {
-        tree,
-        old_abstraction_chain: vec![],
-        new_abstraction_chain: vec![],
-    };
 
     fn _clone_subtree(ctx: &mut Context<'_>, old_node_index: BackingIndex) -> BackingIndex {
         match ctx.tree[old_node_index] {
@@ -1054,6 +1049,12 @@ fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
             }
         }
     }
+
+    let mut context = Context {
+        tree,
+        old_abstraction_chain: vec![],
+        new_abstraction_chain: vec![],
+    };
 
     _clone_subtree(&mut context, index)
 }
