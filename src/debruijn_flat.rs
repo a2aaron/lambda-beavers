@@ -1,6 +1,6 @@
 use core::fmt;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::{Binary, Display},
     num::NonZeroUsize,
     ops::{ControlFlow, Index, IndexMut},
@@ -813,27 +813,51 @@ fn update_usages(tree: &mut FlatTree, redex: &mut RedexMut) {
 // no abstraction term to bind it to, we will ignore it), and we also ignore the arg-bound term of c
 // since that won't get updated.
 fn get_usage_by_depth(tree: &FlatTree, arg_ctx: &mut ActionCtx) -> HashMap<BackingIndex, Usage> {
-    let arg_abstraction_chain = arg_ctx.chain.abstractions.clone();
-    let mut usages = HashMap::new();
-    tree.preorder_walk_at(arg_ctx, |tree, ctx| {
-        if let DebruijnNode::Index(binding) = tree[ctx.current_index()] {
-            if let Binding::Bound(backing_index) = binding {
-                // We don't update usages for abstractions inside the argument subtree
-                // This is because those abstractions will be duplicated and therefore not have
-                // their usages change at all. Hence we need to check that the backing index
-                // is binding to some abstraction in the arg abstraction chain and not just any
-                // abstraction
-                let bound_above_arg = arg_abstraction_chain
-                    .iter()
-                    .any(|abs| abs.parent_index().unwrap() == backing_index);
-                if bound_above_arg {
-                    let entry = usages.entry(backing_index).or_insert(0);
-                    *entry += 1;
+    struct Context<'a> {
+        tree: &'a FlatTree,
+        usages: HashMap<BackingIndex, Usage>,
+        arg_abstraction_chain: HashSet<BackingIndex>,
+    }
+    fn _get_usage_by_depth(ctx: &mut Context, index: BackingIndex) {
+        match ctx.tree[index] {
+            DebruijnNode::Index(binding) => {
+                if let Binding::Bound(backing_index) = binding {
+                    // We don't update usages for abstractions inside the argument subtree
+                    // This is because those abstractions will be duplicated and therefore not have
+                    // their usages change at all. Hence we need to check that the backing index
+                    // is binding to some abstraction in the arg abstraction chain and not just any
+                    // abstraction
+                    let bound_above_arg = ctx.arg_abstraction_chain.contains(&backing_index);
+                    if bound_above_arg {
+                        let entry = ctx.usages.entry(backing_index).or_insert(0);
+                        *entry += 1;
+                    }
                 }
             }
+            DebruijnNode::Abstraction(abstraction) => _get_usage_by_depth(ctx, abstraction.body),
+            DebruijnNode::Application(application) => {
+                _get_usage_by_depth(ctx, application.func);
+                _get_usage_by_depth(ctx, application.arg);
+            }
         }
-    });
-    usages
+    }
+
+    let mut ctx = Context {
+        tree,
+        usages: HashMap::new(),
+        arg_abstraction_chain: HashSet::from_iter(
+            arg_ctx
+                .chain
+                .abstractions
+                .iter()
+                .cloned()
+                .map(|x| x.parent_index().unwrap()),
+        ),
+    };
+
+    _get_usage_by_depth(&mut ctx, arg_ctx.current_index());
+
+    ctx.usages
 }
 
 /// Repoint the term at `child` so that it is the child of `parent`. This does not affect the
