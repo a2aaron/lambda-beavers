@@ -700,51 +700,59 @@ impl RedexMut {
     }
 }
 
+pub enum WalkResult {
+    StackIsEmpty,
+    None,
+    Some(RedexMut),
+}
+
 pub struct WalkContext {
     stack: Vec<(BackingIndex, EdgeWithParent, DebruijnDepth)>,
 }
 
-impl FlatTree {
-    pub fn find_redex(&self) -> Option<RedexMut> {
-        fn walk_one(tree: &FlatTree, ctx: &mut WalkContext) -> Option<RedexMut> {
-            let (index, parent_to_current, depth) = ctx.stack.pop().unwrap();
+impl WalkContext {
+    pub fn new(tree: &FlatTree) -> WalkContext {
+        WalkContext {
+            stack: vec![(tree.root, EdgeWithParent::IntoRoot, 0)],
+        }
+    }
+
+    pub fn walk_one(&mut self, tree: &FlatTree) -> WalkResult {
+        if let Some((index, parent_to_current, depth)) = self.stack.pop() {
             match tree[index] {
-                DebruijnNode::Index(_) => None,
+                DebruijnNode::Index(_) => WalkResult::None,
                 DebruijnNode::Abstraction(abstraction) => {
                     let next_body = (
                         abstraction.body,
                         EdgeWithParent::AbsToBody(index),
                         depth + 1,
                     );
-                    ctx.stack.push(next_body);
-                    None
+                    self.stack.push(next_body);
+                    WalkResult::None
                 }
                 DebruijnNode::Application(application) => {
                     // Note that we want func to be visited before arg--it turns out that most of the
                     // time, redexes live in the function half rather than the argument half.
                     let next_arg = (application.arg, EdgeWithParent::AppToArg(index), depth);
-                    ctx.stack.push(next_arg);
+                    self.stack.push(next_arg);
 
                     let next_func = (application.func, EdgeWithParent::AppToFunc(index), depth);
-                    ctx.stack.push(next_func);
+                    self.stack.push(next_func);
 
-                    let redex = RedexMut::try_get(tree, depth, parent_to_current, index);
-                    redex
+                    if let Some(redex) = RedexMut::try_get(tree, depth, parent_to_current, index) {
+                        WalkResult::Some(redex)
+                    } else {
+                        WalkResult::None
+                    }
                 }
             }
+        } else {
+            WalkResult::StackIsEmpty
         }
-
-        let mut ctx = WalkContext {
-            stack: vec![(self.root, EdgeWithParent::IntoRoot, 0)],
-        };
-        while !ctx.stack.is_empty() {
-            if let Some(redex) = walk_one(self, &mut ctx) {
-                return Some(redex);
-            }
-        }
-        None
     }
+}
 
+impl FlatTree {
     pub fn get_redexes(&self) -> Vec<RedexMut> {
         struct Context<'a> {
             tree: &'a FlatTree,
@@ -782,7 +790,14 @@ impl FlatTree {
     }
 
     pub fn is_bnf(&self) -> bool {
-        self.find_redex().is_none()
+        let mut ctx = WalkContext::new(self);
+        loop {
+            match ctx.walk_one(self) {
+                WalkResult::StackIsEmpty => return true,
+                WalkResult::Some(_) => return false,
+                WalkResult::None => continue,
+            }
+        }
     }
 }
 

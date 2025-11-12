@@ -4,25 +4,40 @@ use clap::ValueEnum;
 
 use crate::{
     debruijn::Debruijn,
-    debruijn_flat::{self, FlatTree},
+    debruijn_flat::{self, FlatTree, RedexMut, WalkContext},
     graph::{NodeIndex, ReductionGraph},
     utils::Rng,
 };
 
 pub struct Reducer {
     pub tree: FlatTree,
+    walk_ctx: WalkContext,
 }
 
 impl Reducer {
     pub fn new(term: &Debruijn) -> Self {
+        let tree = FlatTree::from(term);
         Self {
-            tree: FlatTree::from(term),
+            walk_ctx: WalkContext::new(&tree),
+            tree,
         }
     }
 
+    fn find_redex(&mut self) -> Option<RedexMut> {
+        loop {
+            match self.walk_ctx.walk_one(&self.tree) {
+                debruijn_flat::WalkResult::StackIsEmpty => break,
+                debruijn_flat::WalkResult::None => continue,
+                debruijn_flat::WalkResult::Some(redex_mut) => return Some(redex_mut),
+            }
+        }
+        None
+    }
+
     pub fn reduce_one(&mut self) -> Option<ReductionResult> {
-        if let Some(redex) = self.tree.find_redex() {
+        if let Some(redex) = self.find_redex() {
             debruijn_flat::beta_reduce(&mut self.tree, redex);
+            self.walk_ctx = WalkContext::new(&self.tree);
             None
         } else {
             // This clone is fine, it occurs at the end of all reductions
