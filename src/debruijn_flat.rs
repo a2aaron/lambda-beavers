@@ -694,20 +694,6 @@ impl RedexMut {
             _ => None,
         }
     }
-
-    fn arg_ctx(&self) -> ActionCtx {
-        let edge_w_parent = EdgeWithParent::AppToArg(self.app_index);
-        let child = self.arg_index;
-
-        let mut chain = self.parent_chain.clone();
-        let edge = DoubleEndedEdge {
-            edge_w_parent,
-            child,
-        };
-        chain.push(edge);
-
-        ActionCtx { chain }
-    }
 }
 
 pub fn beta_reduce(tree: &mut FlatTree, mut redex: RedexMut) {
@@ -780,15 +766,14 @@ pub fn beta_reduce(tree: &mut FlatTree, mut redex: RedexMut) {
 fn update_usages(tree: &mut FlatTree, redex: &mut RedexMut) {
     // Number of times body is used
     let body_usage = redex.body_usage;
-    let mut arg_ctx = redex.arg_ctx();
 
     // If there are no parents to update (which happens if the redex is the root)
     // or otherwise has no abstractions in it's parent path, then do nothing.
-    if arg_ctx.chain.debruijn_depth() == 0 {
+    if redex.parent_chain.debruijn_depth() == 0 {
         return;
     }
 
-    let usages_of_page_in_arg = get_usage_by_depth(tree, &mut arg_ctx);
+    let usages_of_page_in_arg = get_usage_by_depth(tree, redex.arg_index);
     for (abstraction_index, usage_in_arg) in usages_of_page_in_arg {
         let abs = tree.get_abs(abstraction_index);
 
@@ -812,7 +797,7 @@ fn update_usages(tree: &mut FlatTree, redex: &mut RedexMut) {
 // Note that the unbound variable is not included (we could talk about it's usage, but since there's
 // no abstraction term to bind it to, we will ignore it), and we also ignore the arg-bound term of c
 // since that won't get updated.
-fn get_usage_by_depth(tree: &FlatTree, arg_ctx: &mut ActionCtx) -> HashMap<BackingIndex, Usage> {
+fn get_usage_by_depth(tree: &FlatTree, arg_index: BackingIndex) -> HashMap<BackingIndex, Usage> {
     struct Context<'a> {
         tree: &'a FlatTree,
         usages: HashMap<BackingIndex, Usage>,
@@ -852,7 +837,7 @@ fn get_usage_by_depth(tree: &FlatTree, arg_ctx: &mut ActionCtx) -> HashMap<Backi
         arg_subtree_abstractions: HashSet::new(),
     };
 
-    _get_usage_by_depth(&mut ctx, arg_ctx.current_index());
+    _get_usage_by_depth(&mut ctx, arg_index);
 
     ctx.usages
 }
