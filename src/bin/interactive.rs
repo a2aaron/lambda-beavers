@@ -4,7 +4,7 @@ use clap::Parser;
 use inquire::Select;
 use lambda_beavers::{
     debruijn::Debruijn,
-    debruijn_flat::{BackingIndex, FlatTree, beta_reduce},
+    debruijn_flat::{self, BackingIndex, FlatTree, beta_reduce},
     parse,
     print::{NodeLabelType, PrintableTerm},
     treewalk::ChildResults,
@@ -22,7 +22,10 @@ struct Args {
 
 fn print_highlighted<'a>(tree: &'a FlatTree, highlighted: BackingIndex) -> String {
     let printable_terms = tree.postorder_walk(|_tree, ctx, results| match results {
-        ChildResults::Index(index) => PrintableTerm::Leaf(format!("{}", index.get(&ctx.chain))),
+        ChildResults::Index(binding) => {
+            let index = debruijn_flat::compute_debruijn_index(&ctx.chain, binding);
+            PrintableTerm::Leaf(format!("{}", index))
+        }
         ChildResults::Abstraction { body_result, .. } => PrintableTerm::Abstraction {
             body_head: "λ ".to_string(),
             body: Box::new(body_result),

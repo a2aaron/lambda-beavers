@@ -1,8 +1,11 @@
 use core::fmt;
 use std::{
+    collections::HashMap,
     fmt::{Binary, Display},
+    num::NonZeroUsize,
     ops::{ControlFlow, Index, IndexMut},
     str::FromStr,
+    usize,
 };
 
 use crate::{
@@ -23,17 +26,25 @@ impl FlatTree {
         FlatTree {
             backing: vec![],
             root: DebruijnEdge {
-                child: 0,
-                adjust: None,
+                child: BackingIndex(0),
             },
         }
+    }
+
+    // Allocate a dummy node and return the backing index to the dummy.
+    // This dummy node should be set to something reasonable.
+    fn alloc_none(&mut self) -> BackingIndex {
+        let backing_index = BackingIndex(self.backing.len());
+        let dummy = DebruijnNode::Index(Binding::Bound(BackingIndex(usize::MAX)));
+        self.backing.push(dummy);
+        backing_index
     }
 
     /// Allocate the given term onto the backing vector. The node is set to the node
     /// in the input `term`.
     /// The return value is the index to the newly allocated node.
-    fn alloc(&mut self, term: DebruijnNode) -> DebruijnEdge {
-        let term_index = DebruijnEdge::new(self.backing.len());
+    fn alloc(&mut self, term: DebruijnNode) -> BackingIndex {
+        let term_index = BackingIndex(self.backing.len());
         self.backing.push(term);
         term_index
     }
@@ -61,22 +72,93 @@ impl FlatTree {
     }
 
     pub fn normalized(&self) -> FlatTree {
+        fn _normalize(
+            new_tree: &mut FlatTree,
+            old_tree: &FlatTree,
+            old_abstraction_chain: &mut Vec<BackingIndex>,
+            new_abstraction_chain: &mut Vec<BackingIndex>,
+            old_node_index: BackingIndex,
+        ) -> BackingIndex {
+            match old_tree[old_node_index] {
+                DebruijnNode::Index(binding) => {
+                    let binding = match binding {
+                        Binding::Free(_) => binding,
+                        Binding::Bound(backing_index) => {
+                            let debruijn_depth = old_abstraction_chain
+                                .iter()
+                                .position(|old_abs_idx| *old_abs_idx == backing_index)
+                                .unwrap();
+
+                            let new_abstraction_index = new_abstraction_chain[debruijn_depth];
+
+                            Binding::Bound(new_abstraction_index)
+                        }
+                    };
+
+                    let index = DebruijnNode::idx(binding);
+                    new_tree.alloc(index)
+                }
+                DebruijnNode::Abstraction(abstraction) => {
+                    let old_body_index = abstraction.body.child;
+                    let old_usage = abstraction.usage;
+
+                    let new_abstraction_index = new_tree.alloc_none();
+
+                    old_abstraction_chain.push(old_node_index);
+                    new_abstraction_chain.push(new_abstraction_index);
+
+                    let new_body = _normalize(
+                        new_tree,
+                        old_tree,
+                        old_abstraction_chain,
+                        new_abstraction_chain,
+                        old_body_index,
+                    );
+
+                    old_abstraction_chain.pop();
+                    new_abstraction_chain.pop();
+
+                    let new_abstraction = DebruijnNode::abs(new_body, old_usage);
+                    new_tree[new_abstraction_index] = new_abstraction;
+
+                    new_abstraction_index
+                }
+                DebruijnNode::Application(application) => {
+                    let old_func_index = application.func.child;
+                    let old_arg_index = application.arg.child;
+
+                    let new_func = _normalize(
+                        new_tree,
+                        old_tree,
+                        old_abstraction_chain,
+                        new_abstraction_chain,
+                        old_func_index,
+                    );
+                    let new_arg = _normalize(
+                        new_tree,
+                        old_tree,
+                        old_abstraction_chain,
+                        new_abstraction_chain,
+                        old_arg_index,
+                    );
+
+                    let app = DebruijnNode::app(new_func, new_arg);
+                    let app_index = new_tree.alloc(app);
+                    app_index
+                }
+            }
+        }
+
         let mut new_tree = FlatTree::new();
-        let root_node = self.postorder_walk(|_tree, ctx, result| match result {
-            ChildResults::Index(idx) => {
-                let index = idx.get(&ctx.chain);
-                new_tree.alloc(DebruijnNode::idx(index))
-            }
-            ChildResults::Abstraction { abs, body_result } => {
-                new_tree.alloc(DebruijnNode::abs(body_result, abs.usage))
-            }
-            ChildResults::Application {
-                func_result,
-                arg_result,
-                ..
-            } => new_tree.alloc(DebruijnNode::app(func_result, arg_result)),
-        });
-        new_tree.root = root_node;
+
+        let root_node = _normalize(
+            &mut new_tree,
+            self,
+            &mut vec![],
+            &mut vec![],
+            self.root.child,
+        );
+        new_tree.root = DebruijnEdge::new(root_node);
         new_tree
     }
 
@@ -142,13 +224,13 @@ impl Index<BackingIndex> for FlatTree {
     type Output = DebruijnNode;
 
     fn index(&self, index: BackingIndex) -> &Self::Output {
-        &self.backing[index]
+        &self.backing[index.0]
     }
 }
 
 impl IndexMut<BackingIndex> for FlatTree {
     fn index_mut(&mut self, index: BackingIndex) -> &mut Self::Output {
-        &mut self.backing[index]
+        &mut self.backing[index.0]
     }
 }
 
@@ -184,7 +266,7 @@ impl From<Vec<DebruijnNode>> for FlatTree {
     fn from(backing: Vec<DebruijnNode>) -> Self {
         FlatTree {
             backing,
-            root: DebruijnEdge::new(0),
+            root: DebruijnEdge::new(BackingIndex(0)),
         }
     }
 }
@@ -197,24 +279,53 @@ impl From<Debruijn> for FlatTree {
 
 impl From<&Debruijn> for FlatTree {
     fn from(term: &Debruijn) -> Self {
-        fn flatten(tree: &mut FlatTree, term: &Debruijn) -> DebruijnEdge {
-            match term {
-                Debruijn::Index(index) => tree.alloc(DebruijnNode::idx(*index)),
-                Debruijn::Abstraction { body } => {
-                    let usage = compute_usage(&body);
-                    let body = flatten(tree, body);
-                    tree.alloc(DebruijnNode::abs(body, usage))
-                }
-                Debruijn::Application { func, arg } => {
-                    let func = flatten(tree, func);
-                    let arg = flatten(tree, arg);
-                    tree.alloc(DebruijnNode::app(func, arg))
-                }
+        fn compute_binding(abstraction_chain: &[BackingIndex], debruijn_index: usize) -> Binding {
+            if debruijn_index > abstraction_chain.len() {
+                let free_height = debruijn_index - abstraction_chain.len();
+                Binding::Free(NonZeroUsize::new(free_height).unwrap())
+            } else {
+                let chain_index = abstraction_chain.len() - debruijn_index;
+                Binding::Bound(abstraction_chain[chain_index])
             }
         }
 
+        fn flatten(
+            tree: &mut FlatTree,
+            abstraction_chain: &mut Vec<BackingIndex>,
+            term: &Debruijn,
+        ) -> BackingIndex {
+            let term = match term {
+                Debruijn::Index(index) => {
+                    let binding = compute_binding(abstraction_chain, *index);
+                    DebruijnNode::idx(binding)
+                }
+                Debruijn::Abstraction { body } => {
+                    let usage = compute_usage(&body);
+
+                    // Pre-allocation is needed here so that we can have a spot for the abstraction
+                    // node to reside in. We will need this value to be allocated by the time we
+                    // go to compute the binding for any index nodes that depend on it.
+                    let backing_index = tree.alloc_none();
+
+                    abstraction_chain.push(backing_index);
+                    let body = flatten(tree, abstraction_chain, body);
+                    abstraction_chain.pop();
+
+                    tree[backing_index] = DebruijnNode::abs(body, usage);
+                    return backing_index;
+                }
+                Debruijn::Application { func, arg } => {
+                    let func = flatten(tree, abstraction_chain, func);
+                    let arg = flatten(tree, abstraction_chain, arg);
+                    DebruijnNode::app(func, arg)
+                }
+            };
+            tree.alloc(term)
+        }
+
         let mut tree = FlatTree::new();
-        tree.root = flatten(&mut tree, term);
+        let root_index = flatten(&mut tree, &mut vec![], term);
+        tree.root = DebruijnEdge::new(root_index);
         tree
     }
 }
@@ -222,7 +333,9 @@ impl From<&Debruijn> for FlatTree {
 impl From<&FlatTree> for Debruijn {
     fn from(tree: &FlatTree) -> Self {
         tree.postorder_walk(|_tree, ctx, child_results| match child_results {
-            ChildResults::Index(idx) => Debruijn::Index(idx.get(&ctx.chain)),
+            ChildResults::Index(binding) => {
+                Debruijn::Index(compute_debruijn_index(&ctx.chain, binding))
+            }
             ChildResults::Abstraction { body_result, .. } => Debruijn::Abstraction {
                 body: Box::new(body_result),
             },
@@ -235,6 +348,21 @@ impl From<&FlatTree> for Debruijn {
                 arg: Box::new(arg_result),
             },
         })
+    }
+}
+
+pub fn compute_debruijn_index(chain: &ParentChain, binding: Binding) -> usize {
+    match binding {
+        Binding::Bound(backing_index) => {
+            let depth = chain.debruijn_depth();
+            let index = chain
+                .abstractions
+                .iter()
+                .position(|edge| edge.parent_index().unwrap() == backing_index)
+                .unwrap();
+            depth - index
+        }
+        Binding::Free(free_height) => chain.debruijn_depth() + free_height.get(),
     }
 }
 
@@ -265,19 +393,14 @@ fn compute_usage(body: &Debruijn) -> Usage {
 /// Note that ctx needs to be pointing at an abstraction!
 pub fn compute_usage_flat(tree: &FlatTree, ctx: &mut ActionCtx) -> Usage {
     let mut usage = 0;
-    let init_depth = ctx.chain.debruijn_depth();
+    let abstraction_index = ctx.current_index();
+
+    let is_abs = matches!(tree[ctx.current_index()], DebruijnNode::Abstraction(_));
+    assert!(is_abs);
 
     tree.preorder_walk_at(ctx, |tree, ctx| {
-        if let DebruijnNode::Index(index) = tree[ctx.current_index()] {
-            let depth_relative_to_arg = ctx.chain.debruijn_depth() - init_depth;
-            let (calculated_index, err) = index.get_failable(&ctx.chain);
-            if let Some(err) = err {
-                println!("=== compute_usage_flat - get_failable ===");
-                println!("{tree:#?}");
-                println!("{err}");
-                println!("======");
-            }
-            if calculated_index == depth_relative_to_arg {
+        if let DebruijnNode::Index(binding) = tree[ctx.current_index()] {
+            if binding.is_bound_to(abstraction_index) {
                 usage += 1;
             }
         }
@@ -292,115 +415,18 @@ pub fn compute_usage_flat(tree: &FlatTree, ctx: &mut ActionCtx) -> Usage {
 // Zero indicates that there are no abstractions between the two terms, one indicates one abstraction, etc
 type DebruijnDepth = usize;
 
-// The index for the DebruijnNode::Index variant. This is an index for the actual lambda term and works
-// just like how Debruijn::Index works.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct DebruijnIndex(usize);
-
-impl DebruijnIndex {
-    pub fn get_failable(&self, chain: &ParentChain) -> (usize, Option<String>) {
-        // This gets the "normalized" value of the leaf node relative to the given chain
-        // Basically, we want to determine the actual lambda that this node binds to
-        // For example, in this tree:
-        // ----------> λ_1 ----------> 2, what does the 2 bind to?
-        //   adj=-1          adj=-1
-        // As it turns out, it should bind to the λ_1, and we would normalize this tree as λ 1
-        // How do we compute this?
-        // Each negative adjustment value is effectively turned into a number of "ghost" lambdas,
-        // which act as if they are in the tree for binding purposes, but are not actually present
-        // in the normalized tree. The above tree can be "ghost normalized" into the following:
-        // --> λ_g --> λ_1 --> λ_g --> 2
-        // Where each λ_g is a ghost lambda.
-        // From this, we do the binding as normal, so 2 ends up skipping over the first λ_g and
-        // then finally binding to λ_1
-
-        // Here's a few more examples:
-        // ------------------> λ_1 ----------> 2
-        //       adj=-2              adj=-1
-        // --> λ_g --> λ_g --> λ_1 --> λ_g --> 2
-        // (2 binds to λ_1, and the tree is equivalent to λ 1)
-
-        //        ------------------> λ_1 --> 4
-        //               adj=-2
-        // [λ_f1] --> λ_g --> λ_g --> λ_1 --> 4
-        // (2 binds to λ_f1)
-        // Note that λ_f1 is a "free" lambda. It does not actually exist in the
-        // tree, but unlike a ghost lambda, it is a valid target for a binding. The tree is
-        // equivalent to λ 2. Here's what the non-ghost normalized version of the tree looks like:
-        // [λ_f1] ------------------> λ_1 --> 2
-        // Note that it is not valid for a leaf node to bind to a ghost lambda--if this happens,
-        // then the tree is invalid and something terrible has happened.
-
-        // Effectively this means we have three lambda types:
-        // 1. Normal lambdas, which are in the tree and function as you expect
-        // 2. Ghost lambdas, which are not in the tree but act as if they are present
-        //    for binding purposes. Along a given edge with adj = -N, there are N ghost lambdas
-        //    They are not valid targets for binding.
-        // 3. Free lambdas, which are not in the tree because they are "above the root" and act as
-        //    if they are present for binding purposes. There are infinitely many free lambdas
-        //    that are above the root and they are all valid targets for binding.
-        let mut normal_lambdas = 0;
-        let mut remaining_index = self.get_raw() as isize;
-        let mut err = None;
-
-        for edge in chain.full_chain.iter().rev().cloned() {
-            let ghost_lambdas = -edge.adjust.unwrap_or(0);
-            // Sanity check
-            if ghost_lambdas >= remaining_index {
-                let raw_index = self.get_raw();
-                let error = format!(
-                    "Expected {remaining_index} to be greater than {ghost_lambdas} in index. raw_index = {raw_index}, chain: {chain:#?}",
-                );
-                err = Some(error);
-            }
-            remaining_index -= ghost_lambdas;
-            // assert!(remaining_index >= 1, "{}", err.unwrap());
-
-            if matches!(edge.edge_w_parent, EdgeWithParent::AbsToBody(_)) {
-                normal_lambdas += 1;
-                remaining_index -= 1;
-            }
-
-            if remaining_index == 0 {
-                break;
-            }
-        }
-
-        let free_lambdas = remaining_index;
-        let calculated_index = (normal_lambdas + free_lambdas) as usize;
-        (calculated_index, err)
-    }
-
-    #[track_caller]
-    pub fn get(&self, chain: &ParentChain) -> usize {
-        let (calculated_index, err) = self.get_failable(chain);
-        if let Some(err) = err {
-            panic!("{err}");
-        };
-        calculated_index
-    }
-
-    #[track_caller]
-    fn get_dbg(&self, chain: &ParentChain, tree: &mut FlatTree) -> usize {
-        let (calculated_index, err) = self.get_failable(chain);
-        if let Some(err) = err {
-            graphviz::debug_write_to_file(tree, "get_fail");
-            println!("{tree}");
-            panic!("{err}");
-        };
-        calculated_index
-    }
-
-    pub fn get_raw(&self) -> usize {
-        self.0
-    }
-}
-
 // The number of times a variable is used in an abstraction.
 pub type Usage = usize;
+
 /// A pointer to a given DebruijnNode within a FlatTree
-pub type BackingIndex = usize;
-pub type Adjustment = Option<isize>;
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BackingIndex(pub usize);
+
+impl Display for BackingIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "@{}", self.0)
+    }
+}
 
 /// An edge in the debruijn tree. This specific consists of
 /// - The child node
@@ -415,36 +441,23 @@ pub type Adjustment = Option<isize>;
 pub struct DebruijnEdge {
     /// An index into the backing vector of a FlatTree.
     pub child: BackingIndex,
-    /// An "adjustment" value. All DebruijnNode::Index nodes are implictly increased or decreased by
-    /// this amount. Note that this is cumulative.
-    pub adjust: Adjustment,
 }
 impl DebruijnEdge {
     /// Create a new TermIndex with adjustment zero.
     pub fn new(child: BackingIndex) -> Self {
-        Self {
-            child,
-            adjust: None,
-        }
+        Self { child }
     }
 }
 
 impl Display for DebruijnEdge {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        if let Some(adjust) = self.adjust {
-            write!(f, "{} (adjust={})", self.child, adjust)
-        } else {
-            write!(f, "{}", self.child)
-        }
+        write!(f, "{}", self.child)
     }
 }
 
 impl From<BackingIndex> for DebruijnEdge {
     fn from(index: BackingIndex) -> Self {
-        DebruijnEdge {
-            child: index,
-            adjust: None,
-        }
+        DebruijnEdge { child: index }
     }
 }
 
@@ -488,14 +501,12 @@ impl EdgeWithParent {
 pub struct DoubleEndedEdge {
     pub edge_w_parent: EdgeWithParent,
     pub child: BackingIndex,
-    pub adjust: Adjustment,
 }
 impl DoubleEndedEdge {
     pub fn root(tree: &FlatTree) -> DoubleEndedEdge {
         DoubleEndedEdge {
             edge_w_parent: EdgeWithParent::IntoRoot,
             child: tree.root.child,
-            adjust: tree.root.adjust,
         }
     }
 
@@ -504,10 +515,7 @@ impl DoubleEndedEdge {
     }
 
     fn child_edge(&self) -> DebruijnEdge {
-        DebruijnEdge {
-            child: self.child,
-            adjust: self.adjust,
-        }
+        DebruijnEdge { child: self.child }
     }
 }
 impl std::fmt::Debug for DoubleEndedEdge {
@@ -524,9 +532,6 @@ impl std::fmt::Debug for DoubleEndedEdge {
             None => write!(f, "{edge_type}: [root] -> {child}")?,
         }
 
-        if let Some(adj) = self.adjust {
-            write!(f, ", adj = {adj}")?;
-        }
         Ok(())
     }
 }
@@ -552,7 +557,6 @@ impl Abstraction {
     pub fn abs_to_body(&self, abs_index: BackingIndex) -> DoubleEndedEdge {
         DoubleEndedEdge {
             child: self.body.child,
-            adjust: self.body.adjust,
             edge_w_parent: EdgeWithParent::AbsToBody(abs_index),
         }
     }
@@ -568,7 +572,6 @@ impl Application {
     pub fn func(&self, app_index: BackingIndex) -> DoubleEndedEdge {
         DoubleEndedEdge {
             child: self.func.child,
-            adjust: self.func.adjust,
             edge_w_parent: EdgeWithParent::AppToFunc(app_index),
         }
     }
@@ -576,28 +579,60 @@ impl Application {
     pub fn arg(&self, app_index: BackingIndex) -> DoubleEndedEdge {
         DoubleEndedEdge {
             child: self.arg.child,
-            adjust: self.arg.adjust,
             edge_w_parent: EdgeWithParent::AppToArg(app_index),
         }
     }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub enum Binding {
+    // The backing index of the abstraction that the Index node binds to
+    Bound(BackingIndex),
+    // The number of abstractions above the root that this Index node binds to
+    // For example, in λ x, if x = 2, then we have a free bind of 1
+    // If x = 3, then we have a free bind of 2, and so on.
+    // Zero is not a valid value for this because we start 1-indexed
+    // Note that this is NOT a debruijn index, it's a debruijn depth, as it always refers
+    // to a constant number of abstractions above the root, no matter how deeply nested the
+    // actual index is
+    Free(NonZeroUsize),
+}
+
+impl Display for Binding {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Binding::Bound(backing_index) => write!(f, "{backing_index}"),
+            Binding::Free(free_index) => write!(f, "free ({free_index})"),
+        }
+    }
+}
+
+impl Binding {
+    fn is_bound_to(&self, backing_index: BackingIndex) -> bool {
+        *self == Binding::Bound(backing_index)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub enum DebruijnNode {
-    Index(DebruijnIndex),
+    // This backing index points to the abstraction that this index binds to
+    Index(Binding),
     Abstraction(Abstraction),
     Application(Application),
 }
 impl DebruijnNode {
-    pub fn idx(index: usize) -> DebruijnNode {
-        DebruijnNode::Index(DebruijnIndex(index))
+    pub fn idx(binding: Binding) -> DebruijnNode {
+        DebruijnNode::Index(binding)
     }
 
-    pub fn abs(body: DebruijnEdge, usage: usize) -> DebruijnNode {
+    pub fn abs(body: BackingIndex, usage: usize) -> DebruijnNode {
+        let body = DebruijnEdge::new(body);
         DebruijnNode::Abstraction(Abstraction { body, usage })
     }
 
-    pub fn app(func: DebruijnEdge, arg: DebruijnEdge) -> DebruijnNode {
+    pub fn app(func: BackingIndex, arg: BackingIndex) -> DebruijnNode {
+        let func = DebruijnEdge::new(func);
+        let arg = DebruijnEdge::new(arg);
         DebruijnNode::Application(Application { func, arg })
     }
 }
@@ -617,7 +652,7 @@ impl From<Application> for DebruijnNode {
 impl std::fmt::Debug for DebruijnNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Index(index) => write!(f, "idx@{}", index.get_raw()),
+            Self::Index(index) => write!(f, "idx: {}", index),
             Self::Abstraction(abs) => write!(f, "abs: body -> {} (usage={})", abs.body, abs.usage),
             Self::Application(app) => write!(f, "app: func -> {}, arg -> {}", app.func, app.arg),
         }
@@ -725,13 +760,11 @@ impl RedexMut {
     fn arg_ctx(&self) -> ActionCtx {
         let edge_w_parent = EdgeWithParent::AppToArg(self.parent_to_app.child);
         let child = self.app_to_arg.child;
-        let adjust = self.app_to_arg.adjust;
 
         let mut chain = self.parent_chain.clone();
         let edge = DoubleEndedEdge {
             edge_w_parent,
             child,
-            adjust,
         };
         chain.push(edge);
 
@@ -739,7 +772,6 @@ impl RedexMut {
     }
 
     fn func_ctx(&self) -> ActionCtx {
-        let adjust = self.app_to_abs.adjust;
         let child = self.app_to_abs.child;
         let edge_w_parent = EdgeWithParent::AppToFunc(self.parent_to_app.child);
 
@@ -747,7 +779,6 @@ impl RedexMut {
         let edge = DoubleEndedEdge {
             edge_w_parent,
             child,
-            adjust,
         };
         chain.push(edge);
         ActionCtx { chain }
@@ -790,32 +821,16 @@ pub fn beta_reduce(tree: &mut FlatTree, mut redex: RedexMut) {
     // arg becoming garbage or modified (it would technically be fine to actually still do that,
     // because the way arg is modified would not affect it's usage counts, but semantically this
     // is easier to reason aboout, so we do it first.)
-    let body_usage = redex.body_usage;
-    let mut ctx = redex.arg_ctx();
-    update_parent_chain_usage(tree, &mut ctx, body_usage);
+
+    update_usages(tree, &mut redex);
 
     // This is the following tree fragment
     // --> new_body
     // (the parent to this edge is supposed to be abs, although this will change later in this methods)
     // Note that body may have been re-allocated--this happens when the body consists of a single
     // leaf node that gets substituted--aka: the abstraction node looks like λ 1
-    let mut new_body = substitute_and_shift_fused(tree, &mut redex);
+    let new_body = substitute_and_shift_fused(tree, &mut redex);
 
-    // Adjust down by one.
-    // Add an adjustment of -1. This represents the effect of the redex abstraction drop out
-    // (in other words, this is being logically applied to the abs -> body edge).
-    let adjust = -1;
-    // Because we are dissolving disolving the parent -> app -> abs -> body path into just
-    // parent -> body, we need to add all of the adjustments that were on those edges.
-    let parent_app_adjust = redex.parent_to_app.adjust.unwrap_or(0);
-    let app_abs_adjust = redex.app_to_abs.adjust.unwrap_or(0);
-    // Note that the abs -> body edge in the redex struct is going to be potentially at this point
-    // due to substitute_and_shift_fused (in particular if the body is substituted)
-    // So instead we use the adjustment on the new_body
-    let abs_body_adjust = new_body.adjust.unwrap_or(0);
-    let adjust = adjust + parent_app_adjust + app_abs_adjust + abs_body_adjust;
-
-    new_body.adjust = Some(adjust);
     // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
     // The tree now looks like this
@@ -832,34 +847,30 @@ pub fn beta_reduce(tree: &mut FlatTree, mut redex: RedexMut) {
     //  ||
     //  VV
     // [various copies of arg]
-    repoint_node(tree, redex.parent_to_app.edge_w_parent, new_body);
+    repoint_node(tree, redex.parent_to_app.edge_w_parent, new_body.child);
 }
 
 // Updates the usages of the parent chain.
 // MEMORY: Modifies in place, does not allocate or make garbage.
-fn update_parent_chain_usage(
-    tree: &mut FlatTree,
-    ctx: &mut ActionCtx,
+fn update_usages(tree: &mut FlatTree, redex: &mut RedexMut) {
     // Number of times body is used
-    body_usage: Usage,
-) {
+    let body_usage = redex.body_usage;
+    let mut arg_ctx = redex.arg_ctx();
+
     // If there are no parents to update (which happens if the redex is the root)
     // or otherwise has no abstractions in it's parent path, then do nothing.
-    if ctx.chain.debruijn_depth() == 0 {
+    if arg_ctx.chain.debruijn_depth() == 0 {
         return;
     }
 
-    let usages_of_page_in_arg = get_usage_by_depth(tree, ctx);
-    for (depth, edge) in ctx.chain.abstractions.iter().enumerate() {
-        // Unwrap is safe here because all of the values in the ctx.chain.abstractions iterator
-        // are AbsToBody values.
-        let parent = edge.parent_index().unwrap();
-        let abs = tree.get_abs(parent);
+    let usages_of_page_in_arg = get_usage_by_depth(tree, &mut arg_ctx);
+    for (abstraction_index, usage_in_arg) in usages_of_page_in_arg {
+        let abs = tree.get_abs(abstraction_index);
 
-        let usage_of_parent_in_arg = usages_of_page_in_arg[depth];
-        let usage_delta: isize = (body_usage as isize - 1) * usage_of_parent_in_arg as isize;
+        let usage_delta: isize = (body_usage as isize - 1) * usage_in_arg as isize;
         let usage = abs.usage.checked_add_signed(usage_delta).unwrap();
-        tree[parent] = DebruijnNode::abs(abs.body, usage)
+
+        tree[abstraction_index] = DebruijnNode::abs(abs.body.child, usage)
     }
 }
 
@@ -876,46 +887,25 @@ fn update_parent_chain_usage(
 // Note that the unbound variable is not included (we could talk about it's usage, but since there's
 // no abstraction term to bind it to, we will ignore it), and we also ignore the arg-bound term of c
 // since that won't get updated.
-fn get_usage_by_depth(tree: &FlatTree, ctx: &mut ActionCtx) -> Vec<Usage> {
-    let init_depth = ctx.chain.debruijn_depth();
-    let mut usages = vec![0; init_depth];
-    tree.preorder_walk_at(ctx, |tree, ctx| {
-        if let DebruijnNode::Index(index) = tree[ctx.current_index()] {
-            let depth_relative_to_arg = ctx.chain.debruijn_depth() - init_depth;
-            // We need to account for the fact that we may be inside an abstraction in the argument
-            // If we are, we should skip if this is a bound variable.
-            let is_bound = index.get(&ctx.chain) <= depth_relative_to_arg;
-            if is_bound {
-                return;
+fn get_usage_by_depth(tree: &FlatTree, arg_ctx: &mut ActionCtx) -> HashMap<BackingIndex, Usage> {
+    let arg_abstraction_chain = arg_ctx.chain.abstractions.clone();
+    let mut usages = HashMap::new();
+    tree.preorder_walk_at(arg_ctx, |tree, ctx| {
+        if let DebruijnNode::Index(binding) = tree[ctx.current_index()] {
+            if let Binding::Bound(backing_index) = binding {
+                // We don't update usages for abstractions inside the argument subtree
+                // This is because those abstractions will be duplicated and therefore not have
+                // their usages change at all. Hence we need to check that the backing index
+                // is binding to some abstraction in the arg abstraction chain and not just any
+                // abstraction
+                let bound_above_arg = arg_abstraction_chain
+                    .iter()
+                    .any(|abs| abs.parent_index().unwrap() == backing_index);
+                if bound_above_arg {
+                    let entry = usages.entry(backing_index).or_insert(0);
+                    *entry += 1;
+                }
             }
-
-            // We want to transform this into an index into the usages array,
-            // which is sorted by parent-chain depth.
-            // In other words, we need to convert from a debruijn index to a debruijn level.
-
-            // arg. For example, if we have index = 5 and parent chain = [a, b, c, d, e, f]
-            // but are two abstractions deep into the arg
-            // (so depth_relative_to_arg = 2), then this points to
-            // [a, b, c, d, e, f]
-            //           ^------- here!
-            // which is level 4 (actual index = 3) into the array.
-            // 6 - (5 - 2)
-
-            // SAFETY: subtraction is safe because we just checked that index <= depth_relative_to_arg
-            // and return in the case that this happens.
-            let index_relative_to_parent = index.get(&ctx.chain) - depth_relative_to_arg;
-
-            // In the case of an open term - eg: λ (λ 1 1) 99
-            // it is possible for an index to actually point to an implict parent which
-            // doesn't actually exist in the tree. In this case, we just do nothing.
-            if usages.len() < index_relative_to_parent {
-                return;
-            }
-
-            // SAFETY: we just checked that usages.len() < index_relative_to_parent, and return
-            // in the case that this happens
-            let level = usages.len() - index_relative_to_parent;
-            usages[level] += 1;
         }
     });
     usages
@@ -937,8 +927,8 @@ fn get_usage_by_depth(tree: &FlatTree, ctx: &mut ActionCtx) -> Vec<Usage> {
 /// child                  old child <- garbage
 ///
 /// MEMORY: Old child becomes garbage after repointing.
-fn repoint_node(tree: &mut FlatTree, parent: EdgeWithParent, child: DebruijnEdge) {
-    if parent.backing_index() == Some(child.child) {
+fn repoint_node(tree: &mut FlatTree, parent: EdgeWithParent, child: BackingIndex) {
+    if parent.backing_index() == Some(child) {
         graphviz::debug_write_to_file(tree, "bad_repoint");
         panic!("attempt to repoint {parent:?} to {child} which would cause a loop (tree: {tree:?}");
     }
@@ -949,15 +939,15 @@ fn repoint_node(tree: &mut FlatTree, parent: EdgeWithParent, child: DebruijnEdge
         }
         EdgeWithParent::AppToFunc(parent) => {
             let app = tree.get_app(parent);
-            tree[parent] = DebruijnNode::app(child, app.arg);
+            tree[parent] = DebruijnNode::app(child, app.arg.child);
         }
         EdgeWithParent::AppToArg(parent) => {
             let app = tree.get_app(parent);
-            tree[parent] = DebruijnNode::app(app.func, child);
+            tree[parent] = DebruijnNode::app(app.func.child, child);
         }
         // Root
         EdgeWithParent::IntoRoot => {
-            tree.root = child;
+            tree.root = DebruijnEdge::new(child);
         }
     }
 }
@@ -1011,39 +1001,28 @@ fn substitute_and_shift_fused(tree: &mut FlatTree, redex: &mut RedexMut) -> Debr
 
 fn substitute_shift_fused_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMut) {
     let mut substitution_i = 0;
-    let init_depth = redex.parent_chain.debruijn_depth();
 
     let arg_ctx = &mut redex.arg_ctx();
     let func_ctx = &mut redex.func_ctx();
+    let func_backing_index = func_ctx.current_index();
 
     let body_usage = redex.body_usage;
-    let app_to_abs_adjustment = redex.app_to_abs.adjust;
-
     tree.preorder_walk_at_mut(func_ctx, |tree, ctx| {
         let term = ctx.current_index();
-        let chain = &ctx.chain;
-        if let DebruijnNode::Index(debruijn_index) = tree[term] {
-            let depth_relative_to_arg = chain.debruijn_depth() - init_depth;
-            // Note that the depth here is 0-indexed, while debruijn_index is 1-indexed
-
-            let calculated_index = debruijn_index.get_dbg(chain, tree);
-            let is_substituting = calculated_index == depth_relative_to_arg;
+        if let DebruijnNode::Index(binding) = tree[term] {
+            let is_substituting = binding.is_bound_to(func_backing_index);
             if is_substituting {
                 // Total adjustment from the app -> abs node. This is a negative value, so we need to
                 // mulitply by -1 in order to know how many 'ghost abstractions' are actually present
                 // Note that depth_relative_to_arg is only tracking the number of *non-ghost* abstractions
                 // are present!
-                let adj_amount = -app_to_abs_adjustment.unwrap_or(0);
-                let up_by_amount = (adj_amount + depth_relative_to_arg as isize) as usize;
-
                 let last_arg_allocation = substitution_i == body_usage - 1;
                 let new_child = if last_arg_allocation {
                     // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
-                    up_by(tree, arg_ctx, up_by_amount);
                     let redex_arg = redex.app_to_arg;
-                    redex_arg
+                    redex_arg.child
                 } else {
-                    clone_subtree_and_fix_up_fused(tree, arg_ctx, up_by_amount)
+                    clone_subtree(tree, arg_ctx)
                 };
                 // Point parent to the newly created subtree
                 let parent = ctx.current_edge().edge_w_parent;
@@ -1063,73 +1042,96 @@ fn substitute_shift_fused_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMu
 /// up_by and clone steps together for substitution, eliminating a second tree walk.
 ///
 /// MEMORY: Allocates new subtree, returned value is the newly allocated tree
-fn clone_subtree_and_fix_up_fused(
-    tree: &mut FlatTree,
-    ctx: &mut ActionCtx,
-    up_by: DebruijnDepth,
-) -> DebruijnEdge {
-    let init_depth = ctx.chain.debruijn_depth();
-    tree.postorder_walk_at_mut(ctx, |tree, ctx, result| {
-        let chain = &ctx.chain;
-        match result {
-            ChildResults::Index(index) => {
-                let depth_relative_to_term = chain.debruijn_depth() + 1 - init_depth;
-                let is_free = index.get(chain) >= depth_relative_to_term;
-                // get_raw is used here for a similar reason that it is used in shift_cutoff
-                // (in that we are bumping up the value of the index by "up_by", so we need to
-                // ignore the effects of adjustment at the moment.)
-                let index = if is_free {
-                    index.get_raw() + up_by
-                } else {
-                    index.get_raw()
+fn clone_subtree(tree: &mut FlatTree, ctx: &mut ActionCtx) -> BackingIndex {
+    struct Context<'a> {
+        tree: &'a mut FlatTree,
+        old_abstraction_chain: Vec<BackingIndex>,
+        new_abstraction_chain: Vec<BackingIndex>,
+    }
+    let mut context = Context {
+        tree,
+        old_abstraction_chain: vec![],
+        new_abstraction_chain: vec![],
+    };
+
+    fn _clone_subtree(ctx: &mut Context<'_>, old_node_index: BackingIndex) -> BackingIndex {
+        match ctx.tree[old_node_index] {
+            DebruijnNode::Index(binding) => {
+                let binding = match binding {
+                    Binding::Free(_) => binding,
+                    Binding::Bound(backing_index) => {
+                        let debruijn_depth = ctx
+                            .old_abstraction_chain
+                            .iter()
+                            .position(|old_abs_idx| *old_abs_idx == backing_index);
+
+                        if let Some(debruijn_depth) = debruijn_depth {
+                            // If this is some, then the binding is bound within the subtree being cloned
+                            // In this case, the binding needs to be updated to point to the abstraction
+                            // in the cloned subtree.
+                            let new_abstraction_index = ctx.new_abstraction_chain[debruijn_depth];
+                            Binding::Bound(new_abstraction_index)
+                        } else {
+                            // Otherwise, the binding is bound within the tree but outside of the subtree bieng cloned.
+                            // In that case, there is no need to update the binding
+                            binding
+                        }
+                    }
                 };
-                tree.alloc(DebruijnNode::idx(index))
+
+                let index = DebruijnNode::idx(binding);
+                ctx.tree.alloc(index)
             }
-            ChildResults::Abstraction { abs, body_result } => {
-                tree.alloc(DebruijnNode::abs(body_result, abs.usage))
+            DebruijnNode::Abstraction(abstraction) => {
+                let old_body_index = abstraction.body.child;
+                let old_usage = abstraction.usage;
+
+                let new_abstraction_index = ctx.tree.alloc_none();
+
+                ctx.old_abstraction_chain.push(old_node_index);
+                ctx.new_abstraction_chain.push(new_abstraction_index);
+
+                let new_body = _clone_subtree(ctx, old_body_index);
+
+                ctx.old_abstraction_chain.pop();
+                ctx.new_abstraction_chain.pop();
+
+                let new_abstraction = DebruijnNode::abs(new_body, old_usage);
+                ctx.tree[new_abstraction_index] = new_abstraction;
+
+                new_abstraction_index
             }
-            ChildResults::Application {
-                func_result,
-                arg_result,
-                ..
-            } => tree.alloc(DebruijnNode::app(func_result, arg_result)),
+            DebruijnNode::Application(application) => {
+                let old_func_index = application.func.child;
+                let old_arg_index = application.arg.child;
+
+                let new_func = _clone_subtree(ctx, old_func_index);
+                let new_arg = _clone_subtree(ctx, old_arg_index);
+
+                let app = DebruijnNode::app(new_func, new_arg);
+
+                let app_index = ctx.tree.alloc(app);
+                app_index
+            }
         }
-    })
-}
+    }
 
-/// MEMORY: Modifies in place, does not allocate or create garbage.
-fn up_by(tree: &mut FlatTree, ctx: &mut ActionCtx, up_by: DebruijnDepth) {
-    shift_cutoff(tree, ctx, up_by as isize, 1)
-}
+    _clone_subtree(&mut context, ctx.current_index())
 
-// ↑ n = n         if n < cutoff
-//       n + up_by otherwise
-// ↑ λ t = λ (↑ t) where up_by -> up_by and cutoff -> cutoff + 1
-// ↑ (t1 t2) = (↑ t1) (↑ t2)
-
-/// Shift the indicies for all terms up by an amount. Indicies below the cutoff are not modified
-/// This is useful during beta reduction because we need to "drop out" an abstraction.
-///
-/// MEMORY: Modifies in place, does not allocate or create garbage.
-fn shift_cutoff(tree: &mut FlatTree, ctx: &mut ActionCtx, up_by: isize, depth: DebruijnDepth) {
-    let init_depth = ctx.chain.debruijn_depth();
-    tree.preorder_walk_at_mut(ctx, |tree, ctx| {
-        let term = ctx.current_index();
-        let chain = &ctx.chain;
-        if let DebruijnNode::Index(term_index) = tree[term] {
-            let depth_relative_to_term = chain.debruijn_depth() + depth - init_depth;
-            // Recall that an index starts at 1, so if depth is set to 1, then this branch will always be taken.
-            let is_free = term_index.get(chain) >= depth_relative_to_term;
-            if is_free {
-                // Note that get_raw is used here because we want to adjust the index by the given amount
-                // (and we do not care about the calculated index for this purpose).
-                // for example, if the raw index is 3, and the calculated index is 1, and up_by is 2
-                // then we need the raw index to be 5, and the calculated index will then be 2
-                let new_index = term_index.get_raw().checked_add_signed(up_by).unwrap();
-                tree[term] = DebruijnNode::idx(new_index);
-            }
-        };
-    });
+    // tree.postorder_walk_at_mut(ctx, |tree, _ctx, result| {
+    //     let term = match result {
+    //         ChildResults::Index(binding) => DebruijnNode::idx(binding),
+    //         ChildResults::Abstraction { abs, body_result } => {
+    //             DebruijnNode::abs(body_result, abs.usage)
+    //         }
+    //         ChildResults::Application {
+    //             func_result,
+    //             arg_result,
+    //             ..
+    //         } => DebruijnNode::app(func_result, arg_result),
+    //     };
+    //     tree.alloc(term)
+    // })
 }
 
 #[cfg(test)]

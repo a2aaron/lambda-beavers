@@ -1,7 +1,7 @@
 use std::ops::ControlFlow;
 
 use crate::debruijn_flat::{
-    Abstraction, Application, BackingIndex, DebruijnIndex, DebruijnNode, DoubleEndedEdge, FlatTree,
+    Abstraction, Application, BackingIndex, Binding, DebruijnNode, DoubleEndedEdge, FlatTree,
     ParentChain,
 };
 
@@ -105,7 +105,7 @@ impl FlatTree {
 pub trait PostOrderAction<T> = FnMut(&FlatTree, &ActionCtx, ChildResults<T>) -> T;
 pub trait PostOrderActionMut<T> = FnMut(&mut FlatTree, &ActionCtx, ChildResults<T>) -> T;
 pub enum ChildResults<T> {
-    Index(DebruijnIndex),
+    Index(Binding),
     Abstraction {
         abs: Abstraction,
         body_result: T,
@@ -272,23 +272,23 @@ pub fn preorder_walk_mut<T>(
 #[cfg(test)]
 
 mod test {
-    use std::{collections::HashMap, ops::ControlFlow, str::FromStr};
+    use std::{collections::HashMap, num::NonZero, ops::ControlFlow, str::FromStr};
 
     use crate::{
-        debruijn_flat::{BackingIndex, DebruijnEdge, DebruijnNode, FlatTree},
+        debruijn_flat::{BackingIndex, Binding, DebruijnNode, FlatTree},
         treewalk::{postorder_walk, postorder_walk_mut},
     };
 
     fn idx(a: usize) -> DebruijnNode {
-        DebruijnNode::idx(a)
+        DebruijnNode::idx(Binding::Free(NonZero::new(a).unwrap()))
     }
 
     fn def(body: usize) -> DebruijnNode {
-        DebruijnNode::abs(DebruijnEdge::new(body), 0)
+        DebruijnNode::abs(BackingIndex(body), 0)
     }
 
     fn call(func: usize, arg: usize) -> DebruijnNode {
-        DebruijnNode::app(DebruijnEdge::new(func), DebruijnEdge::new(arg))
+        DebruijnNode::app(BackingIndex(func), BackingIndex(arg))
     }
 
     type NodeToName = HashMap<BackingIndex, String>;
@@ -312,13 +312,13 @@ mod test {
             let tree = FlatTree::from(vec![
                 call(1, 6), // 0 | F -> B, G
                 call(2, 3), // 1 | B -> A, D
-                idx(0),     // 2 | A
+                idx(1),     // 2 | A
                 call(4, 5), // 3 | D -> C, E
-                idx(1),     // 4 | C
-                idx(2),     // 5 | E
+                idx(2),     // 4 | C
+                idx(3),     // 5 | E
                 def(7),     // 6 | G -> I
                 def(8),     // 7 | I -> H
-                idx(3),     // 8 | H
+                idx(4),     // 8 | H
             ]);
 
             let nodes = [
@@ -336,12 +336,12 @@ mod test {
             let name_to_node = nodes
                 .iter()
                 .cloned()
-                .map(|(a, b)| (a.to_string(), b))
+                .map(|(a, b)| (a.to_string(), BackingIndex(b)))
                 .collect();
             let node_to_name = nodes
                 .iter()
                 .cloned()
-                .map(|(a, b)| (b, a.to_string()))
+                .map(|(a, b)| (BackingIndex(b), a.to_string()))
                 .collect();
 
             TestData {

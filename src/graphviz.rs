@@ -11,8 +11,8 @@ use std::{
 
 use crate::{
     debruijn_flat::{
-        BackingIndex, DebruijnEdge, DebruijnIndex, DebruijnNode, DoubleEndedEdge, FlatTree,
-        RedexMut, Usage, compute_usage_flat,
+        BackingIndex, Binding, DebruijnEdge, DebruijnNode, DoubleEndedEdge, FlatTree, RedexMut,
+        Usage, compute_usage_flat,
     },
     treewalk::ActionCtx,
 };
@@ -97,7 +97,6 @@ pub fn to_graph(tree: &FlatTree, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -
 fn update_or_add_ctx_edge(graph: &mut Graph, edge: DoubleEndedEdge) {
     let start = edge.edge_w_parent.backing_index();
     let end = edge.child;
-    let adjust = edge.adjust;
 
     let start = match start {
         Some(parent) => parent.to_string(),
@@ -117,10 +116,6 @@ fn update_or_add_ctx_edge(graph: &mut Graph, edge: DoubleEndedEdge) {
     } else {
         attributes.set("color", "red");
         attributes.set("fontcolor", "red");
-    }
-
-    if let Some(adj) = adjust {
-        attributes.append_label(format!("adj = {adj}"));
     }
 
     let edge = GraphvizEdge {
@@ -187,7 +182,7 @@ fn make_node(node_info: NodeInfo) -> GraphvizNode {
     // Set basic info
     attributes
         .set("label", to_node_label(node_info.node))
-        .set("xlabel", node_info.index)
+        .set("xlabel", node_info.index.0)
         .set("color", NORMAL_COLOR)
         .set("fontcolor", NORMAL_COLOR);
 
@@ -220,33 +215,6 @@ fn make_node(node_info: NodeInfo) -> GraphvizNode {
         attributes.set("penwidth", 2.0);
     }
 
-    // Set up binding information
-    match node_info.abs_binding {
-        AbstractionBinding::NotLeaf => (),
-        AbstractionBinding::BindingMissing {
-            index,
-            calculated_index,
-        } => {
-            attributes.set("fillcolor", "red").set("style", "filled");
-            attributes.append_label(format!(
-                "NO BINDING - raw: {}, calc: {}",
-                index.get_raw(),
-                calculated_index
-            ));
-        }
-        AbstractionBinding::FreeVariable {
-            calculated_index, ..
-        } => attributes.append_label(format!("(free, calc: {})", calculated_index)),
-        AbstractionBinding::BoundTo {
-            calculated_index,
-            abstraction,
-            ..
-        } => attributes.append_label(format!(
-            "(bound @ {}, calc: {})",
-            abstraction, calculated_index
-        )),
-    }
-
     // Usage mismatch between claimed and actual usage
     if let DebruijnNode::Abstraction(abs) = node_info.node
         && let Some(computed_usage) = node_info.computed_usage
@@ -268,9 +236,9 @@ fn make_node(node_info: NodeInfo) -> GraphvizNode {
 fn get_edges(node_info: NodeInfo) -> Vec<GraphvizEdge> {
     let mut edges = vec![];
     match node_info.node {
-        DebruijnNode::Index(_) => {
+        DebruijnNode::Index(binding) => {
             // Add binding edge
-            if let AbstractionBinding::BoundTo { abstraction, .. } = node_info.abs_binding {
+            if let Binding::Bound(abstraction) = binding {
                 let binding_edge = GraphvizEdge::from_binding_edge(node_info.index, abstraction);
                 edges.push(binding_edge);
             }
@@ -293,22 +261,6 @@ fn get_edges(node_info: NodeInfo) -> Vec<GraphvizEdge> {
 }
 
 #[derive(Debug, Clone, Copy)]
-enum AbstractionBinding {
-    NotLeaf,
-    BindingMissing {
-        index: DebruijnIndex,
-        calculated_index: usize,
-    },
-    FreeVariable {
-        calculated_index: usize,
-    },
-    BoundTo {
-        calculated_index: usize,
-        abstraction: BackingIndex,
-    },
-}
-
-#[derive(Debug, Clone, Copy)]
 struct NodeInfo {
     node: DebruijnNode,
     is_root: Option<DebruijnEdge>,
@@ -316,12 +268,6 @@ struct NodeInfo {
     index: BackingIndex,
     // If true, the this DebruijNode is garbage
     is_garbage: bool,
-    // If not None, then this DebruijNode is a non-garbage Index node
-    // and the value of this field is equal to the non-garbage Abstraction node that this
-    // Index node binds to.
-    // Note that a DebruijnNode can be an Index node without this field being set (which happens if
-    // the Index node is garbage or if the Index node is unbound within the whole term)
-    abs_binding: AbstractionBinding,
     // If not None, then this DebruijnNode is an non-garbage Application and is also a Redex
     redex_info: Option<RedexInfo>,
     computed_usage: Option<Usage>,
@@ -335,7 +281,6 @@ impl NodeInfo {
             index,
             is_root: None,
             is_garbage: true,
-            abs_binding: AbstractionBinding::NotLeaf,
             redex_info: None,
             computed_usage: None,
         }
@@ -352,36 +297,10 @@ struct RedexInfo {
 
 fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
     let mut info_vec: Vec<NodeInfo> = (0..tree.backing.len())
-        .map(|index| NodeInfo::garbage(tree, index))
+        .map(|index| NodeInfo::garbage(tree, BackingIndex(index)))
         .collect();
 
     tree.preorder_walk(|tree, ctx| {
-        let abs_bound = match tree[ctx.current_index()] {
-            DebruijnNode::Index(index) => {
-                let chain = &ctx.chain;
-                let depth = ctx.chain.debruijn_depth();
-                let (calculated_index, err) = index.get_failable(&ctx.chain);
-                if let Some(err) = err {
-                    println!("{err}")
-                }
-                if calculated_index <= depth {
-                    match chain.abstractions.get(depth - calculated_index) {
-                        Some(&abstraction) => AbstractionBinding::BoundTo {
-                            calculated_index,
-                            abstraction: abstraction.parent_index().unwrap(),
-                        },
-                        None => AbstractionBinding::BindingMissing {
-                            index,
-                            calculated_index,
-                        },
-                    }
-                } else {
-                    AbstractionBinding::FreeVariable { calculated_index }
-                }
-            }
-            _ => AbstractionBinding::NotLeaf,
-        };
-
         let redex_info = match RedexMut::try_get(tree, ctx) {
             Some(redex) => Some(RedexInfo {
                 abs: redex.app_to_abs,
@@ -392,10 +311,9 @@ fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
 
         let is_root = tree.root.child == ctx.current_index();
 
-        let index = ctx.current_index();
+        let index = ctx.current_index().0;
         info_vec[index].is_root = if is_root { Some(tree.root) } else { None };
         info_vec[index].is_garbage = false;
-        info_vec[index].abs_binding = abs_bound;
         info_vec[index].redex_info = redex_info;
 
         if matches!(tree[ctx.current_index()], DebruijnNode::Abstraction(_)) {
@@ -409,7 +327,7 @@ fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
 
 fn to_node_label(term: DebruijnNode) -> String {
     match term {
-        DebruijnNode::Index(index) => format!("idx: {}", index.get_raw()),
+        DebruijnNode::Index(index) => format!("idx: {}", index),
         DebruijnNode::Abstraction(abs) => format!("abs\nusage = {}", abs.usage),
         DebruijnNode::Application { .. } => format!("app"),
     }
@@ -517,7 +435,7 @@ struct GraphvizNode {
 impl GraphvizNode {
     fn new(index: BackingIndex, attributes: Attributes) -> GraphvizNode {
         GraphvizNode {
-            name: index.to_string(),
+            name: index.0.to_string(),
             attributes,
         }
     }
@@ -532,8 +450,8 @@ struct GraphvizEdge {
 impl GraphvizEdge {
     fn new(start: BackingIndex, end: BackingIndex, attributes: &Attributes) -> GraphvizEdge {
         GraphvizEdge {
-            start: start.to_string(),
-            end: end.to_string(),
+            start: start.0.to_string(),
+            end: end.0.to_string(),
             attributes: attributes.clone(),
         }
     }
@@ -562,18 +480,12 @@ impl GraphvizEdge {
             attributes.set("fontcolor", GARBAGE_COLOR);
         }
 
-        // Highlight edge if it has an adjustment
-        if let Some(adjust) = edge.adjust {
-            attributes.set("penwidth", "5");
-            attributes.set("label", format!("adj = {adjust}"));
-        }
-
         GraphvizEdge::new(start, end, &attributes)
     }
 }
 
-fn get_random_color(term: usize, saturation: f32) -> String {
+fn get_random_color(term: BackingIndex, saturation: f32) -> String {
     // Divide by phi here to get reasonably 'random' colors
-    let hue = (term as f32 / std::f32::consts::PHI).fract();
+    let hue = (term.0 as f32 / std::f32::consts::PHI).fract();
     format!("{hue} {saturation} 0.75")
 }
