@@ -766,7 +766,7 @@ pub fn beta_reduce(tree: &mut FlatTree, mut redex: RedexMut) {
     // (the parent to this edge is supposed to be abs, although this will change later in this methods)
     // Note that body may have been re-allocated--this happens when the body consists of a single
     // leaf node that gets substituted--aka: the abstraction node looks like λ 1
-    let new_body = substitute_and_shift_fused(tree, &mut redex);
+    let new_body = substitute(tree, &mut redex);
 
     // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
@@ -911,18 +911,14 @@ fn repoint_node(tree: &mut FlatTree, parent: EdgeWithParent, child: BackingIndex
 // - Potentially invalidates redex.body (may repoint redex.abs's body in the case that body consists of a single leaf node that gets substituted)
 // - Potentially invalidates redex.arg (becomes garbage in the zero usage case, may be altered in non-zero usage case)
 // - Potentially alters redex.parent pointer
-fn substitute_and_shift_fused(tree: &mut FlatTree, redex: &mut RedexMut) -> BackingIndex {
+fn substitute(tree: &mut FlatTree, redex: &mut RedexMut) -> BackingIndex {
     if redex.body_usage == 0 {
         // No need to do anything with the argument because it is never used in the body
         // (Since the argument is not used, the entire arg subtree is garbage now.)
         redex.body_index
     } else {
         // Otherwise, perform substitution as usual
-
-        // Perform the actual substition on body.
-        // This method actually fuses the fixing down/up that needs to happen for the whole body
-        // in addition to performing substitutions.
-        substitute_shift_fused_nonzero_usage(tree, redex);
+        substitute_nonzero_usage(tree, redex);
 
         // The body of abs may get repointed if the redex body consists of a single leaf node that gets substituted.
         // Hence, we need to check for this and get the actually new body.
@@ -930,7 +926,7 @@ fn substitute_and_shift_fused(tree: &mut FlatTree, redex: &mut RedexMut) -> Back
     }
 }
 
-fn substitute_shift_fused_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMut) {
+fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMut) {
     let mut substitution_i = 0;
 
     let arg_ctx = &mut redex.arg_ctx();
@@ -943,17 +939,14 @@ fn substitute_shift_fused_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMu
         if let DebruijnNode::Index(binding) = tree[term] {
             let is_substituting = binding.is_bound_to(func_backing_index);
             if is_substituting {
-                // Total adjustment from the app -> abs node. This is a negative value, so we need to
-                // mulitply by -1 in order to know how many 'ghost abstractions' are actually present
-                // Note that depth_relative_to_arg is only tracking the number of *non-ghost* abstractions
-                // are present!
+                // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
                 let last_arg_allocation = substitution_i == body_usage - 1;
                 let new_child = if last_arg_allocation {
-                    // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
                     redex.arg_index
                 } else {
                     clone_subtree(tree, arg_ctx)
                 };
+
                 // Point parent to the newly created subtree
                 let parent = ctx.current_edge().edge_w_parent;
                 repoint_node(tree, parent, new_child);
@@ -968,8 +961,7 @@ fn substitute_shift_fused_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMu
     );
 }
 
-/// Clone the given subtree and fix up each free variable by up_by. This effectively fuses the
-/// up_by and clone steps together for substitution, eliminating a second tree walk.
+/// Clone the given subtree.
 ///
 /// MEMORY: Allocates new subtree, returned value is the newly allocated tree
 fn clone_subtree(tree: &mut FlatTree, ctx: &mut ActionCtx) -> BackingIndex {
@@ -1047,21 +1039,6 @@ fn clone_subtree(tree: &mut FlatTree, ctx: &mut ActionCtx) -> BackingIndex {
     }
 
     _clone_subtree(&mut context, ctx.current_index())
-
-    // tree.postorder_walk_at_mut(ctx, |tree, _ctx, result| {
-    //     let term = match result {
-    //         ChildResults::Index(binding) => DebruijnNode::idx(binding),
-    //         ChildResults::Abstraction { abs, body_result } => {
-    //             DebruijnNode::abs(body_result, abs.usage)
-    //         }
-    //         ChildResults::Application {
-    //             func_result,
-    //             arg_result,
-    //             ..
-    //         } => DebruijnNode::app(func_result, arg_result),
-    //     };
-    //     tree.alloc(term)
-    // })
 }
 
 #[cfg(test)]
