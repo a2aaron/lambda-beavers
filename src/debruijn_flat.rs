@@ -816,7 +816,7 @@ fn get_usage_by_depth(tree: &FlatTree, arg_ctx: &mut ActionCtx) -> HashMap<Backi
     struct Context<'a> {
         tree: &'a FlatTree,
         usages: HashMap<BackingIndex, Usage>,
-        arg_abstraction_chain: HashSet<BackingIndex>,
+        arg_subtree_abstractions: HashSet<BackingIndex>,
     }
     fn _get_usage_by_depth(ctx: &mut Context, index: BackingIndex) {
         match ctx.tree[index] {
@@ -827,14 +827,18 @@ fn get_usage_by_depth(tree: &FlatTree, arg_ctx: &mut ActionCtx) -> HashMap<Backi
                     // their usages change at all. Hence we need to check that the backing index
                     // is binding to some abstraction in the arg abstraction chain and not just any
                     // abstraction
-                    let bound_above_arg = ctx.arg_abstraction_chain.contains(&backing_index);
-                    if bound_above_arg {
+                    let bound_within_arg = ctx.arg_subtree_abstractions.contains(&backing_index);
+                    if !bound_within_arg {
                         let entry = ctx.usages.entry(backing_index).or_insert(0);
                         *entry += 1;
                     }
                 }
             }
-            DebruijnNode::Abstraction(abstraction) => _get_usage_by_depth(ctx, abstraction.body),
+            DebruijnNode::Abstraction(abstraction) => {
+                ctx.arg_subtree_abstractions.insert(index);
+                _get_usage_by_depth(ctx, abstraction.body);
+                ctx.arg_subtree_abstractions.remove(&index);
+            }
             DebruijnNode::Application(application) => {
                 _get_usage_by_depth(ctx, application.func);
                 _get_usage_by_depth(ctx, application.arg);
@@ -845,14 +849,7 @@ fn get_usage_by_depth(tree: &FlatTree, arg_ctx: &mut ActionCtx) -> HashMap<Backi
     let mut ctx = Context {
         tree,
         usages: HashMap::new(),
-        arg_abstraction_chain: HashSet::from_iter(
-            arg_ctx
-                .chain
-                .abstractions
-                .iter()
-                .cloned()
-                .map(|x| x.parent_index().unwrap()),
-        ),
+        arg_subtree_abstractions: HashSet::new(),
     };
 
     _get_usage_by_depth(&mut ctx, arg_ctx.current_index());
