@@ -461,7 +461,7 @@ mod test {
             let mut inner_walk_index = 0;
             tree.preorder_walk_at(ctx, |_tree, ctx| {
                 let actual = ctx.current_index();
-                let expected = expected_nodes[outer_walk_index][inner_walk_index].child;
+                let expected = expected_nodes[outer_walk_index][inner_walk_index];
                 assert_eq!(expected, actual, "expected TermIndex {expected}, got {actual} at {outer_walk_index},{inner_walk_index}");
 
                 inner_walk_index += 1;

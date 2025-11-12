@@ -19,15 +19,13 @@ pub struct FlatTree {
     pub backing: Vec<DebruijnNode>,
     // The into-root edge, which has no parent and whose child is the root node itself
     // --> root
-    pub root: DebruijnEdge,
+    pub root: BackingIndex,
 }
 impl FlatTree {
     fn new() -> FlatTree {
         FlatTree {
             backing: vec![],
-            root: DebruijnEdge {
-                child: BackingIndex(0),
-            },
+            root: BackingIndex(0),
         }
     }
 
@@ -99,7 +97,7 @@ impl FlatTree {
                     new_tree.alloc(index)
                 }
                 DebruijnNode::Abstraction(abstraction) => {
-                    let old_body_index = abstraction.body.child;
+                    let old_body_index = abstraction.body;
                     let old_usage = abstraction.usage;
 
                     let new_abstraction_index = new_tree.alloc_none();
@@ -124,8 +122,8 @@ impl FlatTree {
                     new_abstraction_index
                 }
                 DebruijnNode::Application(application) => {
-                    let old_func_index = application.func.child;
-                    let old_arg_index = application.arg.child;
+                    let old_func_index = application.func;
+                    let old_arg_index = application.arg;
 
                     let new_func = _normalize(
                         new_tree,
@@ -151,14 +149,8 @@ impl FlatTree {
 
         let mut new_tree = FlatTree::new();
 
-        let root_node = _normalize(
-            &mut new_tree,
-            self,
-            &mut vec![],
-            &mut vec![],
-            self.root.child,
-        );
-        new_tree.root = DebruijnEdge::new(root_node);
+        let root_node = _normalize(&mut new_tree, self, &mut vec![], &mut vec![], self.root);
+        new_tree.root = root_node;
         new_tree
     }
 
@@ -234,20 +226,6 @@ impl IndexMut<BackingIndex> for FlatTree {
     }
 }
 
-impl Index<DebruijnEdge> for FlatTree {
-    type Output = DebruijnNode;
-
-    fn index(&self, index: DebruijnEdge) -> &Self::Output {
-        &self[index.child]
-    }
-}
-
-impl IndexMut<DebruijnEdge> for FlatTree {
-    fn index_mut(&mut self, index: DebruijnEdge) -> &mut Self::Output {
-        &mut self[index.child]
-    }
-}
-
 impl Index<DoubleEndedEdge> for FlatTree {
     type Output = DebruijnNode;
 
@@ -266,7 +244,7 @@ impl From<Vec<DebruijnNode>> for FlatTree {
     fn from(backing: Vec<DebruijnNode>) -> Self {
         FlatTree {
             backing,
-            root: DebruijnEdge::new(BackingIndex(0)),
+            root: BackingIndex(0),
         }
     }
 }
@@ -325,7 +303,7 @@ impl From<&Debruijn> for FlatTree {
 
         let mut tree = FlatTree::new();
         let root_index = flatten(&mut tree, &mut vec![], term);
-        tree.root = DebruijnEdge::new(root_index);
+        tree.root = root_index;
         tree
     }
 }
@@ -428,39 +406,6 @@ impl Display for BackingIndex {
     }
 }
 
-/// An edge in the debruijn tree. This specific consists of
-/// - The child node
-/// - The adjustment, which is attached to the edge itself
-/// ```
-///   | adjust
-///   V
-/// child
-/// ```
-/// It does not contain the parent index, use EdgeWithParent for that.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct DebruijnEdge {
-    /// An index into the backing vector of a FlatTree.
-    pub child: BackingIndex,
-}
-impl DebruijnEdge {
-    /// Create a new TermIndex with adjustment zero.
-    pub fn new(child: BackingIndex) -> Self {
-        Self { child }
-    }
-}
-
-impl Display for DebruijnEdge {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.child)
-    }
-}
-
-impl From<BackingIndex> for DebruijnEdge {
-    fn from(index: BackingIndex) -> Self {
-        DebruijnEdge { child: index }
-    }
-}
-
 /// An edge in the Debruijn tree, containing:
 /// - The parent node (if there is one. for the root, there is no parent)
 /// - The type of parent-edge this edge is (ie: is this an edge from an abstraction to body,
@@ -506,7 +451,7 @@ impl DoubleEndedEdge {
     pub fn root(tree: &FlatTree) -> DoubleEndedEdge {
         DoubleEndedEdge {
             edge_w_parent: EdgeWithParent::IntoRoot,
-            child: tree.root.child,
+            child: tree.root,
         }
     }
 
@@ -514,8 +459,8 @@ impl DoubleEndedEdge {
         self.edge_w_parent.backing_index()
     }
 
-    fn child_edge(&self) -> DebruijnEdge {
-        DebruijnEdge { child: self.child }
+    fn child_edge(&self) -> BackingIndex {
+        self.child
     }
 }
 impl std::fmt::Debug for DoubleEndedEdge {
@@ -538,10 +483,8 @@ impl std::fmt::Debug for DoubleEndedEdge {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Abstraction {
-    // The child edge for this Abstraction
-    // abs --> body
-    //     ^^^^^^^^ It's this edge
-    pub body: DebruijnEdge,
+    // The index of the body of the abstraction
+    pub body: BackingIndex,
     /// Number of times the input argument is used in the body
     /// If this is zero, then when doing argument substitution, the algorithm can just
     /// return the body and throw away the argument!
@@ -556,7 +499,7 @@ impl Abstraction {
     // abs_index should be the index of the abstraction node.
     pub fn abs_to_body(&self, abs_index: BackingIndex) -> DoubleEndedEdge {
         DoubleEndedEdge {
-            child: self.body.child,
+            child: self.body,
             edge_w_parent: EdgeWithParent::AbsToBody(abs_index),
         }
     }
@@ -564,21 +507,21 @@ impl Abstraction {
 
 #[derive(Clone, Copy, PartialEq, Eq, Hash)]
 pub struct Application {
-    pub func: DebruijnEdge,
-    pub arg: DebruijnEdge,
+    pub func: BackingIndex,
+    pub arg: BackingIndex,
 }
 
 impl Application {
     pub fn func(&self, app_index: BackingIndex) -> DoubleEndedEdge {
         DoubleEndedEdge {
-            child: self.func.child,
+            child: self.func,
             edge_w_parent: EdgeWithParent::AppToFunc(app_index),
         }
     }
 
     pub fn arg(&self, app_index: BackingIndex) -> DoubleEndedEdge {
         DoubleEndedEdge {
-            child: self.arg.child,
+            child: self.arg,
             edge_w_parent: EdgeWithParent::AppToArg(app_index),
         }
     }
@@ -626,13 +569,10 @@ impl DebruijnNode {
     }
 
     pub fn abs(body: BackingIndex, usage: usize) -> DebruijnNode {
-        let body = DebruijnEdge::new(body);
         DebruijnNode::Abstraction(Abstraction { body, usage })
     }
 
     pub fn app(func: BackingIndex, arg: BackingIndex) -> DebruijnNode {
-        let func = DebruijnEdge::new(func);
-        let arg = DebruijnEdge::new(arg);
         DebruijnNode::Application(Application { func, arg })
     }
 }
@@ -716,11 +656,11 @@ pub struct RedexMut {
     // actually at the root, then this is an into-root edge (and there is technically no parent)
     pub parent_to_app: DoubleEndedEdge,
     // The edge pointing from the application to the function (which an abstraction)
-    pub app_to_abs: DebruijnEdge,
+    pub app_to_abs: BackingIndex,
     // The edge pointing from the abstraction to the body
     abs_to_body: DoubleEndedEdge,
     // The edge pointing from the application to the argument.
-    pub app_to_arg: DebruijnEdge,
+    pub app_to_arg: BackingIndex,
     // The usage of the `body`. Provided for convinence
     body_usage: Usage,
 }
@@ -740,7 +680,7 @@ impl RedexMut {
         match tree[ctx.current_index()] {
             DebruijnNode::Application(app) => match tree[app.func] {
                 DebruijnNode::Abstraction(abs) => {
-                    let body = abs.abs_to_body(app.func.child);
+                    let body = abs.abs_to_body(app.func);
                     let redex = RedexMut {
                         parent_to_app: ctx.current_edge(),
                         app_to_abs: app.func,
@@ -759,7 +699,7 @@ impl RedexMut {
 
     fn arg_ctx(&self) -> ActionCtx {
         let edge_w_parent = EdgeWithParent::AppToArg(self.parent_to_app.child);
-        let child = self.app_to_arg.child;
+        let child = self.app_to_arg;
 
         let mut chain = self.parent_chain.clone();
         let edge = DoubleEndedEdge {
@@ -772,7 +712,7 @@ impl RedexMut {
     }
 
     fn func_ctx(&self) -> ActionCtx {
-        let child = self.app_to_abs.child;
+        let child = self.app_to_abs;
         let edge_w_parent = EdgeWithParent::AppToFunc(self.parent_to_app.child);
 
         let mut chain = self.parent_chain.clone();
@@ -847,7 +787,7 @@ pub fn beta_reduce(tree: &mut FlatTree, mut redex: RedexMut) {
     //  ||
     //  VV
     // [various copies of arg]
-    repoint_node(tree, redex.parent_to_app.edge_w_parent, new_body.child);
+    repoint_node(tree, redex.parent_to_app.edge_w_parent, new_body);
 }
 
 // Updates the usages of the parent chain.
@@ -870,7 +810,7 @@ fn update_usages(tree: &mut FlatTree, redex: &mut RedexMut) {
         let usage_delta: isize = (body_usage as isize - 1) * usage_in_arg as isize;
         let usage = abs.usage.checked_add_signed(usage_delta).unwrap();
 
-        tree[abstraction_index] = DebruijnNode::abs(abs.body.child, usage)
+        tree[abstraction_index] = DebruijnNode::abs(abs.body, usage)
     }
 }
 
@@ -939,16 +879,13 @@ fn repoint_node(tree: &mut FlatTree, parent: EdgeWithParent, child: BackingIndex
         }
         EdgeWithParent::AppToFunc(parent) => {
             let app = tree.get_app(parent);
-            tree[parent] = DebruijnNode::app(child, app.arg.child);
+            tree[parent] = DebruijnNode::app(child, app.arg);
         }
         EdgeWithParent::AppToArg(parent) => {
             let app = tree.get_app(parent);
-            tree[parent] = DebruijnNode::app(app.func.child, child);
+            tree[parent] = DebruijnNode::app(app.func, child);
         }
-        // Root
-        EdgeWithParent::IntoRoot => {
-            tree.root = DebruijnEdge::new(child);
-        }
+        EdgeWithParent::IntoRoot => tree.root = child,
     }
 }
 
@@ -977,7 +914,7 @@ fn repoint_node(tree: &mut FlatTree, parent: EdgeWithParent, child: BackingIndex
 // - Potentially invalidates redex.body (may repoint redex.abs's body in the case that body consists of a single leaf node that gets substituted)
 // - Potentially invalidates redex.arg (becomes garbage in the zero usage case, may be altered in non-zero usage case)
 // - Potentially alters redex.parent pointer
-fn substitute_and_shift_fused(tree: &mut FlatTree, redex: &mut RedexMut) -> DebruijnEdge {
+fn substitute_and_shift_fused(tree: &mut FlatTree, redex: &mut RedexMut) -> BackingIndex {
     if redex.body_usage == 0 {
         // No need to do anything with the argument because it is never used in the body
         // (Since the argument is not used, the entire arg subtree is garbage now.)
@@ -995,7 +932,7 @@ fn substitute_and_shift_fused(tree: &mut FlatTree, redex: &mut RedexMut) -> Debr
 
         // The body of abs may get repointed if the redex body consists of a single leaf node that gets substituted.
         // Hence, we need to check for this and get the actually new body.
-        tree.get_abs(redex.app_to_abs.child).body
+        tree.get_abs(redex.app_to_abs).body
     }
 }
 
@@ -1019,8 +956,7 @@ fn substitute_shift_fused_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMu
                 let last_arg_allocation = substitution_i == body_usage - 1;
                 let new_child = if last_arg_allocation {
                     // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
-                    let redex_arg = redex.app_to_arg;
-                    redex_arg.child
+                    redex.app_to_arg
                 } else {
                     clone_subtree(tree, arg_ctx)
                 };
@@ -1083,7 +1019,7 @@ fn clone_subtree(tree: &mut FlatTree, ctx: &mut ActionCtx) -> BackingIndex {
                 ctx.tree.alloc(index)
             }
             DebruijnNode::Abstraction(abstraction) => {
-                let old_body_index = abstraction.body.child;
+                let old_body_index = abstraction.body;
                 let old_usage = abstraction.usage;
 
                 let new_abstraction_index = ctx.tree.alloc_none();
@@ -1102,8 +1038,8 @@ fn clone_subtree(tree: &mut FlatTree, ctx: &mut ActionCtx) -> BackingIndex {
                 new_abstraction_index
             }
             DebruijnNode::Application(application) => {
-                let old_func_index = application.func.child;
-                let old_arg_index = application.arg.child;
+                let old_func_index = application.func;
+                let old_arg_index = application.arg;
 
                 let new_func = _clone_subtree(ctx, old_func_index);
                 let new_arg = _clone_subtree(ctx, old_arg_index);

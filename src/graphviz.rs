@@ -11,8 +11,8 @@ use std::{
 
 use crate::{
     debruijn_flat::{
-        BackingIndex, Binding, DebruijnEdge, DebruijnNode, DoubleEndedEdge, FlatTree, RedexMut,
-        Usage, compute_usage_flat,
+        BackingIndex, Binding, DebruijnNode, DoubleEndedEdge, FlatTree, RedexMut, Usage,
+        compute_usage_flat,
     },
     treewalk::ActionCtx,
 };
@@ -147,10 +147,7 @@ fn process_node(graph: &mut Graph, node_info: NodeInfo) {
     graph.edges.append(&mut edges);
 }
 
-fn make_into_root_edge(
-    node_info: NodeInfo,
-    root_edge: DebruijnEdge,
-) -> (GraphvizEdge, GraphvizNode) {
+fn make_into_root_edge(node_info: NodeInfo, root: BackingIndex) -> (GraphvizEdge, GraphvizNode) {
     // Use an invisible node to represent the "into root" edge
     let mut invis_root_attribs = Attributes::new();
     invis_root_attribs.set("style", "invis");
@@ -160,7 +157,7 @@ fn make_into_root_edge(
         attributes: invis_root_attribs,
     };
 
-    let mut edge = GraphvizEdge::from_debruijn_edge(root_edge, &node_info);
+    let mut edge = GraphvizEdge::make_normal_edge(&node_info, root);
     edge.start = INTO_ROOT.to_string();
 
     (edge, node)
@@ -169,7 +166,7 @@ fn make_into_root_edge(
 fn add_subgraph_for_application_edge(graph: &mut Graph, app: crate::debruijn_flat::Application) {
     let mut edge_attribs = Attributes::new();
     edge_attribs.set("style", "invis");
-    let edge = GraphvizEdge::new(app.func.child, app.arg.child, &edge_attribs);
+    let edge = GraphvizEdge::new(app.func, app.arg, &edge_attribs);
     let mut same_rank = Graph::default();
     same_rank.edges.push(edge);
     same_rank.attribs.set("rank", "same");
@@ -202,8 +199,8 @@ fn make_node(node_info: NodeInfo) -> GraphvizNode {
 
     // Set shape and color for redex application
     if let Some(info) = node_info.redex_info {
-        let color1 = get_random_color(info.abs.child, 0.5);
-        let color2 = get_random_color(info.arg.child, 0.5);
+        let color1 = get_random_color(info.abs, 0.5);
+        let color2 = get_random_color(info.arg, 0.5);
         let bg_color = format!("{};0.5:{}", color1, color2);
         attributes
             .set("shape", "diamond")
@@ -239,20 +236,20 @@ fn get_edges(node_info: NodeInfo) -> Vec<GraphvizEdge> {
         DebruijnNode::Index(binding) => {
             // Add binding edge
             if let Binding::Bound(abstraction) = binding {
-                let binding_edge = GraphvizEdge::from_binding_edge(node_info.index, abstraction);
+                let binding_edge = GraphvizEdge::make_binding_edge(node_info.index, abstraction);
                 edges.push(binding_edge);
             }
         }
         // Add normal edges
         DebruijnNode::Abstraction(abs) => {
-            let edge = GraphvizEdge::from_debruijn_edge(abs.body, &node_info);
+            let edge = GraphvizEdge::make_normal_edge(&node_info, abs.body);
             edges.push(edge);
         }
         DebruijnNode::Application(app) => {
-            let edge = GraphvizEdge::from_debruijn_edge(app.func, &node_info);
+            let edge = GraphvizEdge::make_normal_edge(&node_info, app.func);
             edges.push(edge);
 
-            let mut edge = GraphvizEdge::from_debruijn_edge(app.arg, &node_info);
+            let mut edge = GraphvizEdge::make_normal_edge(&node_info, app.arg);
             edge.attributes.set("arrowhead", "onormal");
             edges.push(edge);
         }
@@ -263,7 +260,7 @@ fn get_edges(node_info: NodeInfo) -> Vec<GraphvizEdge> {
 #[derive(Debug, Clone, Copy)]
 struct NodeInfo {
     node: DebruijnNode,
-    is_root: Option<DebruijnEdge>,
+    is_root: Option<BackingIndex>,
     // Backing index of the node
     index: BackingIndex,
     // If true, the this DebruijNode is garbage
@@ -290,9 +287,9 @@ impl NodeInfo {
 #[derive(Debug, Clone, Copy)]
 struct RedexInfo {
     // The function of the application in the redex, which will be an Abstraction
-    abs: DebruijnEdge,
+    abs: BackingIndex,
     // The argument of the application in the redex
-    arg: DebruijnEdge,
+    arg: BackingIndex,
 }
 
 fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
@@ -309,7 +306,7 @@ fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
             None => None,
         };
 
-        let is_root = tree.root.child == ctx.current_index();
+        let is_root = tree.root == ctx.current_index();
 
         let index = ctx.current_index().0;
         info_vec[index].is_root = if is_root { Some(tree.root) } else { None };
@@ -456,7 +453,7 @@ impl GraphvizEdge {
         }
     }
 
-    fn from_binding_edge(index: BackingIndex, abstraction: BackingIndex) -> GraphvizEdge {
+    fn make_binding_edge(index: BackingIndex, abstraction: BackingIndex) -> GraphvizEdge {
         let color = get_random_color(abstraction, 1.0);
         let mut edge_attribs = Attributes::new();
         edge_attribs
@@ -466,9 +463,8 @@ impl GraphvizEdge {
         GraphvizEdge::new(index, abstraction, &edge_attribs)
     }
 
-    fn from_debruijn_edge(edge: DebruijnEdge, node_info: &NodeInfo) -> GraphvizEdge {
+    fn make_normal_edge(node_info: &NodeInfo, end: BackingIndex) -> GraphvizEdge {
         let start = node_info.index;
-        let end = edge.child;
 
         let mut attributes = Attributes::new();
         attributes.set("color", NORMAL_COLOR);
