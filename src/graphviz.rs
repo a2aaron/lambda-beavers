@@ -314,7 +314,7 @@ fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
         info_vec[index].redex_info = redex_info;
 
         if matches!(tree[ctx.current_index()], DebruijnNode::Abstraction(_)) {
-            info_vec[index].computed_usage = Some(compute_usage_flat(tree, ctx));
+            info_vec[index].computed_usage = Some(compute_usage_flat(tree, ctx.current_index()));
         }
         ControlFlow::Continue::<()>(())
     });

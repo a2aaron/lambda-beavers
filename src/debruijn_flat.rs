@@ -157,7 +157,7 @@ impl FlatTree {
     pub fn check_usage(&self) -> Result<(), (BackingIndex, Usage, Usage)> {
         let result = self.preorder_walk(|tree, ctx| {
             if let DebruijnNode::Abstraction(abs) = tree[ctx.current_index()] {
-                let expected = compute_usage_flat(tree, ctx);
+                let expected = compute_usage_flat(tree, ctx.current_index());
                 let actual = abs.usage;
                 if actual != expected {
                     return ControlFlow::Break((ctx.current_index(), actual, expected));
@@ -369,22 +369,32 @@ fn compute_usage(body: &Debruijn) -> Usage {
 /// (that is to say, this function computes the number times the input variable appears in the
 /// eg: in λ 1 λ 2 λ 3, we have that 1, 2, and 3 all refer to the same variable, so the usage is 3
 /// Note that ctx needs to be pointing at an abstraction!
-pub fn compute_usage_flat(tree: &FlatTree, ctx: &mut ActionCtx) -> Usage {
-    let mut usage = 0;
-    let abstraction_index = ctx.current_index();
-
-    let is_abs = matches!(tree[ctx.current_index()], DebruijnNode::Abstraction(_));
-    assert!(is_abs);
-
-    tree.preorder_walk_at(ctx, |tree, ctx| {
-        if let DebruijnNode::Index(binding) = tree[ctx.current_index()] {
-            if binding.is_bound_to(abstraction_index) {
-                usage += 1;
+pub fn compute_usage_flat(tree: &FlatTree, abstraction_index: BackingIndex) -> Usage {
+    fn _compute_usage_flat(
+        tree: &FlatTree,
+        abstraction_index: BackingIndex,
+        index: BackingIndex,
+    ) -> Usage {
+        match tree[index] {
+            DebruijnNode::Index(binding) => {
+                if binding.is_bound_to(abstraction_index) {
+                    1
+                } else {
+                    0
+                }
+            }
+            DebruijnNode::Abstraction(abstraction) => {
+                _compute_usage_flat(tree, abstraction_index, abstraction.body)
+            }
+            DebruijnNode::Application(application) => {
+                _compute_usage_flat(tree, abstraction_index, application.func)
+                    + _compute_usage_flat(tree, abstraction_index, application.arg)
             }
         }
-    });
+    }
 
-    usage
+    let abstraction = tree.get_abs(abstraction_index);
+    _compute_usage_flat(tree, abstraction_index, abstraction.body)
 }
 
 // The depth relative to some term. This is used to determine if a variable is free within a term
