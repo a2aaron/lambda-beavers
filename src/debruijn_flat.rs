@@ -660,8 +660,8 @@ impl ParentChain {
 
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RedexMut {
-    // The entire chain of abstractions for the parent, which will all need to get fixed up during substitution.
-    parent_chain: ParentChain,
+    // The number of abstractions in the parent chain above this redex
+    debruijn_depth: DebruijnDepth,
 
     parent_to_app: EdgeWithParent,
     // The index of the redex application node
@@ -692,13 +692,13 @@ impl RedexMut {
             DebruijnNode::Application(app) => match tree[app.func] {
                 DebruijnNode::Abstraction(abs) => {
                     let redex = RedexMut {
+                        debruijn_depth: ctx.chain.debruijn_depth(),
                         parent_to_app: ctx.current_edge().edge_w_parent,
                         app_index: ctx.current_edge().child,
                         func_index: app.func,
                         body_index: abs.body,
                         arg_index: app.arg,
                         body_usage: abs.usage,
-                        parent_chain: ctx.chain.clone(),
                     };
                     Some(redex)
                 }
@@ -776,21 +776,18 @@ pub fn beta_reduce(tree: &mut FlatTree, mut redex: RedexMut) {
 
 // Updates the usages of the parent chain.
 // MEMORY: Modifies in place, does not allocate or make garbage.
-fn update_usages(tree: &mut FlatTree, redex: &mut RedexMut) {
-    // Number of times body is used
-    let body_usage = redex.body_usage;
-
+fn update_usages(tree: &mut FlatTree, redex: &RedexMut) {
     // If there are no parents to update (which happens if the redex is the root)
     // or otherwise has no abstractions in it's parent path, then do nothing.
-    if redex.parent_chain.debruijn_depth() == 0 {
+    if redex.debruijn_depth == 0 {
         return;
     }
 
-    let usages_of_page_in_arg = get_usage_by_depth(tree, redex.arg_index);
-    for (abstraction_index, usage_in_arg) in usages_of_page_in_arg {
+    let index_to_usage_in_arg = get_usage_by_depth(tree, redex.arg_index);
+    for (abstraction_index, usage_in_arg) in index_to_usage_in_arg {
         let abs = tree.get_abs(abstraction_index);
 
-        let usage_delta: isize = (body_usage as isize - 1) * usage_in_arg as isize;
+        let usage_delta: isize = (redex.body_usage as isize - 1) * usage_in_arg as isize;
         let usage = abs.usage.checked_add_signed(usage_delta).unwrap();
 
         tree[abstraction_index] = DebruijnNode::abs(abs.body, usage)
