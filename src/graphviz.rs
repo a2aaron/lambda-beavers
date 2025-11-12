@@ -8,11 +8,8 @@ use std::{
     time::SystemTime,
 };
 
-use crate::{
-    debruijn_flat::{
-        BackingIndex, Binding, DebruijnNode, DoubleEndedEdge, FlatTree, Usage, compute_usage_flat,
-    },
-    treewalk::ActionCtx,
+use crate::debruijn_flat::{
+    BackingIndex, Binding, DebruijnNode, FlatTree, Usage, compute_usage_flat,
 };
 
 const DEBUG: bool = true;
@@ -27,13 +24,7 @@ static TIMESTAMP: LazyLock<u64> = LazyLock::new(|| {
         .as_secs()
 });
 
-pub fn debug_write_to_file_ctx(tree: &FlatTree, ctx: &ActionCtx, name: &str) {
-    _debug_write_to_file_ctx(tree, Some(ctx), name);
-}
 pub fn debug_write_to_file(tree: &FlatTree, name: &str) {
-    _debug_write_to_file_ctx(tree, None, name);
-}
-fn _debug_write_to_file_ctx(tree: &FlatTree, ctx: Option<&ActionCtx>, name: &str) {
     if !DEBUG {
         return;
     }
@@ -47,7 +38,7 @@ fn _debug_write_to_file_ctx(tree: &FlatTree, ctx: Option<&ActionCtx>, name: &str
     let value = COUNTER.fetch_add(1, Ordering::Relaxed);
 
     let args = GraphvizArgs { no_garbage: false };
-    let graph = to_graph(tree, ctx, &args);
+    let graph = to_graph(tree, &args);
 
     let timestamp = *TIMESTAMP;
     let folder = &format!("debug/{timestamp}");
@@ -72,7 +63,7 @@ pub struct GraphvizArgs {
     pub no_garbage: bool,
 }
 
-pub fn to_graph(tree: &FlatTree, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -> Graph {
+pub fn to_graph(tree: &FlatTree, args: &GraphvizArgs) -> Graph {
     let mut graph = Graph::default();
     let info_vec = get_info_array(tree);
 
@@ -84,44 +75,7 @@ pub fn to_graph(tree: &FlatTree, ctx: Option<&ActionCtx>, args: &GraphvizArgs) -
         process_node(&mut graph, node_info);
     }
 
-    if let Some(ctx) = ctx {
-        for edge in &ctx.chain.full_chain {
-            update_or_add_ctx_edge(&mut graph, *edge);
-        }
-    }
     graph
-}
-
-fn update_or_add_ctx_edge(graph: &mut Graph, edge: DoubleEndedEdge) {
-    let start = edge.edge_w_parent.backing_index();
-    let end = edge.child;
-
-    let start = match start {
-        Some(parent) => parent.to_string(),
-        None => INTO_ROOT.to_string(),
-    };
-    let end = end.to_string();
-
-    let ok = graph.get_edge(&start, &end).is_some();
-
-    let mut attributes = Attributes::new();
-    attributes.set("style", "dotted");
-    attributes.set("constraint", "false");
-
-    if ok {
-        attributes.set("color", "green");
-        attributes.set("fontcolor", "green");
-    } else {
-        attributes.set("color", "red");
-        attributes.set("fontcolor", "red");
-    }
-
-    let edge = GraphvizEdge {
-        start,
-        end,
-        attributes,
-    };
-    graph.edges.push(edge);
 }
 
 fn process_node(graph: &mut Graph, node_info: NodeInfo) {
@@ -435,12 +389,6 @@ impl Graph {
 
         output.push(format!("}}"));
         output.join("\n")
-    }
-
-    fn get_edge(&mut self, start: &str, end: &str) -> Option<&mut GraphvizEdge> {
-        self.edges
-            .iter_mut()
-            .find(|edge| edge.start == start && edge.end == end)
     }
 }
 

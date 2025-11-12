@@ -17,5 +17,4 @@ pub mod parse {
 pub mod print;
 pub mod reduce;
 pub mod term;
-pub mod treewalk;
 pub mod utils;
