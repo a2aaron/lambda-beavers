@@ -48,14 +48,19 @@ impl FlatTree {
     }
 
     pub fn is_bnf(&self) -> bool {
-        let result = self.preorder_walk(|tree, ctx| {
-            if RedexMut::is_redex(tree, ctx.current_index()) {
-                ControlFlow::Break(false)
-            } else {
-                ControlFlow::Continue(())
+        fn has_redex(tree: &FlatTree, index: BackingIndex) -> bool {
+            match tree[index] {
+                DebruijnNode::Index(_) => false,
+                DebruijnNode::Abstraction(abstraction) => has_redex(tree, abstraction.body),
+                DebruijnNode::Application(application) => {
+                    let is_redex = RedexMut::is_redex(tree, index);
+                    let func_has_redex = has_redex(tree, application.func);
+                    let arg_has_redex = has_redex(tree, application.arg);
+                    is_redex || func_has_redex || arg_has_redex
+                }
             }
-        });
-        result.unwrap_or(true)
+        }
+        !has_redex(self, self.root)
     }
 
     pub fn get_redexes(&self) -> Vec<RedexMut> {
