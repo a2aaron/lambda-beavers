@@ -300,8 +300,8 @@ fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
     tree.preorder_walk(|tree, ctx| {
         let redex_info = match RedexMut::try_get(tree, ctx) {
             Some(redex) => Some(RedexInfo {
-                abs: redex.app_to_abs,
-                arg: redex.app_to_arg,
+                abs: redex.func_index,
+                arg: redex.arg_index,
             }),
             None => None,
         };

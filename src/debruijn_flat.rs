@@ -458,10 +458,6 @@ impl DoubleEndedEdge {
     pub fn parent_index(&self) -> Option<BackingIndex> {
         self.edge_w_parent.backing_index()
     }
-
-    fn child_edge(&self) -> BackingIndex {
-        self.child
-    }
 }
 impl std::fmt::Debug for DoubleEndedEdge {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -652,15 +648,16 @@ impl ParentChain {
 pub struct RedexMut {
     // The entire chain of abstractions for the parent, which will all need to get fixed up during substitution.
     parent_chain: ParentChain,
-    // The edge pointing from the parent to the application. If the redex application node is
-    // actually at the root, then this is an into-root edge (and there is technically no parent)
-    pub parent_to_app: DoubleEndedEdge,
-    // The edge pointing from the application to the function (which an abstraction)
-    pub app_to_abs: BackingIndex,
-    // The edge pointing from the abstraction to the body
-    abs_to_body: DoubleEndedEdge,
-    // The edge pointing from the application to the argument.
-    pub app_to_arg: BackingIndex,
+
+    parent_to_app: EdgeWithParent,
+    // The index of the redex application node
+    pub app_index: BackingIndex,
+    // The left child of the redex's application node. This should be an abstraction node
+    pub func_index: BackingIndex,
+    // The child of the left child of the redex application
+    body_index: BackingIndex,
+    // The right child of the redex's application node.
+    pub arg_index: BackingIndex,
     // The usage of the `body`. Provided for convinence
     body_usage: Usage,
 }
@@ -680,12 +677,12 @@ impl RedexMut {
         match tree[ctx.current_index()] {
             DebruijnNode::Application(app) => match tree[app.func] {
                 DebruijnNode::Abstraction(abs) => {
-                    let body = abs.abs_to_body(app.func);
                     let redex = RedexMut {
-                        parent_to_app: ctx.current_edge(),
-                        app_to_abs: app.func,
-                        abs_to_body: body,
-                        app_to_arg: app.arg,
+                        parent_to_app: ctx.current_edge().edge_w_parent,
+                        app_index: ctx.current_edge().child,
+                        func_index: app.func,
+                        body_index: abs.body,
+                        arg_index: app.arg,
                         body_usage: abs.usage,
                         parent_chain: ctx.chain.clone(),
                     };
@@ -698,8 +695,8 @@ impl RedexMut {
     }
 
     fn arg_ctx(&self) -> ActionCtx {
-        let edge_w_parent = EdgeWithParent::AppToArg(self.parent_to_app.child);
-        let child = self.app_to_arg;
+        let edge_w_parent = EdgeWithParent::AppToArg(self.app_index);
+        let child = self.arg_index;
 
         let mut chain = self.parent_chain.clone();
         let edge = DoubleEndedEdge {
@@ -712,8 +709,8 @@ impl RedexMut {
     }
 
     fn func_ctx(&self) -> ActionCtx {
-        let child = self.app_to_abs;
-        let edge_w_parent = EdgeWithParent::AppToFunc(self.parent_to_app.child);
+        let child = self.func_index;
+        let edge_w_parent = EdgeWithParent::AppToFunc(self.app_index);
 
         let mut chain = self.parent_chain.clone();
         let edge = DoubleEndedEdge {
@@ -787,7 +784,7 @@ pub fn beta_reduce(tree: &mut FlatTree, mut redex: RedexMut) {
     //  ||
     //  VV
     // [various copies of arg]
-    repoint_node(tree, redex.parent_to_app.edge_w_parent, new_body);
+    repoint_node(tree, redex.parent_to_app, new_body);
 }
 
 // Updates the usages of the parent chain.
@@ -918,10 +915,7 @@ fn substitute_and_shift_fused(tree: &mut FlatTree, redex: &mut RedexMut) -> Back
     if redex.body_usage == 0 {
         // No need to do anything with the argument because it is never used in the body
         // (Since the argument is not used, the entire arg subtree is garbage now.)
-        // Fix up the indicies in it to account for the fact that we are still dropping out the abstraction that the body is in.
-        // down_one(root, &mut redex.func_ctx());
-        let body = redex.abs_to_body.child_edge();
-        body
+        redex.body_index
     } else {
         // Otherwise, perform substitution as usual
 
@@ -932,7 +926,7 @@ fn substitute_and_shift_fused(tree: &mut FlatTree, redex: &mut RedexMut) -> Back
 
         // The body of abs may get repointed if the redex body consists of a single leaf node that gets substituted.
         // Hence, we need to check for this and get the actually new body.
-        tree.get_abs(redex.app_to_abs).body
+        tree.get_abs(redex.func_index).body
     }
 }
 
@@ -956,7 +950,7 @@ fn substitute_shift_fused_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMu
                 let last_arg_allocation = substitution_i == body_usage - 1;
                 let new_child = if last_arg_allocation {
                     // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
-                    redex.app_to_arg
+                    redex.arg_index
                 } else {
                     clone_subtree(tree, arg_ctx)
                 };
