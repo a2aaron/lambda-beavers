@@ -1,4 +1,4 @@
-use std::{fmt::Display, ops::ControlFlow};
+use std::fmt::Display;
 
 use clap::ValueEnum;
 
@@ -21,18 +21,12 @@ impl Reducer {
     }
 
     pub fn reduce_one(&mut self) -> Option<ReductionResult> {
-        let result = self.tree.preorder_walk_mut(|tree, ctx| {
-            if let Some(redex) = debruijn_flat::RedexMut::try_get(tree, ctx) {
-                debruijn_flat::beta_reduce(tree, redex);
-                ControlFlow::Break(())
-            } else {
-                ControlFlow::Continue(())
-            }
-        });
-        match result {
-            Some(()) => None,
+        if let Some(redex) = self.tree.find_redex() {
+            debruijn_flat::beta_reduce(&mut self.tree, redex);
+            None
+        } else {
             // This clone is fine, it occurs at the end of all reductions
-            None => Some(ReductionResult::NormalForm(Debruijn::from(&self.tree))),
+            Some(ReductionResult::NormalForm(Debruijn::from(&self.tree)))
         }
     }
 }

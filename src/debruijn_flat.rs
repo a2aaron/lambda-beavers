@@ -3,12 +3,12 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::{Binary, Display},
     num::NonZeroUsize,
-    ops::{ControlFlow, Index, IndexMut},
+    ops::{Index, IndexMut},
     str::FromStr,
     usize,
 };
 
-use crate::{debruijn::Debruijn, graphviz, treewalk::ActionCtx};
+use crate::{debruijn::Debruijn, graphviz};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FlatTree {
@@ -44,30 +44,90 @@ impl FlatTree {
     }
 
     pub fn is_bnf(&self) -> bool {
-        fn has_redex(tree: &FlatTree, index: BackingIndex) -> bool {
-            match tree[index] {
-                DebruijnNode::Index(_) => false,
-                DebruijnNode::Abstraction(abstraction) => has_redex(tree, abstraction.body),
+        self.find_redex().is_none()
+    }
+
+    pub fn find_redex(&self) -> Option<RedexMut> {
+        struct Context<'a> {
+            tree: &'a FlatTree,
+            debruijn_depth: DebruijnDepth,
+        }
+
+        fn _find_redex(
+            ctx: &mut Context,
+            index: BackingIndex,
+            parent_to_current: EdgeWithParent,
+        ) -> Option<RedexMut> {
+            match ctx.tree[index] {
+                DebruijnNode::Index(_) => None,
+                DebruijnNode::Abstraction(abstraction) => {
+                    ctx.debruijn_depth += 1;
+                    let redex =
+                        _find_redex(ctx, abstraction.body, EdgeWithParent::AbsToBody(index));
+                    ctx.debruijn_depth -= 1;
+                    redex
+                }
                 DebruijnNode::Application(application) => {
-                    let is_redex = RedexMut::is_redex(tree, index);
-                    let func_has_redex = has_redex(tree, application.func);
-                    let arg_has_redex = has_redex(tree, application.arg);
-                    is_redex || func_has_redex || arg_has_redex
+                    if let Some(redex) =
+                        RedexMut::try_get(ctx.tree, ctx.debruijn_depth, parent_to_current, index)
+                    {
+                        return Some(redex);
+                    }
+
+                    let func_redex =
+                        _find_redex(ctx, application.func, EdgeWithParent::AppToFunc(index));
+                    if let Some(redex) = func_redex {
+                        return Some(redex);
+                    }
+
+                    let arg_redex =
+                        _find_redex(ctx, application.arg, EdgeWithParent::AppToArg(index));
+                    arg_redex
                 }
             }
         }
-        !has_redex(self, self.root)
+
+        let mut ctx = Context {
+            tree: self,
+            debruijn_depth: 0,
+        };
+        _find_redex(&mut ctx, self.root, EdgeWithParent::IntoRoot)
     }
 
     pub fn get_redexes(&self) -> Vec<RedexMut> {
-        let mut redexes = vec![];
-        self.preorder_walk(|tree, ctx| {
-            if let Some(redex) = RedexMut::try_get(tree, ctx) {
-                redexes.push(redex);
+        struct Context<'a> {
+            tree: &'a FlatTree,
+            debruijn_depth: DebruijnDepth,
+            redexes: Vec<RedexMut>,
+        }
+
+        fn _get_redexes(ctx: &mut Context, index: BackingIndex, parent_to_current: EdgeWithParent) {
+            match ctx.tree[index] {
+                DebruijnNode::Index(_) => (),
+                DebruijnNode::Abstraction(abstraction) => {
+                    ctx.debruijn_depth += 1;
+                    _get_redexes(ctx, abstraction.body, EdgeWithParent::AbsToBody(index));
+                    ctx.debruijn_depth -= 1;
+                }
+                DebruijnNode::Application(application) => {
+                    if let Some(redex) =
+                        RedexMut::try_get(ctx.tree, ctx.debruijn_depth, parent_to_current, index)
+                    {
+                        ctx.redexes.push(redex);
+                    }
+                    _get_redexes(ctx, application.func, EdgeWithParent::AppToFunc(index));
+                    _get_redexes(ctx, application.arg, EdgeWithParent::AppToArg(index));
+                }
             }
-            ControlFlow::Continue::<()>(())
-        });
-        redexes
+        }
+
+        let mut ctx = Context {
+            tree: self,
+            debruijn_depth: 0,
+            redexes: vec![],
+        };
+        _get_redexes(&mut ctx, self.root, EdgeWithParent::IntoRoot);
+        ctx.redexes
     }
 
     pub fn normalized(&self) -> FlatTree {
@@ -418,7 +478,7 @@ pub fn compute_usage_flat(tree: &FlatTree, abstraction_index: BackingIndex) -> U
 // If a given Index node has a DebruijnIndex >= DebruijnDepth, then that Index node is a free variable
 // with respect to that subtree)
 // Zero indicates that there are no abstractions between the two terms, one indicates one abstraction, etc
-type DebruijnDepth = usize;
+pub type DebruijnDepth = usize;
 
 // The number of times a variable is used in an abstraction.
 pub type Usage = usize;
@@ -700,14 +760,19 @@ impl RedexMut {
         }
     }
 
-    pub fn try_get(tree: &FlatTree, ctx: &mut ActionCtx) -> Option<RedexMut> {
-        match tree[ctx.current_index()] {
+    pub fn try_get(
+        tree: &FlatTree,
+        debruijn_depth: DebruijnDepth,
+        parent_to_app: EdgeWithParent,
+        app_index: BackingIndex,
+    ) -> Option<RedexMut> {
+        match tree[app_index] {
             DebruijnNode::Application(app) => match tree[app.func] {
                 DebruijnNode::Abstraction(abs) => {
                     let redex = RedexMut {
-                        debruijn_depth: ctx.chain.debruijn_depth(),
-                        parent_to_app: ctx.current_edge().edge_w_parent,
-                        app_index: ctx.current_edge().child,
+                        debruijn_depth,
+                        parent_to_app,
+                        app_index,
                         func_index: app.func,
                         body_index: abs.body,
                         arg_index: app.arg,
@@ -1100,8 +1165,7 @@ mod test {
     }
 
     fn redex_at_root(tree: &FlatTree) -> RedexMut {
-        let mut ctx = ActionCtx::new(tree);
-        RedexMut::try_get(tree, &mut ctx).unwrap()
+        RedexMut::try_get(tree, 0, EdgeWithParent::IntoRoot, tree.root).unwrap()
     }
 
     #[test]

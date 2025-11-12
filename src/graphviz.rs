@@ -1,6 +1,5 @@
 use std::{
     collections::HashMap,
-    ops::ControlFlow,
     process::Command,
     sync::{
         LazyLock,
@@ -11,8 +10,7 @@ use std::{
 
 use crate::{
     debruijn_flat::{
-        BackingIndex, Binding, DebruijnNode, DoubleEndedEdge, FlatTree, RedexMut, Usage,
-        compute_usage_flat,
+        BackingIndex, Binding, DebruijnNode, DoubleEndedEdge, FlatTree, Usage, compute_usage_flat,
     },
     treewalk::ActionCtx,
 };
@@ -213,9 +211,11 @@ fn make_node(node_info: NodeInfo) -> GraphvizNode {
     }
 
     // Usage mismatch between claimed and actual usage
+    // Note that garbage nodes are allowed to have stale usage amounts
     if let DebruijnNode::Abstraction(abs) = node_info.node
         && let Some(computed_usage) = node_info.computed_usage
         && abs.usage != computed_usage
+        && !node_info.is_garbage
     {
         attributes.set("color", "red");
         attributes.set("fontcolor", "darkred");
@@ -297,29 +297,49 @@ fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
         .map(|index| NodeInfo::garbage(tree, BackingIndex(index)))
         .collect();
 
-    tree.preorder_walk(|tree, ctx| {
-        let redex_info = match RedexMut::try_get(tree, ctx) {
-            Some(redex) => Some(RedexInfo {
+    let redexes = tree.get_redexes();
+    let non_garbage = get_non_garbage(tree);
+
+    for (index, node) in tree.backing.iter().enumerate() {
+        info_vec[index].is_garbage = !non_garbage.contains(&BackingIndex(index));
+
+        let is_root = tree.root.0 == index;
+        info_vec[index].is_root = if is_root { Some(tree.root) } else { None };
+
+        let redex_info = redexes
+            .iter()
+            .find(|redex| redex.app_index.0 == index)
+            .map(|redex| RedexInfo {
                 abs: redex.func_index,
                 arg: redex.arg_index,
-            }),
-            None => None,
-        };
-
-        let is_root = tree.root == ctx.current_index();
-
-        let index = ctx.current_index().0;
-        info_vec[index].is_root = if is_root { Some(tree.root) } else { None };
-        info_vec[index].is_garbage = false;
+            });
         info_vec[index].redex_info = redex_info;
 
-        if matches!(tree[ctx.current_index()], DebruijnNode::Abstraction(_)) {
-            info_vec[index].computed_usage = Some(compute_usage_flat(tree, ctx.current_index()));
+        if matches!(node, DebruijnNode::Abstraction(_)) {
+            info_vec[index].computed_usage = Some(compute_usage_flat(tree, BackingIndex(index)));
         }
-        ControlFlow::Continue::<()>(())
-    });
+    }
 
     info_vec
+}
+
+fn get_non_garbage(tree: &FlatTree) -> Vec<BackingIndex> {
+    fn _get_non_garbage(tree: &FlatTree, non_garbage: &mut Vec<BackingIndex>, index: BackingIndex) {
+        non_garbage.push(index);
+        match tree[index] {
+            DebruijnNode::Index(_) => (),
+            DebruijnNode::Abstraction(abstraction) => {
+                _get_non_garbage(tree, non_garbage, abstraction.body)
+            }
+            DebruijnNode::Application(application) => {
+                _get_non_garbage(tree, non_garbage, application.func);
+                _get_non_garbage(tree, non_garbage, application.arg);
+            }
+        }
+    }
+    let mut non_garbage = vec![];
+    _get_non_garbage(tree, &mut non_garbage, tree.root);
+    non_garbage
 }
 
 fn to_node_label(term: DebruijnNode) -> String {
