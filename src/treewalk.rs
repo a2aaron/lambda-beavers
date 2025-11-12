@@ -56,11 +56,13 @@ pub trait ActionMut<T> = FnMut(&mut FlatTree, &mut ActionCtx) -> ControlFlow<T>;
 pub trait Action<T> = FnMut(&FlatTree, &mut ActionCtx) -> ControlFlow<T>;
 
 impl FlatTree {
+    #[deprecated]
     pub fn preorder_walk<T>(&self, mut action: impl Action<T>) -> Option<T> {
         let mut ctx = ActionCtx::new(self);
         preorder_walk(self, &mut ctx, &mut action).break_value()
     }
 
+    #[deprecated]
     pub fn preorder_walk_at(
         &self,
         ctx: &mut ActionCtx,
@@ -72,11 +74,13 @@ impl FlatTree {
         });
     }
 
+    #[deprecated]
     pub fn preorder_walk_mut<T>(&mut self, mut action: impl ActionMut<T>) -> Option<T> {
         let mut ctx = ActionCtx::new(self);
         preorder_walk_mut(self, &mut ctx, &mut action).break_value()
     }
 
+    #[deprecated]
     pub fn preorder_walk_at_mut(
         &mut self,
         ctx: &mut ActionCtx,
@@ -88,11 +92,13 @@ impl FlatTree {
         });
     }
 
+    #[deprecated]
     pub fn postorder_walk<T>(&self, mut action: impl PostOrderAction<T>) -> T {
         let mut ctx = ActionCtx::new(self);
         postorder_walk(self, &mut ctx, &mut action)
     }
 
+    #[deprecated]
     pub fn postorder_walk_at_mut<T>(
         &mut self,
         ctx: &mut ActionCtx,
