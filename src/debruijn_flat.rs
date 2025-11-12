@@ -707,19 +707,6 @@ impl RedexMut {
 
         ActionCtx { chain }
     }
-
-    fn func_ctx(&self) -> ActionCtx {
-        let child = self.func_index;
-        let edge_w_parent = EdgeWithParent::AppToFunc(self.app_index);
-
-        let mut chain = self.parent_chain.clone();
-        let edge = DoubleEndedEdge {
-            edge_w_parent,
-            child,
-        };
-        chain.push(edge);
-        ActionCtx { chain }
-    }
 }
 
 pub fn beta_reduce(tree: &mut FlatTree, mut redex: RedexMut) {
@@ -927,37 +914,60 @@ fn substitute(tree: &mut FlatTree, redex: &mut RedexMut) -> BackingIndex {
 }
 
 fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMut) {
-    let mut substitution_i = 0;
+    struct Context<'a> {
+        tree: &'a mut FlatTree,
+        substitution_i: usize,
+        func_index: BackingIndex,
+        arg_index: BackingIndex,
+        body_usage: Usage,
+    }
 
-    let arg_index = redex.arg_index;
-    let func_ctx = &mut redex.func_ctx();
-    let func_backing_index = func_ctx.current_index();
+    fn _substitute(ctx: &mut Context, node_index: BackingIndex, parent_to_node: EdgeWithParent) {
+        match ctx.tree[node_index] {
+            DebruijnNode::Index(binding) => {
+                let is_substituting = binding.is_bound_to(ctx.func_index);
+                if is_substituting {
+                    // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
+                    let last_arg_allocation = ctx.substitution_i == ctx.body_usage - 1;
+                    let new_child = if last_arg_allocation {
+                        ctx.arg_index
+                    } else {
+                        clone_subtree(ctx.tree, ctx.arg_index)
+                    };
 
-    let body_usage = redex.body_usage;
-    tree.preorder_walk_at_mut(func_ctx, |tree, ctx| {
-        let term = ctx.current_index();
-        if let DebruijnNode::Index(binding) = tree[term] {
-            let is_substituting = binding.is_bound_to(func_backing_index);
-            if is_substituting {
-                // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
-                let last_arg_allocation = substitution_i == body_usage - 1;
-                let new_child = if last_arg_allocation {
-                    redex.arg_index
-                } else {
-                    clone_subtree(tree, arg_index)
-                };
-
-                // Point parent to the newly created subtree
-                let parent = ctx.current_edge().edge_w_parent;
-                repoint_node(tree, parent, new_child);
-                substitution_i += 1;
+                    // Point parent to the newly created subtree
+                    repoint_node(ctx.tree, parent_to_node, new_child);
+                    ctx.substitution_i += 1;
+                }
+            }
+            DebruijnNode::Abstraction(abstraction) => {
+                _substitute(ctx, abstraction.body, EdgeWithParent::AbsToBody(node_index))
+            }
+            DebruijnNode::Application(application) => {
+                _substitute(ctx, application.func, EdgeWithParent::AppToFunc(node_index));
+                _substitute(ctx, application.arg, EdgeWithParent::AppToArg(node_index));
             }
         }
-    });
+    }
+
+    let mut ctx = Context {
+        tree,
+        substitution_i: 0,
+        func_index: redex.func_index,
+        body_usage: redex.body_usage,
+        arg_index: redex.arg_index,
+    };
+
+    _substitute(
+        &mut ctx,
+        redex.body_index,
+        EdgeWithParent::AbsToBody(redex.func_index),
+    );
+
     assert_eq!(
-        substitution_i, redex.body_usage,
+        ctx.substitution_i, redex.body_usage,
         "Expected substitution count ({}) to equal usage ({})!",
-        substitution_i, redex.body_usage
+        ctx.substitution_i, redex.body_usage
     );
 }
 
