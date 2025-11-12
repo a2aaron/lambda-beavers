@@ -929,7 +929,7 @@ fn substitute(tree: &mut FlatTree, redex: &mut RedexMut) -> BackingIndex {
 fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMut) {
     let mut substitution_i = 0;
 
-    let arg_ctx = &mut redex.arg_ctx();
+    let arg_index = redex.arg_index;
     let func_ctx = &mut redex.func_ctx();
     let func_backing_index = func_ctx.current_index();
 
@@ -944,7 +944,7 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMut) {
                 let new_child = if last_arg_allocation {
                     redex.arg_index
                 } else {
-                    clone_subtree(tree, arg_ctx)
+                    clone_subtree(tree, arg_index)
                 };
 
                 // Point parent to the newly created subtree
@@ -964,7 +964,7 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMut) {
 /// Clone the given subtree.
 ///
 /// MEMORY: Allocates new subtree, returned value is the newly allocated tree
-fn clone_subtree(tree: &mut FlatTree, ctx: &mut ActionCtx) -> BackingIndex {
+fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
     struct Context<'a> {
         tree: &'a mut FlatTree,
         old_abstraction_chain: Vec<BackingIndex>,
@@ -1038,7 +1038,7 @@ fn clone_subtree(tree: &mut FlatTree, ctx: &mut ActionCtx) -> BackingIndex {
         }
     }
 
-    _clone_subtree(&mut context, ctx.current_index())
+    _clone_subtree(&mut context, index)
 }
 
 #[cfg(test)]
