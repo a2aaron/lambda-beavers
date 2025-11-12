@@ -70,54 +70,50 @@ impl FlatTree {
     }
 
     pub fn normalized(&self) -> FlatTree {
-        fn _normalize(
-            new_tree: &mut FlatTree,
-            old_tree: &FlatTree,
-            old_abstraction_chain: &mut Vec<BackingIndex>,
-            new_abstraction_chain: &mut Vec<BackingIndex>,
-            old_node_index: BackingIndex,
-        ) -> BackingIndex {
-            match old_tree[old_node_index] {
+        struct Context<'a> {
+            old_tree: &'a FlatTree,
+            new_tree: &'a mut FlatTree,
+            old_abstraction_chain: Vec<BackingIndex>,
+            new_abstraction_chain: Vec<BackingIndex>,
+        }
+
+        fn _normalize(ctx: &mut Context, old_node_index: BackingIndex) -> BackingIndex {
+            match ctx.old_tree[old_node_index] {
                 DebruijnNode::Index(binding) => {
                     let binding = match binding {
                         Binding::Free(_) => binding,
                         Binding::Bound(backing_index) => {
-                            let debruijn_depth = old_abstraction_chain
+                            let debruijn_depth = ctx
+                                .old_abstraction_chain
                                 .iter()
                                 .position(|old_abs_idx| *old_abs_idx == backing_index)
                                 .unwrap();
 
-                            let new_abstraction_index = new_abstraction_chain[debruijn_depth];
+                            let new_abstraction_index = ctx.new_abstraction_chain[debruijn_depth];
 
                             Binding::Bound(new_abstraction_index)
                         }
                     };
 
                     let index = DebruijnNode::idx(binding);
-                    new_tree.alloc(index)
+                    ctx.new_tree.alloc(index)
                 }
                 DebruijnNode::Abstraction(abstraction) => {
                     let old_body_index = abstraction.body;
                     let old_usage = abstraction.usage;
 
-                    let new_abstraction_index = new_tree.alloc_none();
+                    let new_abstraction_index = ctx.new_tree.alloc_none();
 
-                    old_abstraction_chain.push(old_node_index);
-                    new_abstraction_chain.push(new_abstraction_index);
+                    ctx.old_abstraction_chain.push(old_node_index);
+                    ctx.new_abstraction_chain.push(new_abstraction_index);
 
-                    let new_body = _normalize(
-                        new_tree,
-                        old_tree,
-                        old_abstraction_chain,
-                        new_abstraction_chain,
-                        old_body_index,
-                    );
+                    let new_body = _normalize(ctx, old_body_index);
 
-                    old_abstraction_chain.pop();
-                    new_abstraction_chain.pop();
+                    ctx.old_abstraction_chain.pop();
+                    ctx.new_abstraction_chain.pop();
 
                     let new_abstraction = DebruijnNode::abs(new_body, old_usage);
-                    new_tree[new_abstraction_index] = new_abstraction;
+                    ctx.new_tree[new_abstraction_index] = new_abstraction;
 
                     new_abstraction_index
                 }
@@ -125,23 +121,11 @@ impl FlatTree {
                     let old_func_index = application.func;
                     let old_arg_index = application.arg;
 
-                    let new_func = _normalize(
-                        new_tree,
-                        old_tree,
-                        old_abstraction_chain,
-                        new_abstraction_chain,
-                        old_func_index,
-                    );
-                    let new_arg = _normalize(
-                        new_tree,
-                        old_tree,
-                        old_abstraction_chain,
-                        new_abstraction_chain,
-                        old_arg_index,
-                    );
+                    let new_func = _normalize(ctx, old_func_index);
+                    let new_arg = _normalize(ctx, old_arg_index);
 
                     let app = DebruijnNode::app(new_func, new_arg);
-                    let app_index = new_tree.alloc(app);
+                    let app_index = ctx.new_tree.alloc(app);
                     app_index
                 }
             }
@@ -149,7 +133,14 @@ impl FlatTree {
 
         let mut new_tree = FlatTree::new();
 
-        let root_node = _normalize(&mut new_tree, self, &mut vec![], &mut vec![], self.root);
+        let mut ctx = Context {
+            old_tree: self,
+            new_tree: &mut new_tree,
+            old_abstraction_chain: vec![],
+            new_abstraction_chain: vec![],
+        };
+
+        let root_node = _normalize(&mut ctx, self.root);
         new_tree.root = root_node;
         new_tree
     }
