@@ -8,11 +8,7 @@ use std::{
     usize,
 };
 
-use crate::{
-    debruijn::Debruijn,
-    graphviz,
-    treewalk::{ActionCtx, ChildResults},
-};
+use crate::{debruijn::Debruijn, graphviz, treewalk::ActionCtx};
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash)]
 pub struct FlatTree {
@@ -314,37 +310,54 @@ impl From<&Debruijn> for FlatTree {
 
 impl From<&FlatTree> for Debruijn {
     fn from(tree: &FlatTree) -> Self {
-        tree.postorder_walk(|_tree, ctx, child_results| match child_results {
-            ChildResults::Index(binding) => {
-                Debruijn::Index(compute_debruijn_index(&ctx.chain, binding))
+        struct Context<'a> {
+            tree: &'a FlatTree,
+            abstraction_chain: Vec<BackingIndex>,
+        }
+        fn _from(ctx: &mut Context, index: BackingIndex) -> Debruijn {
+            match ctx.tree[index] {
+                DebruijnNode::Index(binding) => {
+                    let debruijn_index = compute_debruijn_index(&ctx.abstraction_chain, binding);
+                    Debruijn::Index(debruijn_index)
+                }
+                DebruijnNode::Abstraction(abstraction) => {
+                    ctx.abstraction_chain.push(index);
+                    let body = _from(ctx, abstraction.body);
+                    ctx.abstraction_chain.pop();
+                    Debruijn::Abstraction {
+                        body: Box::new(body),
+                    }
+                }
+                DebruijnNode::Application(application) => {
+                    let func = _from(ctx, application.func);
+                    let arg: Debruijn = _from(ctx, application.arg);
+                    Debruijn::Application {
+                        func: Box::new(func),
+                        arg: Box::new(arg),
+                    }
+                }
             }
-            ChildResults::Abstraction { body_result, .. } => Debruijn::Abstraction {
-                body: Box::new(body_result),
-            },
-            ChildResults::Application {
-                func_result,
-                arg_result,
-                ..
-            } => Debruijn::Application {
-                func: Box::new(func_result),
-                arg: Box::new(arg_result),
-            },
-        })
+        }
+
+        let mut ctx = Context {
+            tree,
+            abstraction_chain: vec![],
+        };
+        _from(&mut ctx, tree.root)
     }
 }
 
-pub fn compute_debruijn_index(chain: &ParentChain, binding: Binding) -> usize {
+pub fn compute_debruijn_index(abstraction_chain: &[BackingIndex], binding: Binding) -> usize {
+    let debruijn_depth = abstraction_chain.len();
     match binding {
         Binding::Bound(backing_index) => {
-            let depth = chain.debruijn_depth();
-            let index = chain
-                .abstractions
+            let index = abstraction_chain
                 .iter()
-                .position(|edge| edge.parent_index().unwrap() == backing_index)
+                .position(|abstraction_index| *abstraction_index == backing_index)
                 .unwrap();
-            depth - index
+            debruijn_depth - index
         }
-        Binding::Free(free_height) => chain.debruijn_depth() + free_height.get(),
+        Binding::Free(free_height) => debruijn_depth + free_height.get(),
     }
 }
 

@@ -7,7 +7,6 @@ use lambda_beavers::{
     debruijn_flat::{self, BackingIndex, FlatTree, beta_reduce},
     parse,
     print::{NodeLabelType, PrintableTerm},
-    treewalk::ChildResults,
 };
 
 #[derive(Parser, Debug)]
@@ -20,31 +19,51 @@ struct Args {
     node_label: NodeLabelType,
 }
 
-fn print_highlighted<'a>(tree: &'a FlatTree, highlighted: BackingIndex) -> String {
-    let printable_terms = tree.postorder_walk(|_tree, ctx, results| match results {
-        ChildResults::Index(binding) => {
-            let index = debruijn_flat::compute_debruijn_index(&ctx.chain, binding);
-            PrintableTerm::Leaf(format!("{}", index))
-        }
-        ChildResults::Abstraction { body_result, .. } => PrintableTerm::Abstraction {
-            body_head: "λ ".to_string(),
-            body: Box::new(body_result),
-        },
-        ChildResults::Application {
-            func_result,
-            arg_result,
-            ..
-        } => {
-            let highlight = ctx.current_index() == highlighted;
+fn print_highlighted(tree: &FlatTree, highlighted: BackingIndex) -> String {
+    struct Context<'a> {
+        tree: &'a FlatTree,
+        abstraction_chain: Vec<BackingIndex>,
+        highlighted: BackingIndex,
+    }
 
-            PrintableTerm::Application {
-                highlight,
-                func: Box::new(func_result),
-                arg: Box::new(arg_result),
+    fn _print_highlighted(ctx: &mut Context, index: BackingIndex) -> PrintableTerm {
+        match ctx.tree[index] {
+            debruijn_flat::DebruijnNode::Index(binding) => {
+                let index = debruijn_flat::compute_debruijn_index(&ctx.abstraction_chain, binding);
+                PrintableTerm::Leaf(format!("{}", index))
+            }
+            debruijn_flat::DebruijnNode::Abstraction(abstraction) => {
+                ctx.abstraction_chain.push(index);
+                let body = _print_highlighted(ctx, abstraction.body);
+                ctx.abstraction_chain.pop();
+
+                PrintableTerm::Abstraction {
+                    body_head: "λ ".to_string(),
+                    body: Box::new(body),
+                }
+            }
+            debruijn_flat::DebruijnNode::Application(application) => {
+                let func = _print_highlighted(ctx, application.func);
+                let arg = _print_highlighted(ctx, application.arg);
+
+                let highlight = index == ctx.highlighted;
+
+                PrintableTerm::Application {
+                    highlight,
+                    func: Box::new(func),
+                    arg: Box::new(arg),
+                }
             }
         }
-    });
+    }
 
+    let mut ctx = Context {
+        tree,
+        abstraction_chain: vec![],
+        highlighted,
+    };
+
+    let printable_terms = _print_highlighted(&mut ctx, tree.root);
     printable_terms.print()
 }
 
