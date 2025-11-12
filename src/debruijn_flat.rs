@@ -1,6 +1,6 @@
 use core::fmt;
 use std::{
-    collections::{HashMap, HashSet},
+    collections::HashMap,
     fmt::{Binary, Display},
     num::NonZeroUsize,
     ops::{Index, IndexMut},
@@ -889,7 +889,7 @@ fn get_usage_by_depth(tree: &FlatTree, arg_index: BackingIndex) -> HashMap<Backi
     struct Context<'a> {
         tree: &'a FlatTree,
         usages: HashMap<BackingIndex, Usage>,
-        arg_subtree_abstractions: HashSet<BackingIndex>,
+        arg_subtree_abstractions: Vec<BackingIndex>,
     }
     fn _get_usage_by_depth(ctx: &mut Context, index: BackingIndex) {
         match ctx.tree[index] {
@@ -908,9 +908,9 @@ fn get_usage_by_depth(tree: &FlatTree, arg_index: BackingIndex) -> HashMap<Backi
                 }
             }
             DebruijnNode::Abstraction(abstraction) => {
-                ctx.arg_subtree_abstractions.insert(index);
+                ctx.arg_subtree_abstractions.push(index);
                 _get_usage_by_depth(ctx, abstraction.body);
-                ctx.arg_subtree_abstractions.remove(&index);
+                ctx.arg_subtree_abstractions.pop();
             }
             DebruijnNode::Application(application) => {
                 _get_usage_by_depth(ctx, application.func);
@@ -922,7 +922,7 @@ fn get_usage_by_depth(tree: &FlatTree, arg_index: BackingIndex) -> HashMap<Backi
     let mut ctx = Context {
         tree,
         usages: HashMap::new(),
-        arg_subtree_abstractions: HashSet::new(),
+        arg_subtree_abstractions: vec![],
     };
 
     _get_usage_by_depth(&mut ctx, arg_index);
