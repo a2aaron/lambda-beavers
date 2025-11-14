@@ -1,6 +1,6 @@
 #![no_main]
 
-use libfuzzer_sys::{arbitrary::Arbitrary, fuzz_target};
+use libfuzzer_sys::{Corpus, arbitrary::Arbitrary, fuzz_target};
 
 use lambda_beavers::{debruijn::Debruijn, reduce::Reducer};
 
@@ -36,9 +36,9 @@ fn is_valid(debruijn: &Debruijn, max_depth: usize) -> bool {
     }
 }
 
-fuzz_target!(|debruijn: DebruijnWrapper| {
+fuzz_target!(|debruijn: DebruijnWrapper| -> Corpus {
     if !is_valid(&debruijn.0, 10) {
-        return;
+        return Corpus::Reject;
     }
     // println!("TEST CASE = {debruijn}");
     let mut reducer = Reducer::new(&debruijn.0);
@@ -58,4 +58,5 @@ fuzz_target!(|debruijn: DebruijnWrapper| {
     assert_usage(&reducer);
     reducer.reduce_one();
     assert_usage(&reducer);
+    Corpus::Keep
 });

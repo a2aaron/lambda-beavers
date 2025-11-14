@@ -23,7 +23,13 @@ members = ["."]
 debug = 1
 
 [[bin]]
-name = "fuzz_target_1"
-path = "fuzz_targets/fuzz_target_1.rs"
+name = "usage"
+path = "fuzz_targets/usage.rs"
+test = false
+doc = false
+
+[[bin]]
+name = "beta_reduce"
+path = "fuzz_targets/beta_reduce.rs"
 test = false
 doc = false
