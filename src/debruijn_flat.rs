@@ -1040,8 +1040,7 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
 fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
     struct Context<'a> {
         tree: &'a mut FlatTree,
-        old_abstraction_chain: Vec<BackingIndex>,
-        new_abstraction_chain: Vec<BackingIndex>,
+        old_to_new_abs_chain: Vec<(BackingIndex, BackingIndex)>,
     }
 
     fn _clone_subtree(ctx: &mut Context<'_>, old_node_index: BackingIndex) -> BackingIndex {
@@ -1050,17 +1049,16 @@ fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
                 let binding = match binding {
                     Binding::Free(_) => binding,
                     Binding::Bound(backing_index) => {
-                        let debruijn_depth = ctx
-                            .old_abstraction_chain
+                        let pair = ctx
+                            .old_to_new_abs_chain
                             .iter()
-                            .position(|old_abs_idx| *old_abs_idx == backing_index);
+                            .find(|(old_abs_idx, _)| *old_abs_idx == backing_index);
 
-                        if let Some(debruijn_depth) = debruijn_depth {
+                        if let Some((_, new_abstraction_index)) = pair {
                             // If this is some, then the binding is bound within the subtree being cloned
                             // In this case, the binding needs to be updated to point to the abstraction
                             // in the cloned subtree.
-                            let new_abstraction_index = ctx.new_abstraction_chain[debruijn_depth];
-                            Binding::Bound(new_abstraction_index)
+                            Binding::Bound(*new_abstraction_index)
                         } else {
                             // Otherwise, the binding is bound within the tree but outside of the subtree bieng cloned.
                             // In that case, there is no need to update the binding
@@ -1078,13 +1076,12 @@ fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
 
                 let new_abstraction_index = ctx.tree.alloc_none();
 
-                ctx.old_abstraction_chain.push(old_node_index);
-                ctx.new_abstraction_chain.push(new_abstraction_index);
+                ctx.old_to_new_abs_chain
+                    .push((old_node_index, new_abstraction_index));
 
                 let new_body = _clone_subtree(ctx, old_body_index);
 
-                ctx.old_abstraction_chain.pop();
-                ctx.new_abstraction_chain.pop();
+                ctx.old_to_new_abs_chain.pop();
 
                 let new_abstraction = DebruijnNode::abs(new_body, old_usage);
                 ctx.tree[new_abstraction_index] = new_abstraction;
@@ -1108,8 +1105,7 @@ fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
 
     let mut context = Context {
         tree,
-        old_abstraction_chain: vec![],
-        new_abstraction_chain: vec![],
+        old_to_new_abs_chain: vec![],
     };
 
     _clone_subtree(&mut context, index)
