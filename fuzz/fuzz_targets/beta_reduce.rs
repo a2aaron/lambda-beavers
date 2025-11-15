@@ -48,7 +48,9 @@ fuzz_target!(|debruijn: DebruijnWrapper| -> Corpus {
 
     let (actual, _) = reduce::reduce(&debruijn.0, 100);
     match actual {
-        reduce::ReductionResult::NormalForm(debruijn) => assert_eq!(debruijn, expected),
+        reduce::ReductionResult::NormalForm(debruijn) => {
+            assert_eq!(debruijn, expected, "Expected {expected}, got {debruijn}")
+        }
         reduce::ReductionResult::Irreducible => {
             panic!("Couldn't reduce after 100 steps! (is irreducible)")
         }

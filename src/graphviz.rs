@@ -8,11 +8,12 @@ use std::{
     time::SystemTime,
 };
 
-use crate::debruijn_flat::{
-    BackingIndex, Binding, DebruijnNode, FlatTree, Usage, compute_usage_flat,
+use crate::{
+    debruijn_flat::{BackingIndex, Binding, DebruijnNode, FlatTree, Usage, compute_usage_flat},
+    reduce::{WalkContext, WalkState},
 };
 
-const DEBUG: bool = true;
+const DEBUG: bool = false;
 
 static CURRENTLY_WRITING_GRAPH: AtomicBool = AtomicBool::new(false);
 
@@ -24,7 +25,7 @@ static TIMESTAMP: LazyLock<u64> = LazyLock::new(|| {
         .as_secs()
 });
 
-pub fn debug_write_to_file(tree: &FlatTree, name: &str) {
+pub fn debug_write_to_file_with_ctx(tree: &FlatTree, walk_ctx: Option<&WalkContext>, name: &str) {
     if !DEBUG {
         return;
     }
@@ -38,7 +39,7 @@ pub fn debug_write_to_file(tree: &FlatTree, name: &str) {
     let value = COUNTER.fetch_add(1, Ordering::Relaxed);
 
     let args = GraphvizArgs { no_garbage: false };
-    let graph = to_graph(tree, &args);
+    let graph = to_graph(tree, walk_ctx, &args);
 
     let timestamp = *TIMESTAMP;
     let folder = &format!("debug/{timestamp}");
@@ -59,11 +60,15 @@ pub fn debug_write_to_file(tree: &FlatTree, name: &str) {
     CURRENTLY_WRITING_GRAPH.store(false, Ordering::Relaxed);
 }
 
+pub fn debug_write_to_file(tree: &FlatTree, name: &str) {
+    debug_write_to_file_with_ctx(tree, None, name)
+}
+
 pub struct GraphvizArgs {
     pub no_garbage: bool,
 }
 
-pub fn to_graph(tree: &FlatTree, args: &GraphvizArgs) -> Graph {
+pub fn to_graph(tree: &FlatTree, walk_ctx: Option<&WalkContext>, args: &GraphvizArgs) -> Graph {
     let mut graph = Graph::default();
     let info_vec = get_info_array(tree);
 
@@ -73,6 +78,22 @@ pub fn to_graph(tree: &FlatTree, args: &GraphvizArgs) -> Graph {
         }
 
         process_node(&mut graph, node_info);
+    }
+
+    if let Some(walk_ctx) = walk_ctx {
+        for frame in &walk_ctx.stack {
+            let node = graph
+                .nodes
+                .iter_mut()
+                .find(|node| node.index == Some(frame.index))
+                .unwrap();
+            let color = match frame.state {
+                WalkState::FirstVisit => "green",
+                WalkState::SecondVisit => "orange",
+                WalkState::ThirdVisit => "red",
+            };
+            node.attributes.set("color", color);
+        }
     }
 
     graph
@@ -105,6 +126,7 @@ fn make_into_root_edge(node_info: NodeInfo, root: BackingIndex) -> (GraphvizEdge
     invis_root_attribs.set("style", "invis");
 
     let node = GraphvizNode {
+        index: None,
         name: INTO_ROOT.to_string(),
         attributes: invis_root_attribs,
     };
@@ -394,12 +416,14 @@ impl Graph {
 
 #[derive(Debug, Default, PartialEq, Eq, Clone)]
 struct GraphvizNode {
+    index: Option<BackingIndex>,
     name: String,
     attributes: Attributes,
 }
 impl GraphvizNode {
     fn new(index: BackingIndex, attributes: Attributes) -> GraphvizNode {
         GraphvizNode {
+            index: Some(index),
             name: index.0.to_string(),
             attributes,
         }

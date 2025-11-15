@@ -23,7 +23,7 @@ impl ReductionNode {
         self.unevaluated_redexes.remove(redex_index.unwrap());
 
         let mut tree = self.tree.clone();
-        beta_reduce(&mut tree, redex);
+        beta_reduce(&mut tree, &redex);
         tree.normalized()
     }
 

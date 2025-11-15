@@ -647,9 +647,9 @@ impl ParentChain {
 #[derive(Debug, PartialEq, Eq, Clone)]
 pub struct RedexMut {
     // The number of abstractions in the parent chain above this redex
-    debruijn_depth: DebruijnDepth,
+    pub debruijn_depth: DebruijnDepth,
 
-    parent_to_app: EdgeWithParent,
+    pub parent_to_app: EdgeWithParent,
     // The index of the redex application node
     pub app_index: BackingIndex,
     // The left child of the redex's application node. This should be an abstraction node
@@ -659,7 +659,7 @@ pub struct RedexMut {
     // The right child of the redex's application node.
     pub arg_index: BackingIndex,
     // The usage of the `body`. Provided for convinence
-    body_usage: Usage,
+    pub body_usage: Usage,
 }
 
 impl RedexMut {
@@ -696,58 +696,6 @@ impl RedexMut {
                 _ => None,
             },
             _ => None,
-        }
-    }
-}
-
-pub enum WalkResult {
-    StackIsEmpty,
-    None,
-    Some(RedexMut),
-}
-
-pub struct WalkContext {
-    stack: Vec<(BackingIndex, EdgeWithParent, DebruijnDepth)>,
-}
-
-impl WalkContext {
-    pub fn new(tree: &FlatTree) -> WalkContext {
-        WalkContext {
-            stack: vec![(tree.root, EdgeWithParent::IntoRoot, 0)],
-        }
-    }
-
-    pub fn walk_one(&mut self, tree: &FlatTree) -> WalkResult {
-        if let Some((index, parent_to_current, depth)) = self.stack.pop() {
-            match tree[index] {
-                DebruijnNode::Index(_) => WalkResult::None,
-                DebruijnNode::Abstraction(abstraction) => {
-                    let next_body = (
-                        abstraction.body,
-                        EdgeWithParent::AbsToBody(index),
-                        depth + 1,
-                    );
-                    self.stack.push(next_body);
-                    WalkResult::None
-                }
-                DebruijnNode::Application(application) => {
-                    // Note that we want func to be visited before arg--it turns out that most of the
-                    // time, redexes live in the function half rather than the argument half.
-                    let next_arg = (application.arg, EdgeWithParent::AppToArg(index), depth);
-                    self.stack.push(next_arg);
-
-                    let next_func = (application.func, EdgeWithParent::AppToFunc(index), depth);
-                    self.stack.push(next_func);
-
-                    if let Some(redex) = RedexMut::try_get(tree, depth, parent_to_current, index) {
-                        WalkResult::Some(redex)
-                    } else {
-                        WalkResult::None
-                    }
-                }
-            }
-        } else {
-            WalkResult::StackIsEmpty
         }
     }
 }
@@ -790,18 +738,23 @@ impl FlatTree {
     }
 
     pub fn is_bnf(&self) -> bool {
-        let mut ctx = WalkContext::new(self);
-        loop {
-            match ctx.walk_one(self) {
-                WalkResult::StackIsEmpty => return true,
-                WalkResult::Some(_) => return false,
-                WalkResult::None => continue,
+        fn _is_bnf(tree: &FlatTree, index: BackingIndex) -> bool {
+            match tree[index] {
+                DebruijnNode::Index(_) => false,
+                DebruijnNode::Abstraction(abstraction) => _is_bnf(tree, abstraction.body),
+                DebruijnNode::Application(application) => {
+                    !RedexMut::is_redex(tree, index)
+                        && _is_bnf(tree, application.func)
+                        && _is_bnf(tree, application.arg)
+                }
             }
         }
+
+        _is_bnf(self, self.root)
     }
 }
 
-pub fn beta_reduce(tree: &mut FlatTree, mut redex: RedexMut) {
+pub fn beta_reduce(tree: &mut FlatTree, redex: &RedexMut) -> BackingIndex {
     // Before this, we have the following shape of tree:
     //   parent
     //     |
@@ -838,14 +791,14 @@ pub fn beta_reduce(tree: &mut FlatTree, mut redex: RedexMut) {
     // because the way arg is modified would not affect it's usage counts, but semantically this
     // is easier to reason aboout, so we do it first.)
 
-    update_usages(tree, &mut redex);
+    update_usages(tree, &redex);
 
     // This is the following tree fragment
     // --> new_body
     // (the parent to this edge is supposed to be abs, although this will change later in this methods)
     // Note that body may have been re-allocated--this happens when the body consists of a single
     // leaf node that gets substituted--aka: the abstraction node looks like λ 1
-    let new_body = substitute(tree, &mut redex);
+    let new_body = substitute(tree, &redex);
 
     // Finally, make the parent point to the body, causing `app` and `abs` to be garbage.
     // The app and abs nodes are no longer pointed to by anything, and therefore are now garbage.
@@ -864,6 +817,7 @@ pub fn beta_reduce(tree: &mut FlatTree, mut redex: RedexMut) {
     //  VV
     // [various copies of arg]
     repoint_node(tree, redex.parent_to_app, new_body);
+    new_body
 }
 
 // Updates the usages of the parent chain.
@@ -1007,7 +961,7 @@ fn repoint_node(tree: &mut FlatTree, parent: EdgeWithParent, child: BackingIndex
 // - Potentially invalidates redex.body (may repoint redex.abs's body in the case that body consists of a single leaf node that gets substituted)
 // - Potentially invalidates redex.arg (becomes garbage in the zero usage case, may be altered in non-zero usage case)
 // - Potentially alters redex.parent pointer
-fn substitute(tree: &mut FlatTree, redex: &mut RedexMut) -> BackingIndex {
+fn substitute(tree: &mut FlatTree, redex: &RedexMut) -> BackingIndex {
     if redex.body_usage == 0 {
         // No need to do anything with the argument because it is never used in the body
         // (Since the argument is not used, the entire arg subtree is garbage now.)
@@ -1022,7 +976,7 @@ fn substitute(tree: &mut FlatTree, redex: &mut RedexMut) -> BackingIndex {
     }
 }
 
-fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &mut RedexMut) {
+fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
     struct Context<'a> {
         tree: &'a mut FlatTree,
         substitution_i: usize,
@@ -1215,7 +1169,7 @@ mod test {
         let redex = redex_at_root(&tree);
         assert_eq!(redex.body_usage, 0);
 
-        beta_reduce(&mut tree, redex);
+        beta_reduce(&mut tree, &redex);
 
         let expected = compile("1");
 
@@ -1231,7 +1185,7 @@ mod test {
         let redex = redex_at_root(&tree);
         assert_eq!(redex.body_usage, 1);
 
-        beta_reduce(&mut tree, redex);
+        beta_reduce(&mut tree, &redex);
 
         let expected = compile("λ 50");
 
@@ -1247,7 +1201,7 @@ mod test {
         let redex = redex_at_root(&tree);
         assert_eq!(redex.body_usage, 1);
 
-        beta_reduce(&mut tree, redex);
+        beta_reduce(&mut tree, &redex);
 
         let expected = compile("1 2 3 4");
 
@@ -1263,7 +1217,7 @@ mod test {
         let redex = redex_at_root(&tree);
         assert_eq!(redex.body_usage, 1);
 
-        beta_reduce(&mut tree, redex);
+        beta_reduce(&mut tree, &redex);
 
         let expected = compile("λ 2 3 4 5");
 
@@ -1279,7 +1233,7 @@ mod test {
         let redex = redex_at_root(&tree);
         assert_eq!(redex.body_usage, 4);
 
-        beta_reduce(&mut tree, redex);
+        beta_reduce(&mut tree, &redex);
 
         let expected = compile("100 λ 101 λ 102 λ 103");
 

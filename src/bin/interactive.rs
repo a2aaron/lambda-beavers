@@ -135,7 +135,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Choice::Quit => break,
             Choice::Reduce(redex_index, _highlighted_string) => {
                 history.push(current_term.clone());
-                beta_reduce(&mut current_term, redexes[redex_index].clone());
+                beta_reduce(&mut current_term, &redexes[redex_index]);
             }
         }
     }

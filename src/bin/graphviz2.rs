@@ -62,7 +62,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let graph_args = GraphvizArgs {
         no_garbage: args.no_garbage,
     };
-    let graph = lambda_beavers::graphviz::to_graph(&tree, &graph_args);
+    let graph = lambda_beavers::graphviz::to_graph(&tree, None, &graph_args);
     std::fs::write(args.output.clone(), graph.to_string())?;
     Ok(())
 }
