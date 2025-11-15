@@ -976,6 +976,7 @@ fn substitute(tree: &mut FlatTree, redex: &RedexMut) -> BackingIndex {
     }
 }
 
+type PairedAbsChain = Vec<(BackingIndex, BackingIndex)>;
 fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
     struct Context<'a> {
         tree: &'a mut FlatTree,
@@ -985,7 +986,12 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
         body_usage: Usage,
     }
 
-    fn _substitute(ctx: &mut Context, node_index: BackingIndex, parent_to_node: EdgeWithParent) {
+    fn _substitute(
+        ctx: &mut Context,
+        chain: &mut PairedAbsChain,
+        node_index: BackingIndex,
+        parent_to_node: EdgeWithParent,
+    ) {
         match ctx.tree[node_index] {
             DebruijnNode::Index(binding) => {
                 let is_substituting = binding.is_bound_to(ctx.func_index);
@@ -995,7 +1001,7 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
                     let new_child = if last_arg_allocation {
                         ctx.arg_index
                     } else {
-                        clone_subtree(ctx.tree, ctx.arg_index)
+                        clone_subtree(ctx.tree, chain, ctx.arg_index)
                     };
 
                     // Point parent to the newly created subtree
@@ -1003,12 +1009,25 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
                     ctx.substitution_i += 1;
                 }
             }
-            DebruijnNode::Abstraction(abstraction) => {
-                _substitute(ctx, abstraction.body, EdgeWithParent::AbsToBody(node_index))
-            }
+            DebruijnNode::Abstraction(abstraction) => _substitute(
+                ctx,
+                chain,
+                abstraction.body,
+                EdgeWithParent::AbsToBody(node_index),
+            ),
             DebruijnNode::Application(application) => {
-                _substitute(ctx, application.func, EdgeWithParent::AppToFunc(node_index));
-                _substitute(ctx, application.arg, EdgeWithParent::AppToArg(node_index));
+                _substitute(
+                    ctx,
+                    chain,
+                    application.func,
+                    EdgeWithParent::AppToFunc(node_index),
+                );
+                _substitute(
+                    ctx,
+                    chain,
+                    application.arg,
+                    EdgeWithParent::AppToArg(node_index),
+                );
             }
         }
     }
@@ -1020,9 +1039,11 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
         body_usage: redex.body_usage,
         arg_index: redex.arg_index,
     };
+    let mut chain = PairedAbsChain::with_capacity(64);
 
     _substitute(
         &mut ctx,
+        &mut chain,
         redex.body_index,
         EdgeWithParent::AbsToBody(redex.func_index),
     );
@@ -1037,20 +1058,22 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
 /// Clone the given subtree.
 ///
 /// MEMORY: Allocates new subtree, returned value is the newly allocated tree
-fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
-    struct Context<'a> {
-        tree: &'a mut FlatTree,
-        old_to_new_abs_chain: Vec<(BackingIndex, BackingIndex)>,
-    }
-
-    fn _clone_subtree(ctx: &mut Context<'_>, old_node_index: BackingIndex) -> BackingIndex {
-        match ctx.tree[old_node_index] {
+fn clone_subtree(
+    tree: &mut FlatTree,
+    chain: &mut PairedAbsChain,
+    index: BackingIndex,
+) -> BackingIndex {
+    fn _clone_subtree(
+        tree: &mut FlatTree,
+        chain: &mut PairedAbsChain,
+        old_node_index: BackingIndex,
+    ) -> BackingIndex {
+        match tree[old_node_index] {
             DebruijnNode::Index(binding) => {
                 let binding = match binding {
                     Binding::Free(_) => binding,
                     Binding::Bound(backing_index) => {
-                        let pair = ctx
-                            .old_to_new_abs_chain
+                        let pair = chain
                             .iter()
                             .find(|(old_abs_idx, _)| *old_abs_idx == backing_index);
 
@@ -1068,23 +1091,22 @@ fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
                 };
 
                 let index = DebruijnNode::idx(binding);
-                ctx.tree.alloc(index)
+                tree.alloc(index)
             }
             DebruijnNode::Abstraction(abstraction) => {
                 let old_body_index = abstraction.body;
                 let old_usage = abstraction.usage;
 
-                let new_abstraction_index = ctx.tree.alloc_none();
+                let new_abstraction_index = tree.alloc_none();
 
-                ctx.old_to_new_abs_chain
-                    .push((old_node_index, new_abstraction_index));
+                chain.push((old_node_index, new_abstraction_index));
 
-                let new_body = _clone_subtree(ctx, old_body_index);
+                let new_body = _clone_subtree(tree, chain, old_body_index);
 
-                ctx.old_to_new_abs_chain.pop();
+                chain.pop();
 
                 let new_abstraction = DebruijnNode::abs(new_body, old_usage);
-                ctx.tree[new_abstraction_index] = new_abstraction;
+                tree[new_abstraction_index] = new_abstraction;
 
                 new_abstraction_index
             }
@@ -1092,23 +1114,18 @@ fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
                 let old_func_index = application.func;
                 let old_arg_index = application.arg;
 
-                let new_func = _clone_subtree(ctx, old_func_index);
-                let new_arg = _clone_subtree(ctx, old_arg_index);
+                let new_func = _clone_subtree(tree, chain, old_func_index);
+                let new_arg = _clone_subtree(tree, chain, old_arg_index);
 
                 let app = DebruijnNode::app(new_func, new_arg);
 
-                let app_index = ctx.tree.alloc(app);
+                let app_index = tree.alloc(app);
                 app_index
             }
         }
     }
-
-    let mut context = Context {
-        tree,
-        old_to_new_abs_chain: Vec::with_capacity(64),
-    };
-
-    _clone_subtree(&mut context, index)
+    chain.clear();
+    _clone_subtree(tree, chain, index)
 }
 
 #[cfg(test)]
