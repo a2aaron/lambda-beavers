@@ -1105,7 +1105,7 @@ fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
 
     let mut context = Context {
         tree,
-        old_to_new_abs_chain: vec![],
+        old_to_new_abs_chain: Vec::with_capacity(64),
     };
 
     _clone_subtree(&mut context, index)
