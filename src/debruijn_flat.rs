@@ -980,18 +980,14 @@ type PairedAbsChain = Vec<(BackingIndex, BackingIndex)>;
 fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
     struct Context<'a> {
         tree: &'a mut FlatTree,
+        chain: PairedAbsChain,
         substitution_i: usize,
         func_index: BackingIndex,
         arg_index: BackingIndex,
         body_usage: Usage,
     }
 
-    fn _substitute(
-        ctx: &mut Context,
-        chain: &mut PairedAbsChain,
-        node_index: BackingIndex,
-        parent_to_node: EdgeWithParent,
-    ) {
+    fn _substitute(ctx: &mut Context, node_index: BackingIndex, parent_to_node: EdgeWithParent) {
         match ctx.tree[node_index] {
             DebruijnNode::Index(binding) => {
                 let is_substituting = binding.is_bound_to(ctx.func_index);
@@ -1001,7 +997,7 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
                     let new_child = if last_arg_allocation {
                         ctx.arg_index
                     } else {
-                        clone_subtree(ctx.tree, chain, ctx.arg_index)
+                        clone_subtree(ctx.tree, &mut ctx.chain, ctx.arg_index)
                     };
 
                     // Point parent to the newly created subtree
@@ -1009,41 +1005,32 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
                     ctx.substitution_i += 1;
                 }
             }
-            DebruijnNode::Abstraction(abstraction) => _substitute(
-                ctx,
-                chain,
-                abstraction.body,
-                EdgeWithParent::AbsToBody(node_index),
-            ),
+            DebruijnNode::Abstraction(abstraction) => {
+                _substitute(ctx, abstraction.body, EdgeWithParent::AbsToBody(node_index))
+            }
             DebruijnNode::Application(application) => {
-                _substitute(
-                    ctx,
-                    chain,
-                    application.func,
-                    EdgeWithParent::AppToFunc(node_index),
-                );
-                _substitute(
-                    ctx,
-                    chain,
-                    application.arg,
-                    EdgeWithParent::AppToArg(node_index),
-                );
+                _substitute(ctx, application.func, EdgeWithParent::AppToFunc(node_index));
+                _substitute(ctx, application.arg, EdgeWithParent::AppToArg(node_index));
             }
         }
     }
 
+    let chain = if redex.body_usage > 1 {
+        PairedAbsChain::with_capacity(64)
+    } else {
+        PairedAbsChain::with_capacity(0)
+    };
     let mut ctx = Context {
         tree,
+        chain,
         substitution_i: 0,
         func_index: redex.func_index,
         body_usage: redex.body_usage,
         arg_index: redex.arg_index,
     };
-    let mut chain = PairedAbsChain::with_capacity(64);
 
     _substitute(
         &mut ctx,
-        &mut chain,
         redex.body_index,
         EdgeWithParent::AbsToBody(redex.func_index),
     );
