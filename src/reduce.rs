@@ -130,7 +130,7 @@ impl WalkContext {
                 depth,
                 state,
             } = frame;
-            match tree[index] {
+            match &tree[index] {
                 DebruijnNode::Index(_) => (),
                 DebruijnNode::Abstraction(abstraction) => {
                     self.push(WalkFrame::first_visit(

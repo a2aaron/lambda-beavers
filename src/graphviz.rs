@@ -77,7 +77,7 @@ pub fn to_graph(tree: &FlatTree, walk_ctx: Option<&WalkContext>, args: &Graphviz
             continue;
         }
 
-        process_node(&mut graph, node_info);
+        process_node(&mut graph, &node_info);
     }
 
     if let Some(walk_ctx) = walk_ctx {
@@ -99,10 +99,10 @@ pub fn to_graph(tree: &FlatTree, walk_ctx: Option<&WalkContext>, args: &Graphviz
     graph
 }
 
-fn process_node(graph: &mut Graph, node_info: NodeInfo) {
-    let graph_node = make_node(node_info);
+fn process_node(graph: &mut Graph, node_info: &NodeInfo) {
+    let graph_node = make_node(&node_info);
 
-    let mut edges = get_edges(node_info);
+    let mut edges = get_edges(&node_info);
 
     if let Some(root_edge) = node_info.is_root {
         let (edge, node) = make_into_root_edge(node_info, root_edge);
@@ -120,7 +120,7 @@ fn process_node(graph: &mut Graph, node_info: NodeInfo) {
     graph.edges.append(&mut edges);
 }
 
-fn make_into_root_edge(node_info: NodeInfo, root: BackingIndex) -> (GraphvizEdge, GraphvizNode) {
+fn make_into_root_edge(node_info: &NodeInfo, root: BackingIndex) -> (GraphvizEdge, GraphvizNode) {
     // Use an invisible node to represent the "into root" edge
     let mut invis_root_attribs = Attributes::new();
     invis_root_attribs.set("style", "invis");
@@ -148,11 +148,11 @@ fn add_subgraph_for_application_edge(graph: &mut Graph, app: crate::debruijn_fla
     graph.subgraphs.push(same_rank);
 }
 
-fn make_node(node_info: NodeInfo) -> GraphvizNode {
+fn make_node(node_info: &NodeInfo) -> GraphvizNode {
     let mut attributes = Attributes::new();
     // Set basic info
     attributes
-        .set("label", to_node_label(node_info.node))
+        .set("label", to_node_label(&node_info.node))
         .set("xlabel", node_info.index.0)
         .set("color", NORMAL_COLOR)
         .set("fontcolor", NORMAL_COLOR);
@@ -188,7 +188,7 @@ fn make_node(node_info: NodeInfo) -> GraphvizNode {
 
     // Usage mismatch between claimed and actual usage
     // Note that garbage nodes are allowed to have stale usage amounts
-    if let DebruijnNode::Abstraction(abs) = node_info.node
+    if let DebruijnNode::Abstraction(abs) = &node_info.node
         && let Some(computed_usage) = node_info.computed_usage
         && abs.usage != computed_usage
         && !node_info.is_garbage
@@ -206,13 +206,13 @@ fn make_node(node_info: NodeInfo) -> GraphvizNode {
     graph_node
 }
 
-fn get_edges(node_info: NodeInfo) -> Vec<GraphvizEdge> {
+fn get_edges(node_info: &NodeInfo) -> Vec<GraphvizEdge> {
     let mut edges = vec![];
-    match node_info.node {
+    match &node_info.node {
         DebruijnNode::Index(binding) => {
             // Add binding edge
             if let Binding::Bound(abstraction) = binding {
-                let binding_edge = GraphvizEdge::make_binding_edge(node_info.index, abstraction);
+                let binding_edge = GraphvizEdge::make_binding_edge(node_info.index, *abstraction);
                 edges.push(binding_edge);
             }
         }
@@ -233,7 +233,7 @@ fn get_edges(node_info: NodeInfo) -> Vec<GraphvizEdge> {
     edges
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 struct NodeInfo {
     node: DebruijnNode,
     is_root: Option<BackingIndex>,
@@ -248,7 +248,7 @@ struct NodeInfo {
 
 impl NodeInfo {
     fn garbage(root: &FlatTree, index: BackingIndex) -> NodeInfo {
-        let node = root[index];
+        let node = root[index].clone();
         NodeInfo {
             node,
             index,
@@ -302,7 +302,7 @@ fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
 fn get_non_garbage(tree: &FlatTree) -> Vec<BackingIndex> {
     fn _get_non_garbage(tree: &FlatTree, non_garbage: &mut Vec<BackingIndex>, index: BackingIndex) {
         non_garbage.push(index);
-        match tree[index] {
+        match &tree[index] {
             DebruijnNode::Index(_) => (),
             DebruijnNode::Abstraction(abstraction) => {
                 _get_non_garbage(tree, non_garbage, abstraction.body)
@@ -318,7 +318,7 @@ fn get_non_garbage(tree: &FlatTree) -> Vec<BackingIndex> {
     non_garbage
 }
 
-fn to_node_label(term: DebruijnNode) -> String {
+fn to_node_label(term: &DebruijnNode) -> String {
     match term {
         DebruijnNode::Index(index) => format!("idx: {}", index),
         DebruijnNode::Abstraction(abs) => format!("abs\nusage = {}", abs.usage),
