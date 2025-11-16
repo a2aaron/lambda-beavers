@@ -2,7 +2,7 @@ use core::fmt;
 use std::{
     collections::HashMap,
     fmt::{Binary, Display},
-    num::NonZeroUsize,
+    num::NonZeroU32,
     ops::{Index, IndexMut},
     str::FromStr,
     usize,
@@ -233,7 +233,7 @@ impl From<&Debruijn> for FlatTree {
         fn compute_binding(abstraction_chain: &[BackingIndex], debruijn_index: usize) -> Binding {
             if debruijn_index > abstraction_chain.len() {
                 let free_height = debruijn_index - abstraction_chain.len();
-                Binding::Free(NonZeroUsize::new(free_height).unwrap())
+                Binding::Free(NonZeroU32::new(free_height as u32).unwrap())
             } else {
                 let chain_index = abstraction_chain.len() - debruijn_index;
                 Binding::Bound(abstraction_chain[chain_index])
@@ -330,7 +330,7 @@ pub fn compute_debruijn_index(abstraction_chain: &[BackingIndex], binding: Bindi
                 .unwrap();
             debruijn_depth - index
         }
-        Binding::Free(free_height) => debruijn_depth + free_height.get(),
+        Binding::Free(free_height) => debruijn_depth + free_height.get() as usize,
     }
 }
 
@@ -394,14 +394,14 @@ pub fn compute_usage_flat(tree: &FlatTree, abstraction_index: BackingIndex) -> U
 pub type DebruijnDepth = usize;
 
 // The number of times a variable is used in an abstraction.
-pub type Usage = usize;
+pub type Usage = u32;
 
 /// A pointer to a given DebruijnNode within a FlatTree
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord, Hash)]
 pub struct BackingIndex(u32);
 impl BackingIndex {
     pub fn new(index: usize) -> Self {
-        Self(index as u32)
+        Self(index as _)
     }
 
     pub fn get(&self) -> usize {
@@ -543,7 +543,7 @@ pub enum Binding {
     // Note that this is NOT a debruijn index, it's a debruijn depth, as it always refers
     // to a constant number of abstractions above the root, no matter how deeply nested the
     // actual index is
-    Free(NonZeroUsize),
+    Free(NonZeroU32),
 }
 
 impl Display for Binding {
@@ -573,7 +573,7 @@ impl DebruijnNode {
         DebruijnNode::Index(binding)
     }
 
-    pub fn abs(body: BackingIndex, usage: usize) -> DebruijnNode {
+    pub fn abs(body: BackingIndex, usage: Usage) -> DebruijnNode {
         DebruijnNode::Abstraction(Abstraction { body, usage })
     }
 
@@ -846,7 +846,7 @@ fn update_usages(tree: &mut FlatTree, redex: &RedexMut) {
     for (abstraction_index, usage_in_arg) in index_to_usage_in_arg {
         let abs = tree.get_abs(abstraction_index);
 
-        let usage_delta: isize = (redex.body_usage as isize - 1) * usage_in_arg as isize;
+        let usage_delta: i32 = (redex.body_usage as i32 - 1) * usage_in_arg as i32;
         let usage = abs.usage.checked_add_signed(usage_delta).unwrap();
 
         tree[abstraction_index] = DebruijnNode::abs(abs.body, usage)
@@ -994,7 +994,7 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
     struct Context<'a> {
         tree: &'a mut FlatTree,
         chain: PairedAbsChain,
-        substitution_i: usize,
+        substitution_i: u32,
         func_index: BackingIndex,
         arg_index: BackingIndex,
         body_usage: Usage,
