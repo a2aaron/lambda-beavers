@@ -153,7 +153,7 @@ fn make_node(node_info: &NodeInfo) -> GraphvizNode {
     // Set basic info
     attributes
         .set("label", to_node_label(&node_info.node))
-        .set("xlabel", node_info.index.0)
+        .set("xlabel", node_info.index.get())
         .set("color", NORMAL_COLOR)
         .set("fontcolor", NORMAL_COLOR);
 
@@ -270,21 +270,21 @@ struct RedexInfo {
 
 fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
     let mut info_vec: Vec<NodeInfo> = (0..tree.backing.len())
-        .map(|index| NodeInfo::garbage(tree, BackingIndex(index)))
+        .map(|index| NodeInfo::garbage(tree, BackingIndex::new(index)))
         .collect();
 
     let redexes = tree.get_redexes();
     let non_garbage = get_non_garbage(tree);
 
     for (index, node) in tree.backing.iter().enumerate() {
-        info_vec[index].is_garbage = !non_garbage.contains(&BackingIndex(index));
+        info_vec[index].is_garbage = !non_garbage.contains(&BackingIndex::new(index));
 
-        let is_root = tree.root.0 == index;
+        let is_root = tree.root.get() == index;
         info_vec[index].is_root = if is_root { Some(tree.root) } else { None };
 
         let redex_info = redexes
             .iter()
-            .find(|redex| redex.app_index.0 == index)
+            .find(|redex| redex.app_index.get() == index)
             .map(|redex| RedexInfo {
                 abs: redex.func_index,
                 arg: redex.arg_index,
@@ -292,7 +292,8 @@ fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
         info_vec[index].redex_info = redex_info;
 
         if matches!(node, DebruijnNode::Abstraction(_)) {
-            info_vec[index].computed_usage = Some(compute_usage_flat(tree, BackingIndex(index)));
+            info_vec[index].computed_usage =
+                Some(compute_usage_flat(tree, BackingIndex::new(index)));
         }
     }
 
@@ -424,7 +425,7 @@ impl GraphvizNode {
     fn new(index: BackingIndex, attributes: Attributes) -> GraphvizNode {
         GraphvizNode {
             index: Some(index),
-            name: index.0.to_string(),
+            name: index.get().to_string(),
             attributes,
         }
     }
@@ -439,8 +440,8 @@ struct GraphvizEdge {
 impl GraphvizEdge {
     fn new(start: BackingIndex, end: BackingIndex, attributes: &Attributes) -> GraphvizEdge {
         GraphvizEdge {
-            start: start.0.to_string(),
-            end: end.0.to_string(),
+            start: start.get().to_string(),
+            end: end.get().to_string(),
             attributes: attributes.clone(),
         }
     }
@@ -474,6 +475,6 @@ impl GraphvizEdge {
 
 fn get_random_color(term: BackingIndex, saturation: f32) -> String {
     // Divide by phi here to get reasonably 'random' colors
-    let hue = (term.0 as f32 / std::f32::consts::PHI).fract();
+    let hue = (term.get() as f32 / std::f32::consts::PHI).fract();
     format!("{hue} {saturation} 0.75")
 }

@@ -28,8 +28,8 @@ impl FlatTree {
     // Allocate a dummy node and return the backing index to the dummy.
     // This dummy node should be set to something reasonable.
     fn alloc_none(&mut self) -> BackingIndex {
-        let backing_index = BackingIndex(self.backing.len());
-        let dummy = DebruijnNode::Index(Binding::Bound(BackingIndex(usize::MAX)));
+        let backing_index = BackingIndex::new(self.backing.len());
+        let dummy = DebruijnNode::dummy_abs();
         self.backing.push(dummy);
         backing_index
     }
@@ -38,7 +38,7 @@ impl FlatTree {
     /// in the input `term`.
     /// The return value is the index to the newly allocated node.
     fn alloc(&mut self, term: DebruijnNode) -> BackingIndex {
-        let term_index = BackingIndex(self.backing.len());
+        let term_index = BackingIndex::new(self.backing.len());
         self.backing.push(term);
         term_index
     }
@@ -189,13 +189,13 @@ impl Index<BackingIndex> for FlatTree {
     type Output = DebruijnNode;
 
     fn index(&self, index: BackingIndex) -> &Self::Output {
-        &self.backing[index.0]
+        &self.backing[index.0 as usize]
     }
 }
 
 impl IndexMut<BackingIndex> for FlatTree {
     fn index_mut(&mut self, index: BackingIndex) -> &mut Self::Output {
-        &mut self.backing[index.0]
+        &mut self.backing[index.0 as usize]
     }
 }
 
@@ -397,8 +397,17 @@ pub type DebruijnDepth = usize;
 pub type Usage = usize;
 
 /// A pointer to a given DebruijnNode within a FlatTree
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct BackingIndex(pub usize);
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord, Hash)]
+pub struct BackingIndex(u32);
+impl BackingIndex {
+    pub fn new(index: usize) -> Self {
+        Self(index as u32)
+    }
+
+    pub fn get(&self) -> usize {
+        self.0 as usize
+    }
+}
 
 impl Display for BackingIndex {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
@@ -570,6 +579,10 @@ impl DebruijnNode {
 
     pub fn app(func: BackingIndex, arg: BackingIndex) -> DebruijnNode {
         DebruijnNode::Application(Application { func, arg })
+    }
+
+    fn dummy_abs() -> DebruijnNode {
+        DebruijnNode::abs(BackingIndex(u32::MAX), Usage::MAX)
     }
 }
 

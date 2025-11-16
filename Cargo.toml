@@ -16,3 +16,4 @@ backtrace-on-stack-overflow = "0.3.0"
 
 [profile.release]
 debug = true
+split-debug = "packed"
