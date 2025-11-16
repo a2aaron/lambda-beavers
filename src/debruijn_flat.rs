@@ -10,7 +10,7 @@ use std::{
 
 use crate::{debruijn::Debruijn, graphviz};
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct FlatTree {
     pub backing: Vec<DebruijnNode>,
     // The into-root edge, which has no parent and whose child is the root node itself
@@ -397,7 +397,7 @@ pub type DebruijnDepth = usize;
 pub type Usage = u32;
 
 /// A pointer to a given DebruijnNode within a FlatTree
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default, PartialOrd, Ord, Hash)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BackingIndex(u32);
 impl BackingIndex {
     pub fn new(index: usize) -> Self {
@@ -425,7 +425,7 @@ impl Display for BackingIndex {
 ///    | edge type
 ///    V
 /// ```
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy)]
 pub enum EdgeWithParent {
     /// The "edge" has no parent, and the child here is the root of the tree
     IntoRoot,
@@ -451,7 +451,7 @@ impl EdgeWithParent {
 /// parent      <- edge_w_parent backing index (if present)
 ///   | adjust
 /// child      
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Clone, Copy)]
 pub struct DoubleEndedEdge {
     pub edge_w_parent: EdgeWithParent,
     pub child: BackingIndex,
@@ -486,7 +486,7 @@ impl std::fmt::Debug for DoubleEndedEdge {
     }
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Hash)]
+#[derive(Debug, Clone)]
 pub struct Abstraction {
     // The index of the body of the abstraction
     pub body: BackingIndex,
@@ -510,7 +510,7 @@ impl Abstraction {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy)]
 pub struct Application {
     pub func: BackingIndex,
     pub arg: BackingIndex,
@@ -532,7 +532,7 @@ impl Application {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+#[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Binding {
     // The backing index of the abstraction that the Index node binds to
     Bound(BackingIndex),
@@ -561,7 +561,7 @@ impl Binding {
     }
 }
 
-#[derive(Clone, PartialEq, Eq, Hash)]
+#[derive(Clone)]
 pub enum DebruijnNode {
     // This backing index points to the abstraction that this index binds to
     Index(Binding),
@@ -609,7 +609,7 @@ impl std::fmt::Debug for DebruijnNode {
 }
 
 // The path of edges from the root to a node
-#[derive(Debug, PartialEq, Eq, Clone, Default)]
+#[derive(Debug, Clone, Default)]
 pub struct ParentChain {
     // Every edge in this vector is a abs -> body edge
     pub abstractions: Vec<DoubleEndedEdge>,
@@ -657,7 +657,7 @@ impl ParentChain {
     }
 }
 
-#[derive(Debug, PartialEq, Eq, Clone)]
+#[derive(Debug, Clone)]
 pub struct RedexMut {
     // The number of abstractions in the parent chain above this redex
     pub debruijn_depth: DebruijnDepth,

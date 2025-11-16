@@ -7,7 +7,6 @@ use crate::{
     debruijn_flat::{
         self, BackingIndex, DebruijnDepth, DebruijnNode, EdgeWithParent, FlatTree, RedexMut,
     },
-    graph::{NodeIndex, ReductionGraph},
     graphviz,
     utils::Rng,
 };
@@ -285,21 +284,6 @@ pub enum ReductionStrategy {
 }
 
 impl ReductionStrategy {
-    pub fn get_node(&mut self, graph: &mut ReductionGraph) -> Option<NodeIndex> {
-        if !graph.any_reducible() {
-            return None;
-        }
-        let node = match self {
-            ReductionStrategy::DFS => graph.incomplete_nodes[graph.incomplete_nodes.len() - 1],
-            ReductionStrategy::BFS => graph.incomplete_nodes[0],
-            ReductionStrategy::Random(rng) => {
-                let index = rng.rand_usize() % graph.incomplete_nodes.len();
-                graph.incomplete_nodes[index]
-            }
-        };
-        Some(node)
-    }
-
     pub fn random() -> ReductionStrategy {
         ReductionStrategy::Random(Rng::new())
     }
