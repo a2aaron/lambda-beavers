@@ -199,20 +199,6 @@ impl IndexMut<BackingIndex> for FlatTree {
     }
 }
 
-impl Index<DoubleEndedEdge> for FlatTree {
-    type Output = DebruijnNode;
-
-    fn index(&self, index: DoubleEndedEdge) -> &Self::Output {
-        &self[index.child]
-    }
-}
-
-impl IndexMut<DoubleEndedEdge> for FlatTree {
-    fn index_mut(&mut self, index: DoubleEndedEdge) -> &mut Self::Output {
-        &mut self[index.child]
-    }
-}
-
 impl From<Vec<DebruijnNode>> for FlatTree {
     fn from(backing: Vec<DebruijnNode>) -> Self {
         FlatTree {
@@ -447,45 +433,6 @@ impl EdgeWithParent {
     }
 }
 
-/// Struct containing an edge along with the parent and child
-/// parent      <- edge_w_parent backing index (if present)
-///   | adjust
-/// child      
-#[derive(Clone, Copy)]
-pub struct DoubleEndedEdge {
-    pub edge_w_parent: EdgeWithParent,
-    pub child: BackingIndex,
-}
-impl DoubleEndedEdge {
-    pub fn root(tree: &FlatTree) -> DoubleEndedEdge {
-        DoubleEndedEdge {
-            edge_w_parent: EdgeWithParent::IntoRoot,
-            child: tree.root,
-        }
-    }
-
-    pub fn parent_index(&self) -> Option<BackingIndex> {
-        self.edge_w_parent.backing_index()
-    }
-}
-impl std::fmt::Debug for DoubleEndedEdge {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let edge_type = match self.edge_w_parent {
-            EdgeWithParent::IntoRoot => "into_root",
-            EdgeWithParent::AbsToBody(_) => "abs_to_body",
-            EdgeWithParent::AppToFunc(_) => "app_to_func",
-            EdgeWithParent::AppToArg(_) => "app_to_arg",
-        };
-        let child = self.child;
-        match self.edge_w_parent.backing_index() {
-            Some(parent) => write!(f, "{edge_type}: {parent} -> {child}")?,
-            None => write!(f, "{edge_type}: [root] -> {child}")?,
-        }
-
-        Ok(())
-    }
-}
-
 #[derive(Debug, Clone)]
 pub struct Abstraction {
     // The index of the body of the abstraction
@@ -498,38 +445,10 @@ pub struct Abstraction {
     pub usage: Usage,
 }
 
-impl Abstraction {
-    // Returns a double ended edge for this Abstraction
-    // abs --> body
-    // abs_index should be the index of the abstraction node.
-    pub fn abs_to_body(&self, abs_index: BackingIndex) -> DoubleEndedEdge {
-        DoubleEndedEdge {
-            child: self.body,
-            edge_w_parent: EdgeWithParent::AbsToBody(abs_index),
-        }
-    }
-}
-
 #[derive(Clone, Copy)]
 pub struct Application {
     pub func: BackingIndex,
     pub arg: BackingIndex,
-}
-
-impl Application {
-    pub fn func(&self, app_index: BackingIndex) -> DoubleEndedEdge {
-        DoubleEndedEdge {
-            child: self.func,
-            edge_w_parent: EdgeWithParent::AppToFunc(app_index),
-        }
-    }
-
-    pub fn arg(&self, app_index: BackingIndex) -> DoubleEndedEdge {
-        DoubleEndedEdge {
-            child: self.arg,
-            edge_w_parent: EdgeWithParent::AppToArg(app_index),
-        }
-    }
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -605,55 +524,6 @@ impl std::fmt::Debug for DebruijnNode {
             Self::Abstraction(abs) => write!(f, "abs: body -> {} (usage={})", abs.body, abs.usage),
             Self::Application(app) => write!(f, "app: func -> {}, arg -> {}", app.func, app.arg),
         }
-    }
-}
-
-// The path of edges from the root to a node
-#[derive(Debug, Clone, Default)]
-pub struct ParentChain {
-    // Every edge in this vector is a abs -> body edge
-    pub abstractions: Vec<DoubleEndedEdge>,
-    pub full_chain: Vec<DoubleEndedEdge>,
-}
-
-impl ParentChain {
-    pub fn new(tree: &FlatTree) -> ParentChain {
-        ParentChain {
-            abstractions: vec![],
-            full_chain: vec![DoubleEndedEdge::root(tree)],
-        }
-    }
-    #[track_caller]
-    pub fn push(&mut self, edge: DoubleEndedEdge) {
-        // Sanity check - we expect the previous edge's child to match up with
-        // this edge's parent. If not, we've broken the chain somehow
-
-        // This unwrap is safe because even an "empty" chain will have the into-root
-        // edge.
-        let last_edge = self.full_chain.last().unwrap();
-        let last_edge_child = last_edge.child;
-        // This unwrap is safe because only the into-root edge will not have a parent
-        // and we never allow pushing the into-root edge in this method.
-        let this_edge_parent = edge.parent_index().unwrap();
-        assert_eq!(
-            last_edge_child, this_edge_parent,
-            "Incorrect edge pushed. Chain: {self:#?}, edge: {edge:?}"
-        );
-
-        if matches!(edge.edge_w_parent, EdgeWithParent::AbsToBody(_)) {
-            self.abstractions.push(edge);
-        }
-        self.full_chain.push(edge);
-    }
-    pub fn pop(&mut self, edge: DoubleEndedEdge) {
-        if matches!(edge.edge_w_parent, EdgeWithParent::AbsToBody(_)) {
-            self.abstractions.pop();
-        }
-        self.full_chain.pop();
-    }
-
-    pub fn debruijn_depth(&self) -> DebruijnDepth {
-        self.abstractions.len()
     }
 }
 
