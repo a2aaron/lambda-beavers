@@ -5,7 +5,7 @@ use clap::ValueEnum;
 use crate::{
     debruijn::Debruijn,
     debruijn_flat::{
-        self, BackingIndex, DebruijnDepth, DebruijnNode, EdgeWithParent, FlatTree, RedexMut,
+        self, BackingIndex, DebruijnDepth, DebruijnNode, FlatTree, ParentEdge, RedexMut,
     },
     graphviz,
     utils::Rng,
@@ -20,13 +20,13 @@ pub enum WalkResult {
 #[derive(Debug, Clone, Copy)]
 pub struct WalkFrame {
     pub index: BackingIndex,
-    pub parent: EdgeWithParent,
+    pub parent: ParentEdge,
     pub depth: DebruijnDepth,
     pub state: WalkState,
 }
 
 impl WalkFrame {
-    fn first_visit(index: BackingIndex, parent: EdgeWithParent, depth: DebruijnDepth) -> WalkFrame {
+    fn first_visit(index: BackingIndex, parent: ParentEdge, depth: DebruijnDepth) -> WalkFrame {
         WalkFrame {
             index,
             parent,
@@ -112,11 +112,7 @@ impl WalkContext {
 
     pub fn new(tree: &FlatTree) -> WalkContext {
         WalkContext {
-            stack: vec![WalkFrame::first_visit(
-                tree.root,
-                EdgeWithParent::IntoRoot,
-                0,
-            )],
+            stack: vec![WalkFrame::first_visit(tree.root, ParentEdge::IntoRoot, 0)],
         }
     }
 
@@ -134,7 +130,7 @@ impl WalkContext {
                 DebruijnNode::Abstraction(abstraction) => {
                     self.push(WalkFrame::first_visit(
                         abstraction.body,
-                        EdgeWithParent::AbsToBody(index),
+                        ParentEdge::AbsToBody(index),
                         depth + 1,
                     ));
                 }
@@ -151,7 +147,7 @@ impl WalkContext {
                                 // time, redexes live in the function half rather than the argument half.
                                 self.push(WalkFrame::first_visit(
                                     application.func,
-                                    EdgeWithParent::AppToFunc(index),
+                                    ParentEdge::AppToFunc(index),
                                     depth,
                                 ));
                             }
@@ -160,7 +156,7 @@ impl WalkContext {
                             self.push(WalkFrame::third_visit(frame));
                             self.push(WalkFrame::first_visit(
                                 application.arg,
-                                EdgeWithParent::AppToArg(index),
+                                ParentEdge::AppToArg(index),
                                 depth,
                             ));
                         }

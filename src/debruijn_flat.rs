@@ -412,7 +412,7 @@ impl Display for BackingIndex {
 ///    V
 /// ```
 #[derive(Debug, Clone, Copy)]
-pub enum EdgeWithParent {
+pub enum ParentEdge {
     /// The "edge" has no parent, and the child here is the root of the tree
     IntoRoot,
     /// The edge is an abstraction to body edge, and the BackingIndex here is the index for the abstraction
@@ -422,13 +422,13 @@ pub enum EdgeWithParent {
     /// The edge is an application to argument edge, and the BackingIndex here is the index for the application
     AppToArg(BackingIndex),
 }
-impl EdgeWithParent {
+impl ParentEdge {
     pub fn backing_index(&self) -> Option<BackingIndex> {
         match self {
-            EdgeWithParent::IntoRoot => None,
-            EdgeWithParent::AbsToBody(abs) => Some(*abs),
-            EdgeWithParent::AppToFunc(app) => Some(*app),
-            EdgeWithParent::AppToArg(app) => Some(*app),
+            ParentEdge::IntoRoot => None,
+            ParentEdge::AbsToBody(abs) => Some(*abs),
+            ParentEdge::AppToFunc(app) => Some(*app),
+            ParentEdge::AppToArg(app) => Some(*app),
         }
     }
 }
@@ -532,7 +532,7 @@ pub struct RedexMut {
     // The number of abstractions in the parent chain above this redex
     pub debruijn_depth: DebruijnDepth,
 
-    pub parent_to_app: EdgeWithParent,
+    pub parent_to_app: ParentEdge,
     // The index of the redex application node
     pub app_index: BackingIndex,
     // The left child of the redex's application node. This should be an abstraction node
@@ -559,7 +559,7 @@ impl RedexMut {
     pub fn try_get(
         tree: &FlatTree,
         debruijn_depth: DebruijnDepth,
-        parent_to_app: EdgeWithParent,
+        parent_to_app: ParentEdge,
         app_index: BackingIndex,
     ) -> Option<RedexMut> {
         match tree[app_index] {
@@ -591,12 +591,12 @@ impl FlatTree {
             redexes: Vec<RedexMut>,
         }
 
-        fn _get_redexes(ctx: &mut Context, index: BackingIndex, parent_to_current: EdgeWithParent) {
+        fn _get_redexes(ctx: &mut Context, index: BackingIndex, parent_to_current: ParentEdge) {
             match &ctx.tree[index] {
                 DebruijnNode::Index(_) => (),
                 DebruijnNode::Abstraction(abstraction) => {
                     ctx.debruijn_depth += 1;
-                    _get_redexes(ctx, abstraction.body, EdgeWithParent::AbsToBody(index));
+                    _get_redexes(ctx, abstraction.body, ParentEdge::AbsToBody(index));
                     ctx.debruijn_depth -= 1;
                 }
                 DebruijnNode::Application(application) => {
@@ -605,8 +605,8 @@ impl FlatTree {
                     {
                         ctx.redexes.push(redex);
                     }
-                    _get_redexes(ctx, application.func, EdgeWithParent::AppToFunc(index));
-                    _get_redexes(ctx, application.arg, EdgeWithParent::AppToArg(index));
+                    _get_redexes(ctx, application.func, ParentEdge::AppToFunc(index));
+                    _get_redexes(ctx, application.arg, ParentEdge::AppToArg(index));
                 }
             }
         }
@@ -616,7 +616,7 @@ impl FlatTree {
             debruijn_depth: 0,
             redexes: vec![],
         };
-        _get_redexes(&mut ctx, self.root, EdgeWithParent::IntoRoot);
+        _get_redexes(&mut ctx, self.root, ParentEdge::IntoRoot);
         ctx.redexes
     }
 
@@ -797,25 +797,25 @@ fn get_usage_by_depth(tree: &FlatTree, arg_index: BackingIndex) -> HashMap<Backi
 /// child                  old child <- garbage
 ///
 /// MEMORY: Old child becomes garbage after repointing.
-fn repoint_node(tree: &mut FlatTree, parent: EdgeWithParent, child: BackingIndex) {
+fn repoint_node(tree: &mut FlatTree, parent: ParentEdge, child: BackingIndex) {
     if parent.backing_index() == Some(child) {
         graphviz::debug_write_to_file(tree, "bad_repoint");
         panic!("attempt to repoint {parent:?} to {child} which would cause a loop (tree: {tree:?}");
     }
     match parent {
-        EdgeWithParent::AbsToBody(parent) => {
+        ParentEdge::AbsToBody(parent) => {
             let abs = tree.get_abs(parent);
             tree[parent] = DebruijnNode::abs(child, abs.usage);
         }
-        EdgeWithParent::AppToFunc(parent) => {
+        ParentEdge::AppToFunc(parent) => {
             let app = tree.get_app(parent);
             tree[parent] = DebruijnNode::app(child, app.arg);
         }
-        EdgeWithParent::AppToArg(parent) => {
+        ParentEdge::AppToArg(parent) => {
             let app = tree.get_app(parent);
             tree[parent] = DebruijnNode::app(app.func, child);
         }
-        EdgeWithParent::IntoRoot => tree.root = child,
+        ParentEdge::IntoRoot => tree.root = child,
     }
 }
 
@@ -870,7 +870,7 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
         body_usage: Usage,
     }
 
-    fn _substitute(ctx: &mut Context, node_index: BackingIndex, parent_to_node: EdgeWithParent) {
+    fn _substitute(ctx: &mut Context, node_index: BackingIndex, parent_to_node: ParentEdge) {
         match &ctx.tree[node_index] {
             DebruijnNode::Index(binding) => {
                 let is_substituting = binding.is_bound_to(ctx.func_index);
@@ -889,14 +889,14 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
                 }
             }
             DebruijnNode::Abstraction(abstraction) => {
-                _substitute(ctx, abstraction.body, EdgeWithParent::AbsToBody(node_index))
+                _substitute(ctx, abstraction.body, ParentEdge::AbsToBody(node_index))
             }
             DebruijnNode::Application(application) => {
                 let func = application.func;
                 let arg = application.arg;
 
-                _substitute(ctx, func, EdgeWithParent::AppToFunc(node_index));
-                _substitute(ctx, arg, EdgeWithParent::AppToArg(node_index));
+                _substitute(ctx, func, ParentEdge::AppToFunc(node_index));
+                _substitute(ctx, arg, ParentEdge::AppToArg(node_index));
             }
         }
     }
@@ -918,7 +918,7 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
     _substitute(
         &mut ctx,
         redex.body_index,
-        EdgeWithParent::AbsToBody(redex.func_index),
+        ParentEdge::AbsToBody(redex.func_index),
     );
 
     assert_eq!(
@@ -1019,7 +1019,7 @@ mod test {
     }
 
     fn redex_at_root(tree: &FlatTree) -> RedexMut {
-        RedexMut::try_get(tree, 0, EdgeWithParent::IntoRoot, tree.root).unwrap()
+        RedexMut::try_get(tree, 0, ParentEdge::IntoRoot, tree.root).unwrap()
     }
 
     #[test]
