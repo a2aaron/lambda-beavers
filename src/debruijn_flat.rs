@@ -53,7 +53,7 @@ impl FlatTree {
 
         fn _normalize(ctx: &mut Context, old_node_index: BackingIndex) -> BackingIndex {
             match &ctx.old_tree[old_node_index] {
-                DebruijnNode::Index(binding) => {
+                DebruijnNode::Var(binding) => {
                     let binding = match binding {
                         Binding::Free(_) => binding,
                         Binding::Bound(backing_index) => &{
@@ -125,7 +125,7 @@ impl FlatTree {
             index: BackingIndex,
         ) -> Result<(), (BackingIndex, Usage, Usage)> {
             match &tree[index] {
-                DebruijnNode::Index(_) => (),
+                DebruijnNode::Var(_) => (),
                 DebruijnNode::Abstraction(abstraction) => {
                     let expected = compute_usage_flat(tree, index);
                     let actual = abstraction.usage;
@@ -275,7 +275,7 @@ impl From<&FlatTree> for Debruijn {
         }
         fn _from(ctx: &mut Context, index: BackingIndex) -> Debruijn {
             match &ctx.tree[index] {
-                DebruijnNode::Index(binding) => {
+                DebruijnNode::Var(binding) => {
                     let debruijn_index = compute_debruijn_index(&ctx.abstraction_chain, *binding);
                     Debruijn::Index(debruijn_index)
                 }
@@ -352,7 +352,7 @@ pub fn compute_usage_flat(tree: &FlatTree, abstraction_index: BackingIndex) -> U
         index: BackingIndex,
     ) -> Usage {
         match &tree[index] {
-            DebruijnNode::Index(binding) => {
+            DebruijnNode::Var(binding) => {
                 if binding.is_bound_to(abstraction_index) {
                     1
                 } else {
@@ -483,13 +483,13 @@ impl Binding {
 #[derive(Clone)]
 pub enum DebruijnNode {
     // This backing index points to the abstraction that this index binds to
-    Index(Binding),
+    Var(Binding),
     Abstraction(Abstraction),
     Application(Application),
 }
 impl DebruijnNode {
     pub fn idx(binding: Binding) -> DebruijnNode {
-        DebruijnNode::Index(binding)
+        DebruijnNode::Var(binding)
     }
 
     pub fn abs(body: BackingIndex, usage: Usage) -> DebruijnNode {
@@ -520,7 +520,7 @@ impl From<Application> for DebruijnNode {
 impl std::fmt::Debug for DebruijnNode {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Index(index) => write!(f, "idx: {}", index),
+            Self::Var(index) => write!(f, "idx: {}", index),
             Self::Abstraction(abs) => write!(f, "abs: body -> {} (usage={})", abs.body, abs.usage),
             Self::Application(app) => write!(f, "app: func -> {}, arg -> {}", app.func, app.arg),
         }
@@ -593,7 +593,7 @@ impl FlatTree {
 
         fn _get_redexes(ctx: &mut Context, index: BackingIndex, parent_to_current: ParentEdge) {
             match &ctx.tree[index] {
-                DebruijnNode::Index(_) => (),
+                DebruijnNode::Var(_) => (),
                 DebruijnNode::Abstraction(abstraction) => {
                     ctx.debruijn_depth += 1;
                     _get_redexes(ctx, abstraction.body, ParentEdge::AbsToBody(index));
@@ -623,7 +623,7 @@ impl FlatTree {
     pub fn is_bnf(&self) -> bool {
         fn _is_bnf(tree: &FlatTree, index: BackingIndex) -> bool {
             match &tree[index] {
-                DebruijnNode::Index(_) => false,
+                DebruijnNode::Var(_) => false,
                 DebruijnNode::Abstraction(abstraction) => _is_bnf(tree, abstraction.body),
                 DebruijnNode::Application(application) => {
                     !RedexMut::is_redex(tree, index)
@@ -744,7 +744,7 @@ fn get_usage_by_depth(tree: &FlatTree, arg_index: BackingIndex) -> HashMap<Backi
     }
     fn _get_usage_by_depth(ctx: &mut Context, index: BackingIndex) {
         match &ctx.tree[index] {
-            DebruijnNode::Index(binding) => {
+            DebruijnNode::Var(binding) => {
                 if let Binding::Bound(backing_index) = binding {
                     // We don't update usages for abstractions inside the argument subtree
                     // This is because those abstractions will be duplicated and therefore not have
@@ -872,7 +872,7 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
 
     fn _substitute(ctx: &mut Context, node_index: BackingIndex, parent_to_node: ParentEdge) {
         match &ctx.tree[node_index] {
-            DebruijnNode::Index(binding) => {
+            DebruijnNode::Var(binding) => {
                 let is_substituting = binding.is_bound_to(ctx.func_index);
                 if is_substituting {
                     // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
@@ -942,7 +942,7 @@ fn clone_subtree(
         old_node_index: BackingIndex,
     ) -> BackingIndex {
         match &tree[old_node_index] {
-            DebruijnNode::Index(binding) => {
+            DebruijnNode::Var(binding) => {
                 let binding = match binding {
                     Binding::Free(_) => binding,
                     Binding::Bound(backing_index) => &{

@@ -209,7 +209,7 @@ fn make_node(node_info: &NodeInfo) -> GraphvizNode {
 fn get_edges(node_info: &NodeInfo) -> Vec<GraphvizEdge> {
     let mut edges = vec![];
     match &node_info.node {
-        DebruijnNode::Index(binding) => {
+        DebruijnNode::Var(binding) => {
             // Add binding edge
             if let Binding::Bound(abstraction) = binding {
                 let binding_edge = GraphvizEdge::make_binding_edge(node_info.index, *abstraction);
@@ -304,7 +304,7 @@ fn get_non_garbage(tree: &FlatTree) -> Vec<BackingIndex> {
     fn _get_non_garbage(tree: &FlatTree, non_garbage: &mut Vec<BackingIndex>, index: BackingIndex) {
         non_garbage.push(index);
         match &tree[index] {
-            DebruijnNode::Index(_) => (),
+            DebruijnNode::Var(_) => (),
             DebruijnNode::Abstraction(abstraction) => {
                 _get_non_garbage(tree, non_garbage, abstraction.body)
             }
@@ -321,7 +321,7 @@ fn get_non_garbage(tree: &FlatTree) -> Vec<BackingIndex> {
 
 fn to_node_label(term: &DebruijnNode) -> String {
     match term {
-        DebruijnNode::Index(index) => format!("idx: {}", index),
+        DebruijnNode::Var(index) => format!("idx: {}", index),
         DebruijnNode::Abstraction(abs) => format!("abs\nusage = {}", abs.usage),
         DebruijnNode::Application { .. } => format!("app"),
     }
