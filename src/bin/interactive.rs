@@ -4,7 +4,7 @@ use clap::Parser;
 use inquire::Select;
 use lambda_beavers::{
     debruijn::Debruijn,
-    debruijn_flat::{self, BackingIndex, FlatTree, beta_reduce},
+    flat_tree::{self, BackingIndex, FlatTree, beta_reduce},
     parse,
     print::{NodeLabelType, PrintableTerm},
 };
@@ -28,11 +28,11 @@ fn print_highlighted(tree: &FlatTree, highlighted: BackingIndex) -> String {
 
     fn _print_highlighted(ctx: &mut Context, index: BackingIndex) -> PrintableTerm {
         match &ctx.tree[index] {
-            debruijn_flat::DebruijnNode::Var(binding) => {
-                let index = debruijn_flat::compute_debruijn_index(&ctx.abstraction_chain, *binding);
+            flat_tree::DebruijnNode::Var(binding) => {
+                let index = flat_tree::compute_debruijn_index(&ctx.abstraction_chain, *binding);
                 PrintableTerm::Leaf(format!("{}", index))
             }
-            debruijn_flat::DebruijnNode::Abstraction(abstraction) => {
+            flat_tree::DebruijnNode::Abstraction(abstraction) => {
                 ctx.abstraction_chain.push(index);
                 let body = _print_highlighted(ctx, abstraction.body);
                 ctx.abstraction_chain.pop();
@@ -42,7 +42,7 @@ fn print_highlighted(tree: &FlatTree, highlighted: BackingIndex) -> String {
                     body: Box::new(body),
                 }
             }
-            debruijn_flat::DebruijnNode::Application(application) => {
+            flat_tree::DebruijnNode::Application(application) => {
                 let func = _print_highlighted(ctx, application.func);
                 let arg = _print_highlighted(ctx, application.arg);
 

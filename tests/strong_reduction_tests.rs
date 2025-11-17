@@ -3,7 +3,7 @@
 
 use lambda_beavers::{
     debruijn::Debruijn,
-    debruijn_flat::FlatTree,
+    flat_tree::FlatTree,
     reduce::{Reducer, ReductionResult},
     term::Classic,
     utils::strong_reduction_test::{parse_line, reduce_with_timeout},

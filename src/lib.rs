@@ -6,7 +6,7 @@
 
 pub mod common_terms;
 pub mod debruijn;
-pub mod debruijn_flat;
+pub mod flat_tree;
 pub mod graphviz;
 pub mod reference;
 pub mod parse {

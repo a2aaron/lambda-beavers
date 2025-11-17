@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    debruijn_flat::{BackingIndex, Binding, DebruijnNode, FlatTree, Usage, compute_usage_flat},
+    flat_tree::{BackingIndex, Binding, DebruijnNode, FlatTree, Usage, compute_usage_flat},
     reduce::{WalkContext, WalkState},
 };
 
@@ -137,7 +137,7 @@ fn make_into_root_edge(node_info: &NodeInfo, root: BackingIndex) -> (GraphvizEdg
     (edge, node)
 }
 
-fn add_subgraph_for_application_edge(graph: &mut Graph, app: crate::debruijn_flat::Application) {
+fn add_subgraph_for_application_edge(graph: &mut Graph, app: crate::flat_tree::Application) {
     let mut edge_attribs = Attributes::new();
     edge_attribs.set("style", "invis");
     let edge = GraphvizEdge::new(app.func, app.arg, &edge_attribs);

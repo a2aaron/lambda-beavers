@@ -1,6 +1,6 @@
 use std::{fmt::Display, str::FromStr};
 
-use crate::{debruijn::Debruijn, debruijn_flat::FlatTree, parse::term};
+use crate::{debruijn::Debruijn, flat_tree::FlatTree, parse::term};
 
 /// A literal
 /// TODO: This should eventually become more sophisticated, possibly containing

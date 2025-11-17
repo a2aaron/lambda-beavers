@@ -4,9 +4,7 @@ use clap::ValueEnum;
 
 use crate::{
     debruijn::Debruijn,
-    debruijn_flat::{
-        self, BackingIndex, DebruijnDepth, DebruijnNode, FlatTree, ParentEdge, RedexMut,
-    },
+    flat_tree::{self, BackingIndex, DebruijnDepth, DebruijnNode, FlatTree, ParentEdge, RedexMut},
     graphviz,
     utils::Rng,
 };
@@ -205,7 +203,7 @@ impl Reducer {
                 "before_beta_reduce",
             );
 
-            let new_body = debruijn_flat::beta_reduce(&mut self.tree, &redex);
+            let new_body = flat_tree::beta_reduce(&mut self.tree, &redex);
 
             graphviz::debug_write_to_file_with_ctx(
                 &self.tree,
