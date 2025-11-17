@@ -28,11 +28,11 @@ fn print_highlighted(tree: &FlatTree, highlighted: BackingIndex) -> String {
 
     fn _print_highlighted(ctx: &mut Context, index: BackingIndex) -> PrintableTerm {
         match &ctx.tree[index] {
-            flat_tree::DebruijnNode::Var(binding) => {
+            flat_tree::Node::Var(binding) => {
                 let index = flat_tree::compute_debruijn_index(&ctx.abstraction_chain, *binding);
                 PrintableTerm::Leaf(format!("{}", index))
             }
-            flat_tree::DebruijnNode::Abstraction(abstraction) => {
+            flat_tree::Node::Abstraction(abstraction) => {
                 ctx.abstraction_chain.push(index);
                 let body = _print_highlighted(ctx, abstraction.body);
                 ctx.abstraction_chain.pop();
@@ -42,7 +42,7 @@ fn print_highlighted(tree: &FlatTree, highlighted: BackingIndex) -> String {
                     body: Box::new(body),
                 }
             }
-            flat_tree::DebruijnNode::Application(application) => {
+            flat_tree::Node::Application(application) => {
                 let func = _print_highlighted(ctx, application.func);
                 let arg = _print_highlighted(ctx, application.arg);
 

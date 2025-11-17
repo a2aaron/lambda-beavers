@@ -4,7 +4,7 @@ use clap::ValueEnum;
 
 use crate::{
     debruijn::Debruijn,
-    flat_tree::{self, BackingIndex, DebruijnDepth, DebruijnNode, FlatTree, ParentEdge, RedexMut},
+    flat_tree::{self, BackingIndex, DebruijnDepth, FlatTree, Node, ParentEdge, RedexMut},
     graphviz,
     utils::Rng,
 };
@@ -124,15 +124,15 @@ impl WalkContext {
                 state,
             } = frame;
             match &tree[index] {
-                DebruijnNode::Var(_) => (),
-                DebruijnNode::Abstraction(abstraction) => {
+                Node::Var(_) => (),
+                Node::Abstraction(abstraction) => {
                     self.push(WalkFrame::first_visit(
                         abstraction.body,
                         ParentEdge::AbsToBody(index),
                         depth + 1,
                     ));
                 }
-                DebruijnNode::Application(application) => {
+                Node::Application(application) => {
                     match state {
                         WalkState::FirstVisit => {
                             if let Some(redex) = RedexMut::try_get(tree, depth, parent, index) {
@@ -213,7 +213,7 @@ impl Reducer {
 
             // If the most recent application is the immediate parent of the redex, revisit it to check if it's a redex
             let should_rewalk_parent = if let Some(last_frame) = self.walk_ctx.stack.last_mut() {
-                let is_app = matches!(self.tree[last_frame.index], DebruijnNode::Application(_));
+                let is_app = matches!(self.tree[last_frame.index], Node::Application(_));
                 assert!(is_app);
                 assert!(last_frame.state != WalkState::FirstVisit);
 
