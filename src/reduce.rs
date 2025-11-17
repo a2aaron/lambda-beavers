@@ -125,14 +125,14 @@ impl WalkContext {
             } = frame;
             match &tree[index] {
                 Node::Var(_) => (),
-                Node::Abstraction(abstraction) => {
+                Node::Abs(abstraction) => {
                     self.push(WalkFrame::first_visit(
                         abstraction.body,
                         ParentEdge::AbsToBody(index),
                         depth + 1,
                     ));
                 }
-                Node::Application(application) => {
+                Node::App(application) => {
                     match state {
                         WalkState::FirstVisit => {
                             if let Some(redex) = RedexMut::try_get(tree, depth, parent, index) {
@@ -213,7 +213,7 @@ impl Reducer {
 
             // If the most recent application is the immediate parent of the redex, revisit it to check if it's a redex
             let should_rewalk_parent = if let Some(last_frame) = self.walk_ctx.stack.last_mut() {
-                let is_app = matches!(self.tree[last_frame.index], Node::Application(_));
+                let is_app = matches!(self.tree[last_frame.index], Node::App(_));
                 assert!(is_app);
                 assert!(last_frame.state != WalkState::FirstVisit);
 

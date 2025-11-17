@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    flat_tree::{BackingIndex, Binding, FlatTree, Node, Usage, compute_usage_flat},
+    flat_tree::{BackingIndex, FlatTree, Node, Usage, Variable, compute_usage_flat},
     reduce::{WalkContext, WalkState},
 };
 
@@ -110,7 +110,7 @@ fn process_node(graph: &mut Graph, node_info: &NodeInfo) {
         graph.nodes.push(node)
     }
 
-    if let Node::Application(app) = node_info.node
+    if let Node::App(app) = node_info.node
         && !node_info.is_garbage
     {
         add_subgraph_for_application_edge(graph, app);
@@ -165,7 +165,7 @@ fn make_node(node_info: &NodeInfo) -> GraphvizNode {
     }
 
     // Set color for abstraction
-    let is_abstraction = matches!(node_info.node, Node::Abstraction(_));
+    let is_abstraction = matches!(node_info.node, Node::Abs(_));
     if is_abstraction {
         let bg_color = get_random_color(node_info.index, 0.5);
         attributes.set("fillcolor", bg_color).set("style", "filled");
@@ -188,7 +188,7 @@ fn make_node(node_info: &NodeInfo) -> GraphvizNode {
 
     // Usage mismatch between claimed and actual usage
     // Note that garbage nodes are allowed to have stale usage amounts
-    if let Node::Abstraction(abs) = &node_info.node
+    if let Node::Abs(abs) = &node_info.node
         && let Some(computed_usage) = node_info.computed_usage
         && abs.usage != computed_usage
         && !node_info.is_garbage
@@ -209,19 +209,19 @@ fn make_node(node_info: &NodeInfo) -> GraphvizNode {
 fn get_edges(node_info: &NodeInfo) -> Vec<GraphvizEdge> {
     let mut edges = vec![];
     match &node_info.node {
-        Node::Var(binding) => {
+        Node::Var(variable) => {
             // Add binding edge
-            if let Binding::Bound(abstraction) = binding {
+            if let Variable::Bound(abstraction) = variable {
                 let binding_edge = GraphvizEdge::make_binding_edge(node_info.index, *abstraction);
                 edges.push(binding_edge);
             }
         }
         // Add normal edges
-        Node::Abstraction(abs) => {
+        Node::Abs(abs) => {
             let edge = GraphvizEdge::make_normal_edge(&node_info, abs.body);
             edges.push(edge);
         }
-        Node::Application(app) => {
+        Node::App(app) => {
             let edge = GraphvizEdge::make_normal_edge(&node_info, app.func);
             edges.push(edge);
 
@@ -291,7 +291,7 @@ fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
             });
         info_vec[index].redex_info = redex_info;
 
-        if matches!(node, Node::Abstraction(_)) {
+        if matches!(node, Node::Abs(_)) {
             info_vec[index].computed_usage =
                 Some(compute_usage_flat(tree, BackingIndex::new(index)));
         }
@@ -305,8 +305,8 @@ fn get_non_garbage(tree: &FlatTree) -> Vec<BackingIndex> {
         non_garbage.push(index);
         match &tree[index] {
             Node::Var(_) => (),
-            Node::Abstraction(abstraction) => _get_non_garbage(tree, non_garbage, abstraction.body),
-            Node::Application(application) => {
+            Node::Abs(abstraction) => _get_non_garbage(tree, non_garbage, abstraction.body),
+            Node::App(application) => {
                 _get_non_garbage(tree, non_garbage, application.func);
                 _get_non_garbage(tree, non_garbage, application.arg);
             }
@@ -319,9 +319,9 @@ fn get_non_garbage(tree: &FlatTree) -> Vec<BackingIndex> {
 
 fn to_node_label(term: &Node) -> String {
     match term {
-        Node::Var(binding) => format!("var: {}", binding),
-        Node::Abstraction(abs) => format!("abs\nusage = {}", abs.usage),
-        Node::Application { .. } => format!("app"),
+        Node::Var(variable) => format!("var: {}", variable),
+        Node::Abs(abs) => format!("abs\nusage = {}", abs.usage),
+        Node::App { .. } => format!("app"),
     }
 }
 

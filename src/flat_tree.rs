@@ -53,10 +53,10 @@ impl FlatTree {
 
         fn _normalize(ctx: &mut Context, old_node_index: BackingIndex) -> BackingIndex {
             match &ctx.old_tree[old_node_index] {
-                Node::Var(binding) => {
-                    let binding = match binding {
-                        Binding::Free(_) => binding,
-                        Binding::Bound(backing_index) => &{
+                Node::Var(variable) => {
+                    let variable = match variable {
+                        Variable::Free(_) => variable,
+                        Variable::Bound(backing_index) => &{
                             let debruijn_depth = ctx
                                 .old_abstraction_chain
                                 .iter()
@@ -65,14 +65,14 @@ impl FlatTree {
 
                             let new_abstraction_index = ctx.new_abstraction_chain[debruijn_depth];
 
-                            Binding::Bound(new_abstraction_index)
+                            Variable::Bound(new_abstraction_index)
                         },
                     };
 
-                    let index = Node::var(*binding);
+                    let index = Node::var(*variable);
                     ctx.new_tree.alloc(index)
                 }
-                Node::Abstraction(abstraction) => {
+                Node::Abs(abstraction) => {
                     let old_body_index = abstraction.body;
                     let old_usage = abstraction.usage;
 
@@ -91,7 +91,7 @@ impl FlatTree {
 
                     new_abstraction_index
                 }
-                Node::Application(application) => {
+                Node::App(application) => {
                     let old_func_index = application.func;
                     let old_arg_index = application.arg;
 
@@ -126,7 +126,7 @@ impl FlatTree {
         ) -> Result<(), (BackingIndex, Usage, Usage)> {
             match &tree[index] {
                 Node::Var(_) => (),
-                Node::Abstraction(abstraction) => {
+                Node::Abs(abstraction) => {
                     let expected = compute_usage_flat(tree, index);
                     let actual = abstraction.usage;
                     if actual != expected {
@@ -134,7 +134,7 @@ impl FlatTree {
                     }
                     _check_usage(tree, abstraction.body)?;
                 }
-                Node::Application(application) => {
+                Node::App(application) => {
                     _check_usage(tree, application.func)?;
                     _check_usage(tree, application.arg)?;
                 }
@@ -146,7 +146,7 @@ impl FlatTree {
 
     fn get_abs(&self, term: BackingIndex) -> Abstraction {
         match &self[term] {
-            Node::Abstraction(abs) => abs.clone(),
+            Node::Abs(abs) => abs.clone(),
             _ => panic!(
                 "Expected abstraction for term @ {term}, got {:?}",
                 self[term]
@@ -156,7 +156,7 @@ impl FlatTree {
 
     fn get_app(&self, term: BackingIndex) -> Application {
         match self[term] {
-            Node::Application(app) => app,
+            Node::App(app) => app,
             _ => panic!(
                 "Expected abstraction for term @ {term}, got {:?}",
                 self[term]
@@ -216,13 +216,13 @@ impl From<Debruijn> for FlatTree {
 
 impl From<&Debruijn> for FlatTree {
     fn from(term: &Debruijn) -> Self {
-        fn compute_binding(abstraction_chain: &[BackingIndex], debruijn_index: usize) -> Binding {
+        fn compute_variable(abstraction_chain: &[BackingIndex], debruijn_index: usize) -> Variable {
             if debruijn_index > abstraction_chain.len() {
                 let free_height = debruijn_index - abstraction_chain.len();
-                Binding::Free(NonZeroU32::new(free_height as u32).unwrap())
+                Variable::Free(NonZeroU32::new(free_height as u32).unwrap())
             } else {
                 let chain_index = abstraction_chain.len() - debruijn_index;
-                Binding::Bound(abstraction_chain[chain_index])
+                Variable::Bound(abstraction_chain[chain_index])
             }
         }
 
@@ -233,15 +233,15 @@ impl From<&Debruijn> for FlatTree {
         ) -> BackingIndex {
             let term = match term {
                 Debruijn::Index(index) => {
-                    let binding = compute_binding(abstraction_chain, *index);
-                    Node::var(binding)
+                    let variable = compute_variable(abstraction_chain, *index);
+                    Node::var(variable)
                 }
                 Debruijn::Abstraction { body } => {
                     let usage = compute_usage(&body);
 
                     // Pre-allocation is needed here so that we can have a spot for the abstraction
                     // node to reside in. We will need this value to be allocated by the time we
-                    // go to compute the binding for any index nodes that depend on it.
+                    // go to compute the binding for any variable nodes that depend on it.
                     let backing_index = tree.alloc_none();
 
                     abstraction_chain.push(backing_index);
@@ -275,11 +275,11 @@ impl From<&FlatTree> for Debruijn {
         }
         fn _from(ctx: &mut Context, index: BackingIndex) -> Debruijn {
             match &ctx.tree[index] {
-                Node::Var(binding) => {
-                    let debruijn_index = compute_debruijn_index(&ctx.abstraction_chain, *binding);
+                Node::Var(variable) => {
+                    let debruijn_index = compute_debruijn_index(&ctx.abstraction_chain, *variable);
                     Debruijn::Index(debruijn_index)
                 }
-                Node::Abstraction(abstraction) => {
+                Node::Abs(abstraction) => {
                     ctx.abstraction_chain.push(index);
                     let body = _from(ctx, abstraction.body);
                     ctx.abstraction_chain.pop();
@@ -287,7 +287,7 @@ impl From<&FlatTree> for Debruijn {
                         body: Box::new(body),
                     }
                 }
-                Node::Application(application) => {
+                Node::App(application) => {
                     let func = _from(ctx, application.func);
                     let arg: Debruijn = _from(ctx, application.arg);
                     Debruijn::Application {
@@ -306,17 +306,17 @@ impl From<&FlatTree> for Debruijn {
     }
 }
 
-pub fn compute_debruijn_index(abstraction_chain: &[BackingIndex], binding: Binding) -> usize {
+pub fn compute_debruijn_index(abstraction_chain: &[BackingIndex], variable: Variable) -> usize {
     let debruijn_depth = abstraction_chain.len();
-    match binding {
-        Binding::Bound(backing_index) => {
+    match variable {
+        Variable::Bound(backing_index) => {
             let index = abstraction_chain
                 .iter()
                 .position(|abstraction_index| *abstraction_index == backing_index)
                 .unwrap();
             debruijn_depth - index
         }
-        Binding::Free(free_height) => debruijn_depth + free_height.get() as usize,
+        Variable::Free(free_height) => debruijn_depth + free_height.get() as usize,
     }
 }
 
@@ -352,17 +352,17 @@ pub fn compute_usage_flat(tree: &FlatTree, abstraction_index: BackingIndex) -> U
         index: BackingIndex,
     ) -> Usage {
         match &tree[index] {
-            Node::Var(binding) => {
-                if binding.is_bound_to(abstraction_index) {
+            Node::Var(variable) => {
+                if variable.is_bound_to(abstraction_index) {
                     1
                 } else {
                     0
                 }
             }
-            Node::Abstraction(abstraction) => {
+            Node::Abs(abstraction) => {
                 _compute_usage_flat(tree, abstraction_index, abstraction.body)
             }
-            Node::Application(application) => {
+            Node::App(application) => {
                 _compute_usage_flat(tree, abstraction_index, application.func)
                     + _compute_usage_flat(tree, abstraction_index, application.arg)
             }
@@ -452,7 +452,7 @@ pub struct Application {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Binding {
+pub enum Variable {
     // The backing index of the abstraction that the Index node binds to
     Bound(BackingIndex),
     // The number of abstractions above the root that this Index node binds to
@@ -465,39 +465,39 @@ pub enum Binding {
     Free(NonZeroU32),
 }
 
-impl Display for Binding {
+impl Display for Variable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Binding::Bound(backing_index) => write!(f, "{backing_index}"),
-            Binding::Free(free_index) => write!(f, "free ({free_index})"),
+            Variable::Bound(backing_index) => write!(f, "{backing_index}"),
+            Variable::Free(free_index) => write!(f, "free ({free_index})"),
         }
     }
 }
 
-impl Binding {
-    fn is_bound_to(&self, backing_index: BackingIndex) -> bool {
-        *self == Binding::Bound(backing_index)
+impl Variable {
+    fn is_bound_to(&self, abs_index: BackingIndex) -> bool {
+        *self == Variable::Bound(abs_index)
     }
 }
 
 #[derive(Clone)]
 pub enum Node {
     // This backing index points to the abstraction that this index binds to
-    Var(Binding),
-    Abstraction(Abstraction),
-    Application(Application),
+    Var(Variable),
+    Abs(Abstraction),
+    App(Application),
 }
 impl Node {
-    pub fn var(binding: Binding) -> Node {
-        Node::Var(binding)
+    pub fn var(variable: Variable) -> Node {
+        Node::Var(variable)
     }
 
     pub fn abs(body: BackingIndex, usage: Usage) -> Node {
-        Node::Abstraction(Abstraction { body, usage })
+        Node::Abs(Abstraction { body, usage })
     }
 
     pub fn app(func: BackingIndex, arg: BackingIndex) -> Node {
-        Node::Application(Application { func, arg })
+        Node::App(Application { func, arg })
     }
 
     fn dummy_abs() -> Node {
@@ -507,13 +507,13 @@ impl Node {
 
 impl From<Abstraction> for Node {
     fn from(abs: Abstraction) -> Self {
-        Node::Abstraction(abs)
+        Node::Abs(abs)
     }
 }
 
 impl From<Application> for Node {
     fn from(app: Application) -> Self {
-        Node::Application(app)
+        Node::App(app)
     }
 }
 
@@ -521,8 +521,8 @@ impl std::fmt::Debug for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Self::Var(var) => write!(f, "var: {}", var),
-            Self::Abstraction(abs) => write!(f, "abs: body -> {} (usage={})", abs.body, abs.usage),
-            Self::Application(app) => write!(f, "app: func -> {}, arg -> {}", app.func, app.arg),
+            Self::Abs(abs) => write!(f, "abs: body -> {} (usage={})", abs.body, abs.usage),
+            Self::App(app) => write!(f, "app: func -> {}, arg -> {}", app.func, app.arg),
         }
     }
 }
@@ -548,8 +548,8 @@ pub struct RedexMut {
 impl RedexMut {
     pub fn is_redex(tree: &FlatTree, term: BackingIndex) -> bool {
         match tree[term] {
-            Node::Application(app) => match tree[app.func] {
-                Node::Abstraction { .. } => true,
+            Node::App(app) => match tree[app.func] {
+                Node::Abs { .. } => true,
                 _ => false,
             },
             _ => false,
@@ -563,8 +563,8 @@ impl RedexMut {
         app_index: BackingIndex,
     ) -> Option<RedexMut> {
         match tree[app_index] {
-            Node::Application(app) => match &tree[app.func] {
-                Node::Abstraction(abs) => {
+            Node::App(app) => match &tree[app.func] {
+                Node::Abs(abs) => {
                     let redex = RedexMut {
                         debruijn_depth,
                         parent_to_app,
@@ -594,12 +594,12 @@ impl FlatTree {
         fn _get_redexes(ctx: &mut Context, index: BackingIndex, parent_to_current: ParentEdge) {
             match &ctx.tree[index] {
                 Node::Var(_) => (),
-                Node::Abstraction(abstraction) => {
+                Node::Abs(abstraction) => {
                     ctx.debruijn_depth += 1;
                     _get_redexes(ctx, abstraction.body, ParentEdge::AbsToBody(index));
                     ctx.debruijn_depth -= 1;
                 }
-                Node::Application(application) => {
+                Node::App(application) => {
                     if let Some(redex) =
                         RedexMut::try_get(ctx.tree, ctx.debruijn_depth, parent_to_current, index)
                     {
@@ -624,8 +624,8 @@ impl FlatTree {
         fn _is_bnf(tree: &FlatTree, index: BackingIndex) -> bool {
             match &tree[index] {
                 Node::Var(_) => false,
-                Node::Abstraction(abstraction) => _is_bnf(tree, abstraction.body),
-                Node::Application(application) => {
+                Node::Abs(abstraction) => _is_bnf(tree, abstraction.body),
+                Node::App(application) => {
                     !RedexMut::is_redex(tree, index)
                         && _is_bnf(tree, application.func)
                         && _is_bnf(tree, application.arg)
@@ -744,8 +744,8 @@ fn get_usage_by_depth(tree: &FlatTree, arg_index: BackingIndex) -> HashMap<Backi
     }
     fn _get_usage_by_depth(ctx: &mut Context, index: BackingIndex) {
         match &ctx.tree[index] {
-            Node::Var(binding) => {
-                if let Binding::Bound(backing_index) = binding {
+            Node::Var(variable) => {
+                if let Variable::Bound(backing_index) = variable {
                     // We don't update usages for abstractions inside the argument subtree
                     // This is because those abstractions will be duplicated and therefore not have
                     // their usages change at all. Hence we need to check that the backing index
@@ -758,12 +758,12 @@ fn get_usage_by_depth(tree: &FlatTree, arg_index: BackingIndex) -> HashMap<Backi
                     }
                 }
             }
-            Node::Abstraction(abstraction) => {
+            Node::Abs(abstraction) => {
                 ctx.arg_subtree_abstractions.push(index);
                 _get_usage_by_depth(ctx, abstraction.body);
                 ctx.arg_subtree_abstractions.pop();
             }
-            Node::Application(application) => {
+            Node::App(application) => {
                 _get_usage_by_depth(ctx, application.func);
                 _get_usage_by_depth(ctx, application.arg);
             }
@@ -872,8 +872,8 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
 
     fn _substitute(ctx: &mut Context, node_index: BackingIndex, parent_to_node: ParentEdge) {
         match &ctx.tree[node_index] {
-            Node::Var(binding) => {
-                let is_substituting = binding.is_bound_to(ctx.func_index);
+            Node::Var(variable) => {
+                let is_substituting = variable.is_bound_to(ctx.func_index);
                 if is_substituting {
                     // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
                     let last_arg_allocation = ctx.substitution_i == ctx.body_usage - 1;
@@ -888,10 +888,10 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
                     ctx.substitution_i += 1;
                 }
             }
-            Node::Abstraction(abstraction) => {
+            Node::Abs(abstraction) => {
                 _substitute(ctx, abstraction.body, ParentEdge::AbsToBody(node_index))
             }
-            Node::Application(application) => {
+            Node::App(application) => {
                 let func = application.func;
                 let arg = application.arg;
 
@@ -942,31 +942,31 @@ fn clone_subtree(
         old_node_index: BackingIndex,
     ) -> BackingIndex {
         match &tree[old_node_index] {
-            Node::Var(binding) => {
-                let binding = match binding {
-                    Binding::Free(_) => binding,
-                    Binding::Bound(backing_index) => &{
+            Node::Var(variable) => {
+                let variable = match variable {
+                    Variable::Free(_) => variable,
+                    Variable::Bound(backing_index) => &{
                         let pair = chain
                             .iter()
                             .find(|(old_abs_idx, _)| *old_abs_idx == *backing_index);
 
                         if let Some((_, new_abstraction_index)) = pair {
-                            // If this is some, then the binding is bound within the subtree being cloned
-                            // In this case, the binding needs to be updated to point to the abstraction
+                            // If this is some, then the variable is bound within the subtree being cloned
+                            // In this case, the variable needs to be updated to point to the abstraction
                             // in the cloned subtree.
-                            Binding::Bound(*new_abstraction_index)
+                            Variable::Bound(*new_abstraction_index)
                         } else {
-                            // Otherwise, the binding is bound within the tree but outside of the subtree bieng cloned.
-                            // In that case, there is no need to update the binding
-                            *binding
+                            // Otherwise, the variable is bound within the tree but outside of the subtree bieng cloned.
+                            // In that case, there is no need to update the variable
+                            *variable
                         }
                     },
                 };
 
-                let index = Node::var(*binding);
+                let index = Node::var(*variable);
                 tree.alloc(index)
             }
-            Node::Abstraction(abstraction) => {
+            Node::Abs(abstraction) => {
                 let old_body_index = abstraction.body;
                 let old_usage = abstraction.usage;
 
@@ -983,7 +983,7 @@ fn clone_subtree(
 
                 new_abstraction_index
             }
-            Node::Application(application) => {
+            Node::App(application) => {
                 let old_func_index = application.func;
                 let old_arg_index = application.arg;
 
