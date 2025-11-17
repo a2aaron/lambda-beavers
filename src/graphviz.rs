@@ -319,7 +319,7 @@ fn get_non_garbage(tree: &FlatTree) -> Vec<BackingIndex> {
 
 fn to_node_label(term: &Node) -> String {
     match term {
-        Node::Var(index) => format!("idx: {}", index),
+        Node::Var(binding) => format!("var: {}", binding),
         Node::Abstraction(abs) => format!("abs\nusage = {}", abs.usage),
         Node::Application { .. } => format!("app"),
     }

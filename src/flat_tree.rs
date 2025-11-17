@@ -69,7 +69,7 @@ impl FlatTree {
                         },
                     };
 
-                    let index = Node::idx(*binding);
+                    let index = Node::var(*binding);
                     ctx.new_tree.alloc(index)
                 }
                 Node::Abstraction(abstraction) => {
@@ -234,7 +234,7 @@ impl From<&Debruijn> for FlatTree {
             let term = match term {
                 Debruijn::Index(index) => {
                     let binding = compute_binding(abstraction_chain, *index);
-                    Node::idx(binding)
+                    Node::var(binding)
                 }
                 Debruijn::Abstraction { body } => {
                     let usage = compute_usage(&body);
@@ -488,7 +488,7 @@ pub enum Node {
     Application(Application),
 }
 impl Node {
-    pub fn idx(binding: Binding) -> Node {
+    pub fn var(binding: Binding) -> Node {
         Node::Var(binding)
     }
 
@@ -520,7 +520,7 @@ impl From<Application> for Node {
 impl std::fmt::Debug for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Var(index) => write!(f, "idx: {}", index),
+            Self::Var(var) => write!(f, "var: {}", var),
             Self::Abstraction(abs) => write!(f, "abs: body -> {} (usage={})", abs.body, abs.usage),
             Self::Application(app) => write!(f, "app: func -> {}, arg -> {}", app.func, app.arg),
         }
@@ -963,7 +963,7 @@ fn clone_subtree(
                     },
                 };
 
-                let index = Node::idx(*binding);
+                let index = Node::var(*binding);
                 tree.alloc(index)
             }
             Node::Abstraction(abstraction) => {
