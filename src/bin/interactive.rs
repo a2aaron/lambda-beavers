@@ -4,7 +4,7 @@ use clap::Parser;
 use inquire::Select;
 use lambda_beavers::{
     debruijn::Debruijn,
-    flat_tree::{self, BackingIndex, FlatTree, beta_reduce},
+    flat_tree::{self, AbsIndex, BackingIndex, FlatTree, beta_reduce},
     parse,
     print::{NodeLabelType, PrintableTerm},
 };
@@ -22,20 +22,29 @@ struct Args {
 fn print_highlighted(tree: &FlatTree, highlighted: BackingIndex) -> String {
     struct Context<'a> {
         tree: &'a FlatTree,
-        abstraction_chain: Vec<BackingIndex>,
+        chain: Vec<AbsIndex>,
         highlighted: BackingIndex,
     }
 
     fn _print_highlighted(ctx: &mut Context, index: BackingIndex) -> PrintableTerm {
         match &ctx.tree[index] {
-            flat_tree::Node::Var(variable) => {
-                let index = flat_tree::compute_debruijn_index(&ctx.abstraction_chain, *variable);
+            flat_tree::Node::FreeVar(free_var) => {
+                let index = flat_tree::compute_debruijn_index_free(ctx.chain.as_slice(), free_var);
+                PrintableTerm::Leaf(format!("{}", index))
+            }
+            flat_tree::Node::BoundVar(variable) => {
+                let index = flat_tree::compute_debruijn_index_bound(
+                    &ctx.tree,
+                    ctx.chain.as_slice(),
+                    variable,
+                );
                 PrintableTerm::Leaf(format!("{}", index))
             }
             flat_tree::Node::Abs(abstraction) => {
-                ctx.abstraction_chain.push(index);
+                let index = AbsIndex(index);
+                ctx.chain.push(index);
                 let body = _print_highlighted(ctx, abstraction.body);
-                ctx.abstraction_chain.pop();
+                ctx.chain.pop();
 
                 PrintableTerm::Abstraction {
                     body_head: "λ ".to_string(),
@@ -59,7 +68,7 @@ fn print_highlighted(tree: &FlatTree, highlighted: BackingIndex) -> String {
 
     let mut ctx = Context {
         tree,
-        abstraction_chain: vec![],
+        chain: vec![],
         highlighted,
     };
 

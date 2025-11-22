@@ -4,7 +4,9 @@ use clap::ValueEnum;
 
 use crate::{
     debruijn::Debruijn,
-    flat_tree::{self, BackingIndex, DebruijnDepth, FlatTree, Node, ParentEdge, RedexMut},
+    flat_tree::{
+        self, AbsIndex, BackingIndex, DebruijnDepth, FlatTree, Node, ParentEdge, RedexMut,
+    },
     graphviz,
     utils::Rng,
 };
@@ -124,8 +126,10 @@ impl WalkContext {
                 state,
             } = frame;
             match &tree[index] {
-                Node::Var(_) => (),
+                Node::BoundVar(_) => (),
+                Node::FreeVar(_) => (),
                 Node::Abs(abstraction) => {
+                    let index = AbsIndex(index);
                     self.push(WalkFrame::first_visit(
                         abstraction.body,
                         ParentEdge::AbsToBody(index),
@@ -310,12 +314,9 @@ mod test {
     };
 
     #[track_caller]
-    fn assert_usage(reducer: &Reducer) {
-        if let Err((failing_term, actual, expected)) = reducer.tree.check_usage() {
-            panic!(
-                "Expected usage to be {expected} but got {actual} for node {failing_term} in {}",
-                reducer.tree
-            );
+    fn assert_contour(reducer: &Reducer) {
+        if let Err(error) = reducer.tree.check_contours() {
+            panic!("Error for tree {}: {error:?}", reducer.tree);
         }
     }
 
@@ -324,7 +325,7 @@ mod test {
         let term = Debruijn::from_str("λ (λ 1 1) (1 1)").unwrap();
         let mut reducer = Reducer::new(&term);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -332,7 +333,7 @@ mod test {
         let term = Debruijn::from_str("λ (λ 1 1) 99").unwrap();
         let mut reducer = Reducer::new(&term);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -341,21 +342,21 @@ mod test {
             Debruijn::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
         let mut reducer = Reducer::new(&term);
 
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -363,21 +364,21 @@ mod test {
         let term = Debruijn::from_str("(λ λ 3 2) (λ λ 2)").unwrap();
         let mut reducer = Reducer::new(&term);
 
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -386,7 +387,7 @@ mod test {
         let mut reducer = Reducer::new(&term);
 
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -398,7 +399,7 @@ mod test {
         println!("{}", reducer.tree);
         reducer.reduce_one();
         println!("{}", reducer.tree);
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -406,21 +407,21 @@ mod test {
         let term = Debruijn::from_str("λ ((λ λ 1) 99) 1 99").unwrap();
         let mut reducer = Reducer::new(&term);
 
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -428,21 +429,21 @@ mod test {
         let term = Debruijn::from_str("λ ((λ λ 1) 99) 1").unwrap();
         let mut reducer = Reducer::new(&term);
 
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -450,21 +451,21 @@ mod test {
         let term = Debruijn::from_str("λ (λ λ λ 2) 100").unwrap();
         let mut reducer = Reducer::new(&term);
 
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -473,21 +474,21 @@ mod test {
         let term = Debruijn::from_str(term).unwrap();
         let mut reducer = Reducer::new(&term);
 
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -496,21 +497,21 @@ mod test {
         let term = Debruijn::from_str(term).unwrap();
         let mut reducer = Reducer::new(&term);
 
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -519,21 +520,21 @@ mod test {
         let term = Debruijn::from_str(term).unwrap();
         let mut reducer = Reducer::new(&term);
 
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -541,28 +542,28 @@ mod test {
         let term = Debruijn::from_str("λ (λ λ 1) 100").unwrap();
         let mut reducer = Reducer::new(&term);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
     fn fuzzer4() {
         let term = Debruijn::from_str("2 1 λ λ (λ λ 1 20 2) 20 λ 2 λ λ λ 22 λ λ λ λ λ λ λ λ λ 22 λ 5 λ λ λ 5 λ λ (λ λ 1 20 2) 20 λ 2 λ 1 22").unwrap();
         let mut reducer = Reducer::new(&term);
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -572,21 +573,21 @@ mod test {
         ).unwrap();
         let mut reducer = Reducer::new(&term);
 
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -595,21 +596,21 @@ mod test {
         let term = Debruijn::from_str(testcase).unwrap();
         let mut reducer = Reducer::new(&term);
 
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -618,21 +619,21 @@ mod test {
         let term = Debruijn::from_str(testcase).unwrap();
         let mut reducer = Reducer::new(&term);
 
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     #[test]
@@ -641,21 +642,21 @@ mod test {
         let term = Debruijn::from_str(testcase).unwrap();
         let mut reducer = Reducer::new(&term);
 
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
         reducer.reduce_one();
-        assert_usage(&reducer);
+        assert_contour(&reducer);
     }
 
     fn reference_reduce(term: &Debruijn) -> Debruijn {

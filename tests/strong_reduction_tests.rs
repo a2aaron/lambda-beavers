@@ -58,16 +58,16 @@ fn assert_round_trip(test: &str, _: usize) {
     );
 }
 
-fn assert_usage(test: &str, test_i: usize) {
+fn assert_contour(test: &str, test_i: usize) {
     let (starting, expected) = parse_line(test);
 
     let mut reducer = Reducer::new(&starting);
     loop {
         let result = reducer.reduce_one();
-        if let Err((failing_term, actual, expected)) = reducer.tree.check_usage() {
+        if let Err(err) = reducer.tree.check_contours() {
             println!("Failed test case #{test_i} - {test}: ({starting} -> {expected})");
             panic!(
-                "Expected usage to be {expected} but got {actual} for node {failing_term} in {} (original: {})",
+                "Contour check failed in {} (original: {}). Error: {err:?}",
                 reducer.tree, starting
             );
         }
@@ -116,19 +116,19 @@ fn assert_test(test: &str, test_i: usize) {
 }
 
 make_test_batch!("0", "3465", assert_round_trip);
-make_test_batch!("0", "480", assert_usage);
-make_test_batch!("480", "490", assert_usage);
-make_test!("490", assert_usage);
-make_test!("491", assert_usage);
-make_test!("492", assert_usage);
-make_test!("493", assert_usage);
-make_test!("494", assert_usage);
-make_test!("495", assert_usage);
-make_test!("496", assert_usage);
-make_test!("497", assert_usage);
-make_test!("498", assert_usage);
-make_test!("499", assert_usage);
-make_test!("500", assert_usage);
+make_test_batch!("0", "480", assert_contour);
+make_test_batch!("480", "490", assert_contour);
+make_test!("490", assert_contour);
+make_test!("491", assert_contour);
+make_test!("492", assert_contour);
+make_test!("493", assert_contour);
+make_test!("494", assert_contour);
+make_test!("495", assert_contour);
+make_test!("496", assert_contour);
+make_test!("497", assert_contour);
+make_test!("498", assert_contour);
+make_test!("499", assert_contour);
+make_test!("500", assert_contour);
 
 make_test!("0");
 make_test!("1");

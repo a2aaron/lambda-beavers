@@ -23,8 +23,8 @@ members = ["."]
 debug = 1
 
 [[bin]]
-name = "usage"
-path = "fuzz_targets/usage.rs"
+name = "contour"
+path = "fuzz_targets/contour.rs"
 test = false
 doc = false
 

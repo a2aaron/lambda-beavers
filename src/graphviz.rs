@@ -9,7 +9,7 @@ use std::{
 };
 
 use crate::{
-    flat_tree::{BackingIndex, FlatTree, Node, Usage, Variable, compute_usage_flat},
+    flat_tree::{AbsIndex, BackingIndex, FlatTree, Node},
     reduce::{WalkContext, WalkState},
 };
 
@@ -173,7 +173,7 @@ fn make_node(node_info: &NodeInfo) -> GraphvizNode {
 
     // Set shape and color for redex application
     if let Some(info) = node_info.redex_info {
-        let color1 = get_random_color(info.abs, 0.5);
+        let color1 = get_random_color(info.abs.0, 0.5);
         let color2 = get_random_color(info.arg, 0.5);
         let bg_color = format!("{};0.5:{}", color1, color2);
         attributes
@@ -186,22 +186,6 @@ fn make_node(node_info: &NodeInfo) -> GraphvizNode {
         attributes.set("penwidth", 2.0);
     }
 
-    // Usage mismatch between claimed and actual usage
-    // Note that garbage nodes are allowed to have stale usage amounts
-    if let Node::Abs(abs) = &node_info.node
-        && let Some(computed_usage) = node_info.computed_usage
-        && abs.usage != computed_usage
-        && !node_info.is_garbage
-    {
-        attributes.set("color", "red");
-        attributes.set("fontcolor", "darkred");
-        attributes.set("style", "filled");
-        attributes.append_label(format!(
-            "WRONG USAGE\nclaimed: {}, actual: {} ",
-            abs.usage, computed_usage
-        ));
-    }
-
     let graph_node = GraphvizNode::new(node_info.index, attributes);
     graph_node
 }
@@ -209,17 +193,26 @@ fn make_node(node_info: &NodeInfo) -> GraphvizNode {
 fn get_edges(node_info: &NodeInfo) -> Vec<GraphvizEdge> {
     let mut edges = vec![];
     match &node_info.node {
-        Node::Var(variable) => {
-            // Add binding edge
-            if let Variable::Bound(abstraction) = variable {
-                let binding_edge = GraphvizEdge::make_binding_edge(node_info.index, *abstraction);
-                edges.push(binding_edge);
+        // Free var does not have any edges
+        Node::FreeVar(_free_var) => (),
+        Node::BoundVar(bound_var) => {
+            let edge = GraphvizEdge::make_contour_edge(node_info.index, bound_var.prev);
+            edges.push(edge);
+
+            if let Some(next) = bound_var.next {
+                let edge = GraphvizEdge::make_contour_edge(node_info.index, next.0);
+                edges.push(edge);
             }
         }
         // Add normal edges
         Node::Abs(abs) => {
             let edge = GraphvizEdge::make_normal_edge(&node_info, abs.body);
             edges.push(edge);
+
+            if let Some(entrance) = abs.entrance {
+                let edge = GraphvizEdge::make_contour_edge(node_info.index, entrance.0);
+                edges.push(edge);
+            }
         }
         Node::App(app) => {
             let edge = GraphvizEdge::make_normal_edge(&node_info, app.func);
@@ -243,7 +236,6 @@ struct NodeInfo {
     is_garbage: bool,
     // If not None, then this DebruijnNode is an non-garbage Application and is also a Redex
     redex_info: Option<RedexInfo>,
-    computed_usage: Option<Usage>,
 }
 
 impl NodeInfo {
@@ -255,7 +247,6 @@ impl NodeInfo {
             is_root: None,
             is_garbage: true,
             redex_info: None,
-            computed_usage: None,
         }
     }
 }
@@ -263,7 +254,7 @@ impl NodeInfo {
 #[derive(Debug, Clone, Copy)]
 struct RedexInfo {
     // The function of the application in the redex, which will be an Abstraction
-    abs: BackingIndex,
+    abs: AbsIndex,
     // The argument of the application in the redex
     arg: BackingIndex,
 }
@@ -276,7 +267,7 @@ fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
     let redexes = tree.get_redexes();
     let non_garbage = get_non_garbage(tree);
 
-    for (index, node) in tree.backing.iter().enumerate() {
+    for (index, _node) in tree.backing.iter().enumerate() {
         info_vec[index].is_garbage = !non_garbage.contains(&BackingIndex::new(index));
 
         let is_root = tree.root.get() == index;
@@ -290,11 +281,6 @@ fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
                 arg: redex.arg_index,
             });
         info_vec[index].redex_info = redex_info;
-
-        if matches!(node, Node::Abs(_)) {
-            info_vec[index].computed_usage =
-                Some(compute_usage_flat(tree, BackingIndex::new(index)));
-        }
     }
 
     info_vec
@@ -304,7 +290,8 @@ fn get_non_garbage(tree: &FlatTree) -> Vec<BackingIndex> {
     fn _get_non_garbage(tree: &FlatTree, non_garbage: &mut Vec<BackingIndex>, index: BackingIndex) {
         non_garbage.push(index);
         match &tree[index] {
-            Node::Var(_) => (),
+            Node::FreeVar(_) => (),
+            Node::BoundVar(_) => (),
             Node::Abs(abstraction) => _get_non_garbage(tree, non_garbage, abstraction.body),
             Node::App(application) => {
                 _get_non_garbage(tree, non_garbage, application.func);
@@ -319,8 +306,9 @@ fn get_non_garbage(tree: &FlatTree) -> Vec<BackingIndex> {
 
 fn to_node_label(term: &Node) -> String {
     match term {
-        Node::Var(variable) => format!("var: {}", variable),
-        Node::Abs(abs) => format!("abs\nusage = {}", abs.usage),
+        Node::FreeVar(variable) => format!("var: {}", variable),
+        Node::BoundVar(variable) => format!("var: {}", variable),
+        Node::Abs(_) => format!("abs"),
         Node::App { .. } => format!("app"),
     }
 }
@@ -352,20 +340,6 @@ impl Attributes {
             .map(|(name, value)| format!("{name}=\"{}\"", value))
             .intersperse(" ".to_string())
             .collect()
-    }
-
-    fn get(&self, key: &str) -> Option<&String> {
-        self.attributes.get(key)
-    }
-
-    fn append_label(&mut self, str: impl ToString) {
-        let label = self.get("label");
-        if let Some(label) = label {
-            let label = format!("{label}\n{}", str.to_string());
-            self.set("label", label);
-        } else {
-            self.set("label", str);
-        }
     }
 }
 
@@ -444,14 +418,13 @@ impl GraphvizEdge {
         }
     }
 
-    fn make_binding_edge(index: BackingIndex, abstraction: BackingIndex) -> GraphvizEdge {
-        let color = get_random_color(abstraction, 1.0);
+    fn make_contour_edge(start: BackingIndex, end: BackingIndex) -> GraphvizEdge {
         let mut edge_attribs = Attributes::new();
         edge_attribs
-            .set("color", color)
+            .set("color", "green")
             .set("style", "dashed")
             .set("constraint", "false");
-        GraphvizEdge::new(index, abstraction, &edge_attribs)
+        GraphvizEdge::new(start, end, &edge_attribs)
     }
 
     fn make_normal_edge(node_info: &NodeInfo, end: BackingIndex) -> GraphvizEdge {

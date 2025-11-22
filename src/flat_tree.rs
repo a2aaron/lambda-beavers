@@ -1,7 +1,8 @@
 use core::fmt;
 use std::{
-    collections::HashMap,
+    collections::{HashMap, HashSet},
     fmt::{Binary, Display},
+    hash::Hash,
     num::NonZeroU32,
     ops::{Index, IndexMut},
     str::FromStr,
@@ -25,13 +26,20 @@ impl FlatTree {
         }
     }
 
+    fn alloc_blank_var(&mut self) -> BoundVarIndex {
+        let backing_index = BackingIndex::new(self.backing.len());
+        let dummy = Node::dummy_var();
+        self.backing.push(dummy);
+        BoundVarIndex(backing_index)
+    }
+
     // Allocate a dummy node and return the backing index to the dummy.
     // This dummy node should be set to something reasonable.
-    fn alloc_none(&mut self) -> BackingIndex {
+    fn alloc_blank_abs(&mut self) -> AbsIndex {
         let backing_index = BackingIndex::new(self.backing.len());
         let dummy = Node::dummy_abs();
         self.backing.push(dummy);
-        backing_index
+        AbsIndex(backing_index)
     }
 
     /// Allocate the given term onto the backing vector. The node is set to the node
@@ -43,53 +51,116 @@ impl FlatTree {
         term_index
     }
 
+    fn alloc_app(&mut self, func: BackingIndex, arg: BackingIndex) -> BackingIndex {
+        let app = Node::App(Application { func, arg });
+        self.alloc(app)
+    }
+
+    fn alloc_bound_var(&mut self, bound_var: BoundVariable) -> BoundVarIndex {
+        let node = Node::BoundVar(bound_var);
+        let index = self.alloc(node);
+        BoundVarIndex(index)
+    }
+
+    fn alloc_free_var(&mut self, free_var: FreeVariable) -> BackingIndex {
+        let node = Node::FreeVar(free_var);
+        self.alloc(node)
+    }
+
+    fn fixup_next(&mut self, prev: PrevIndex, this_var: BoundVarIndex) {
+        match prev {
+            PrevIndex::Var(var) => {
+                let var = self.get_bound_var_mut(var);
+                var.next = Some(this_var);
+            }
+            PrevIndex::Abs(abs) => {
+                let abs = self.get_abs_mut(abs);
+                abs.entrance = Some(this_var);
+            }
+        }
+    }
+
     pub fn normalized(&self) -> FlatTree {
         struct Context<'a> {
             old_tree: &'a FlatTree,
             new_tree: &'a mut FlatTree,
-            old_abstraction_chain: Vec<BackingIndex>,
-            new_abstraction_chain: Vec<BackingIndex>,
+            old_abs_chain: Vec<AbsIndex>,
+            new_abs_chain: Vec<AbsIndex>,
+            new_abs_contours: HashMap<AbsIndex, Vec<BoundVarIndex>>,
+        }
+
+        impl<'a> Context<'a> {
+            fn push(&mut self, old_abs_index: AbsIndex, new_abs_index: AbsIndex) {
+                self.old_abs_chain.push(old_abs_index);
+                self.new_abs_chain.push(new_abs_index);
+                self.new_abs_contours.insert(new_abs_index, vec![]);
+            }
+
+            fn pop(&mut self) {
+                self.old_abs_chain.pop();
+                self.new_abs_chain.pop();
+            }
+
+            fn old_to_new(&self, old_abs: AbsIndex) -> AbsIndex {
+                let debruijn_depth = self
+                    .old_abs_chain
+                    .iter()
+                    .position(|idx| *idx == old_abs)
+                    .unwrap();
+
+                let new_abs_index = self.new_abs_chain[debruijn_depth];
+                new_abs_index
+            }
+
+            fn add_new_var(&mut self, new_abs: AbsIndex, new_var: BoundVarIndex) {
+                self.new_abs_contours
+                    .get_mut(&new_abs)
+                    .unwrap()
+                    .push(new_var)
+            }
+
+            fn get_prev_for_contour(&self, new_abs_idx: AbsIndex) -> PrevIndex {
+                match self.new_abs_contours.get(&new_abs_idx) {
+                    Some(contour) => match contour.last() {
+                        Some(last_var) => PrevIndex::Var(*last_var),
+                        None => PrevIndex::Abs(new_abs_idx),
+                    },
+                    None => unreachable!(),
+                }
+            }
         }
 
         fn _normalize(ctx: &mut Context, old_node_index: BackingIndex) -> BackingIndex {
             match &ctx.old_tree[old_node_index] {
-                Node::Var(variable) => {
-                    let variable = match variable {
-                        Variable::Free(_) => variable,
-                        Variable::Bound(backing_index) => &{
-                            let debruijn_depth = ctx
-                                .old_abstraction_chain
-                                .iter()
-                                .position(|old_abs_idx| *old_abs_idx == *backing_index)
-                                .unwrap();
+                Node::FreeVar(free) => ctx.new_tree.alloc_free_var(*free),
+                Node::BoundVar(old_var) => {
+                    let old_abs_idx = ctx.old_tree.get_binding_abs(old_var);
+                    let new_abs_idx = ctx.old_to_new(old_abs_idx);
+                    let new_prev = ctx.get_prev_for_contour(new_abs_idx);
 
-                            let new_abstraction_index = ctx.new_abstraction_chain[debruijn_depth];
+                    let new_var_index = ctx.new_tree.alloc_blank_var();
+                    ctx.add_new_var(new_abs_idx, new_var_index);
+                    ctx.new_tree.fixup_next(new_prev, new_var_index);
 
-                            Variable::Bound(new_abstraction_index)
-                        },
-                    };
+                    let new_var = ctx.new_tree.get_bound_var_mut(new_var_index);
+                    new_var.prev = new_prev.into();
 
-                    let index = Node::var(*variable);
-                    ctx.new_tree.alloc(index)
+                    new_var_index.0
                 }
                 Node::Abs(abstraction) => {
+                    let old_abs_index = AbsIndex(old_node_index);
                     let old_body_index = abstraction.body;
-                    let old_usage = abstraction.usage;
 
-                    let new_abstraction_index = ctx.new_tree.alloc_none();
+                    let new_abs_index = ctx.new_tree.alloc_blank_abs();
 
-                    ctx.old_abstraction_chain.push(old_node_index);
-                    ctx.new_abstraction_chain.push(new_abstraction_index);
-
+                    ctx.push(old_abs_index, new_abs_index);
                     let new_body = _normalize(ctx, old_body_index);
+                    ctx.pop();
 
-                    ctx.old_abstraction_chain.pop();
-                    ctx.new_abstraction_chain.pop();
+                    let abs = ctx.new_tree.get_abs_mut(new_abs_index);
+                    abs.body = new_body;
 
-                    let new_abstraction = Node::abs(new_body, old_usage);
-                    ctx.new_tree[new_abstraction_index] = new_abstraction;
-
-                    new_abstraction_index
+                    new_abs_index.0
                 }
                 Node::App(application) => {
                     let old_func_index = application.func;
@@ -97,10 +168,7 @@ impl FlatTree {
 
                     let new_func = _normalize(ctx, old_func_index);
                     let new_arg = _normalize(ctx, old_arg_index);
-
-                    let app = Node::app(new_func, new_arg);
-                    let app_index = ctx.new_tree.alloc(app);
-                    app_index
+                    ctx.new_tree.alloc_app(new_func, new_arg)
                 }
             }
         }
@@ -110,8 +178,9 @@ impl FlatTree {
         let mut ctx = Context {
             old_tree: self,
             new_tree: &mut new_tree,
-            old_abstraction_chain: vec![],
-            new_abstraction_chain: vec![],
+            old_abs_chain: vec![],
+            new_abs_chain: vec![],
+            new_abs_contours: HashMap::new(),
         };
 
         let root_node = _normalize(&mut ctx, self.root);
@@ -119,50 +188,274 @@ impl FlatTree {
         new_tree
     }
 
-    pub fn check_usage(&self) -> Result<(), (BackingIndex, Usage, Usage)> {
-        fn _check_usage(
-            tree: &FlatTree,
-            index: BackingIndex,
-        ) -> Result<(), (BackingIndex, Usage, Usage)> {
-            match &tree[index] {
-                Node::Var(_) => (),
-                Node::Abs(abstraction) => {
-                    let expected = compute_usage_flat(tree, index);
-                    let actual = abstraction.usage;
-                    if actual != expected {
-                        return Err((index, actual, expected));
-                    }
-                    _check_usage(tree, abstraction.body)?;
+    fn get_abs(&self, abs: AbsIndex) -> Abstraction {
+        match &self[abs.0] {
+            Node::Abs(abs) => abs.clone(),
+            node => panic!("Expected abstraction for term @ {abs}, got {node:?}",),
+        }
+    }
+
+    fn get_abs_mut(&mut self, abs: AbsIndex) -> &mut Abstraction {
+        match &mut self[abs.0] {
+            Node::Abs(abs) => abs,
+            node => panic!("Expected abstraction for term @ {abs}, got {node:?}"),
+        }
+    }
+
+    fn get_app_mut(&mut self, app: BackingIndex) -> &mut Application {
+        match &mut self[app] {
+            Node::App(app) => app,
+            node => panic!("Expected abstraction for term @ {app}, got {node:?}",),
+        }
+    }
+
+    fn get_bound_var(&self, var: BoundVarIndex) -> &BoundVariable {
+        match &self[var.0] {
+            Node::BoundVar(var) => var,
+            node => panic!("Expected variable for term @ {var}, got {node:?}",),
+        }
+    }
+
+    fn get_bound_var_mut(&mut self, var: BoundVarIndex) -> &mut BoundVariable {
+        match &mut self[var.0] {
+            Node::BoundVar(var) => var,
+            node => panic!("Expected variable for term @ {var}, got {node:?}",),
+        }
+    }
+
+    fn get_binding_abs<'a>(&'a self, mut bound_var: &'a BoundVariable) -> AbsIndex {
+        loop {
+            match bound_var.prev(self) {
+                PrevIndex::Var(bound_var_index) => {
+                    let prev_var = self.get_bound_var(bound_var_index);
+                    bound_var = prev_var;
                 }
-                Node::App(application) => {
-                    _check_usage(tree, application.func)?;
-                    _check_usage(tree, application.arg)?;
+                PrevIndex::Abs(abs_index) => return abs_index,
+            }
+        }
+    }
+
+    pub fn check_contours(&self) -> ContourResult<()> {
+        struct Context<'a> {
+            tree: &'a FlatTree,
+            contours: HashMap<AbsIndex, Vec<BoundVarIndex>>,
+            non_garbage: HashSet<BackingIndex>,
+        }
+
+        impl<'a> Context<'a> {
+            fn check_prev_index(&self, prev: BackingIndex) -> ContourResult<PrevIndex> {
+                match &self.tree[prev] {
+                    Node::BoundVar(_) => Ok(PrevIndex::Var(BoundVarIndex(prev))),
+                    Node::Abs(_) => Ok(PrevIndex::Abs(AbsIndex(prev))),
+                    node => Err(ContourError::ExpectedAbsOrBoundVar {
+                        index: prev,
+                        actual: node.clone(),
+                    }),
                 }
             }
-            Ok(())
-        }
-        _check_usage(self, self.root)
-    }
 
-    fn get_abs(&self, term: BackingIndex) -> Abstraction {
-        match &self[term] {
-            Node::Abs(abs) => abs.clone(),
-            _ => panic!(
-                "Expected abstraction for term @ {term}, got {:?}",
-                self[term]
-            ),
-        }
-    }
+            fn check_abs_index(&self, index: AbsIndex) -> ContourResult<&'a Abstraction> {
+                match &self.tree[index.0] {
+                    Node::Abs(abstraction) => ContourResult::Ok(abstraction),
+                    node => ContourResult::Err(ContourError::ExpectedAbs {
+                        index: index,
+                        actual: node.clone(),
+                    }),
+                }
+            }
 
-    fn get_app(&self, term: BackingIndex) -> Application {
-        match self[term] {
-            Node::App(app) => app,
-            _ => panic!(
-                "Expected abstraction for term @ {term}, got {:?}",
-                self[term]
-            ),
+            fn check_bound_var_index(
+                &self,
+                index: BoundVarIndex,
+            ) -> ContourResult<&'a BoundVariable> {
+                match &self.tree[index.0] {
+                    Node::BoundVar(bound_variable) => ContourResult::Ok(bound_variable),
+                    node => ContourResult::Err(ContourError::ExpectedBoundVar {
+                        index,
+                        actual: node.clone(),
+                    }),
+                }
+            }
+
+            fn check_contour(&mut self, abs: &Abstraction, abs_idx: AbsIndex) -> ContourResult<()> {
+                let mut contour = vec![];
+
+                if let Some(entrance) = abs.entrance {
+                    let node1 = self.check_bound_var_index(entrance)?;
+                    let prev_of_node1 = self.check_prev_index(node1.prev)?;
+                    if prev_of_node1 != PrevIndex::Abs(abs_idx) {
+                        return Err(ContourError::PrevEntranceMismatch {
+                            abs: abs_idx,
+                            entrance_of_abs: entrance,
+                            entrance,
+                            prev_of_entrance: node1.prev(self.tree),
+                        });
+                    }
+
+                    let mut node1_idx = entrance;
+                    // We expect that each node in the contour has next and prev nodes that properly
+                    // match up.
+                    loop {
+                        contour.push(node1_idx);
+                        let node1 = self.check_bound_var_index(node1_idx)?;
+                        if let Some(next_of_node1) = node1.next {
+                            let node2 = self.check_bound_var_index(next_of_node1)?;
+
+                            let prev_of_node2 = self.check_prev_index(node2.prev)?;
+                            if prev_of_node2 != PrevIndex::Var(node1_idx) {
+                                return Err(ContourError::PrevNextMismatch {
+                                    node1: node1_idx,
+                                    next_of_node1,
+                                    prev_of_node2,
+                                });
+                            }
+
+                            node1_idx = next_of_node1;
+                        } else {
+                            break;
+                        }
+                    }
+                } else {
+                    // No contour--so nothing to check
+                    // (However, we do later check that bound variables do not lead back to this abstrction)
+                }
+
+                let expect_none = self.contours.insert(abs_idx, contour);
+                assert!(expect_none.is_none());
+                Ok(())
+            }
+
+            fn check_bound_var_for_loop(&self, bound_var: BoundVarIndex) -> ContourResult<()> {
+                // We expect this to be a non-looping linked list
+
+                // Check backwards
+                let mut contour_backwards = vec![];
+                let mut this_var = bound_var;
+                let abs_index = loop {
+                    let bound_var = self.check_bound_var_index(this_var)?;
+                    let prev = self.check_prev_index(bound_var.prev)?;
+                    match prev {
+                        PrevIndex::Var(prev) => {
+                            if contour_backwards.contains(&prev) {
+                                return Err(ContourError::LoopDetectedFromPrev {
+                                    node: this_var,
+                                    prev,
+                                });
+                            }
+                            contour_backwards.push(prev);
+                            this_var = prev;
+                        }
+                        PrevIndex::Abs(abs_index) => break abs_index,
+                    }
+                };
+
+                let mut contour_forwards = vec![];
+                let mut this_var = bound_var;
+                loop {
+                    let bound_var = self.check_bound_var_index(this_var)?;
+                    match bound_var.next {
+                        Some(next) => {
+                            if contour_forwards.contains(&next) {
+                                return Err(ContourError::LoopDetectedFromNext {
+                                    node: this_var,
+                                    next,
+                                });
+                            }
+                            contour_forwards.push(next);
+                            this_var = next;
+                        }
+                        None => break,
+                    }
+                }
+
+                let mut contour = vec![];
+
+                contour_backwards.reverse();
+                contour.extend(contour_backwards);
+                contour.push(bound_var);
+                contour.extend(contour_forwards);
+
+                let abs = self.check_abs_index(abs_index)?;
+                if abs.entrance.is_none() {
+                    return Err(ContourError::AbsIsNoneButHasBoundVars {
+                        abs: abs_index,
+                        contour,
+                    });
+                }
+
+                Ok(())
+            }
+
+            fn mark_not_garbage(&mut self, node: BackingIndex) {
+                self.non_garbage.insert(node);
+            }
         }
+
+        fn _check_contours(ctx: &mut Context, node: BackingIndex) -> ContourResult<()> {
+            ctx.mark_not_garbage(node);
+            match &ctx.tree[node] {
+                Node::FreeVar(_) => Ok(()),
+                Node::BoundVar(_) => ctx.check_bound_var_for_loop(BoundVarIndex(node)),
+                Node::Abs(abstraction) => {
+                    ctx.check_contour(abstraction, AbsIndex(node))?;
+                    _check_contours(ctx, abstraction.body)
+                }
+                Node::App(application) => {
+                    _check_contours(ctx, application.func)?;
+                    _check_contours(ctx, application.arg)
+                }
+            }
+        }
+
+        let mut ctx = Context {
+            tree: self,
+            contours: HashMap::new(),
+            non_garbage: HashSet::new(),
+        };
+        _check_contours(&mut ctx, self.root)?;
+        Ok(())
     }
+}
+
+pub type ContourResult<T> = Result<T, ContourError>;
+
+#[derive(Debug)]
+pub enum ContourError {
+    ExpectedBoundVar {
+        index: BoundVarIndex,
+        actual: Node,
+    },
+    ExpectedAbs {
+        index: AbsIndex,
+        actual: Node,
+    },
+    ExpectedAbsOrBoundVar {
+        index: BackingIndex,
+        actual: Node,
+    },
+    AbsIsNoneButHasBoundVars {
+        abs: AbsIndex,
+        contour: Vec<BoundVarIndex>,
+    },
+    PrevEntranceMismatch {
+        abs: AbsIndex,
+        entrance_of_abs: BoundVarIndex,
+        entrance: BoundVarIndex,
+        prev_of_entrance: PrevIndex,
+    },
+    PrevNextMismatch {
+        node1: BoundVarIndex,
+        next_of_node1: BoundVarIndex,
+        prev_of_node2: PrevIndex,
+    },
+    LoopDetectedFromPrev {
+        node: BoundVarIndex,
+        prev: BoundVarIndex,
+    },
+    LoopDetectedFromNext {
+        node: BoundVarIndex,
+        next: BoundVarIndex,
+    },
 }
 
 impl FromStr for FlatTree {
@@ -216,73 +509,134 @@ impl From<Debruijn> for FlatTree {
 
 impl From<&Debruijn> for FlatTree {
     fn from(term: &Debruijn) -> Self {
-        fn compute_variable(abstraction_chain: &[BackingIndex], debruijn_index: usize) -> Variable {
-            if debruijn_index > abstraction_chain.len() {
-                let free_height = debruijn_index - abstraction_chain.len();
-                Variable::Free(NonZeroU32::new(free_height as u32).unwrap())
-            } else {
-                let chain_index = abstraction_chain.len() - debruijn_index;
-                Variable::Bound(abstraction_chain[chain_index])
+        struct Context<'a> {
+            tree: &'a mut FlatTree,
+            abs_chain: Vec<(AbsIndex, PrevIndex)>,
+        }
+
+        impl<'a> Context<'a> {
+            fn push(&mut self, abs: AbsIndex) {
+                let prev = PrevIndex::Abs(abs);
+                self.abs_chain.push((abs, prev))
+            }
+
+            fn pop(&mut self) {
+                self.abs_chain.pop();
+            }
+
+            fn alloc_var_and_fixup(&mut self, debruijn_index: usize) -> BackingIndex {
+                if debruijn_index > self.abs_chain.len() {
+                    let free_height = debruijn_index - self.abs_chain.len();
+                    let height = NonZeroU32::new(free_height as u32).unwrap();
+                    let var = FreeVariable { height };
+                    self.tree.alloc_free_var(var)
+                } else {
+                    let chain_index = self.abs_chain.len() - debruijn_index;
+                    let (_, prev) = &mut self.abs_chain[chain_index];
+
+                    let this_var = BoundVariable {
+                        prev: (*prev).into(),
+                        next: None,
+                    };
+                    let this_var_index = self.tree.alloc_bound_var(this_var);
+
+                    self.tree.fixup_next(*prev, this_var_index);
+
+                    *prev = PrevIndex::Var(this_var_index);
+
+                    this_var_index.0
+                }
             }
         }
 
-        fn flatten(
-            tree: &mut FlatTree,
-            abstraction_chain: &mut Vec<BackingIndex>,
-            term: &Debruijn,
-        ) -> BackingIndex {
-            let term = match term {
-                Debruijn::Index(index) => {
-                    let variable = compute_variable(abstraction_chain, *index);
-                    Node::var(variable)
-                }
+        fn flatten(ctx: &mut Context, term: &Debruijn) -> BackingIndex {
+            match term {
+                Debruijn::Index(debruijn_index) => ctx.alloc_var_and_fixup(*debruijn_index),
                 Debruijn::Abstraction { body } => {
-                    let usage = compute_usage(&body);
-
                     // Pre-allocation is needed here so that we can have a spot for the abstraction
                     // node to reside in. We will need this value to be allocated by the time we
                     // go to compute the binding for any variable nodes that depend on it.
-                    let backing_index = tree.alloc_none();
+                    let abs_index = ctx.tree.alloc_blank_abs();
 
-                    abstraction_chain.push(backing_index);
-                    let body = flatten(tree, abstraction_chain, body);
-                    abstraction_chain.pop();
+                    ctx.push(abs_index);
+                    let body = flatten(ctx, body);
+                    ctx.pop();
 
-                    tree[backing_index] = Node::abs(body, usage);
-                    return backing_index;
+                    let abs = ctx.tree.get_abs_mut(abs_index);
+                    abs.body = body;
+
+                    abs_index.0
                 }
                 Debruijn::Application { func, arg } => {
-                    let func = flatten(tree, abstraction_chain, func);
-                    let arg = flatten(tree, abstraction_chain, arg);
-                    Node::app(func, arg)
+                    let func = flatten(ctx, func);
+                    let arg = flatten(ctx, arg);
+                    ctx.tree.alloc_app(func, arg)
                 }
-            };
-            tree.alloc(term)
+            }
         }
 
         let mut tree = FlatTree::new();
-        let root_index = flatten(&mut tree, &mut vec![], term);
+        let mut ctx = Context {
+            tree: &mut tree,
+            abs_chain: vec![],
+        };
+        let root_index = flatten(&mut ctx, term);
         tree.root = root_index;
         tree
     }
+}
+
+pub fn compute_debruijn_index_free(abs_chain: &[AbsIndex], free_var: &FreeVariable) -> usize {
+    let debruijn_depth = abs_chain.len();
+    debruijn_depth + free_var.height.get() as usize
+}
+
+pub fn compute_debruijn_index_bound(
+    tree: &FlatTree,
+    chain: &[AbsIndex],
+    bound_var: &BoundVariable,
+) -> usize {
+    let abs = tree.get_binding_abs(bound_var);
+    let index = chain.iter().position(|abs_idx| *abs_idx == abs).unwrap();
+    let debruijn_depth = chain.len();
+    let debruijn_index = debruijn_depth - index;
+    debruijn_index
 }
 
 impl From<&FlatTree> for Debruijn {
     fn from(tree: &FlatTree) -> Self {
         struct Context<'a> {
             tree: &'a FlatTree,
-            abstraction_chain: Vec<BackingIndex>,
+            chain: Vec<AbsIndex>,
+        }
+        impl<'a> Context<'a> {
+            fn push(&mut self, abs: AbsIndex) {
+                self.chain.push(abs);
+            }
+
+            fn pop(&mut self) {
+                self.chain.pop();
+            }
+
+            fn compute_debruijn_index(&self, bound_var: &BoundVariable) -> usize {
+                compute_debruijn_index_bound(self.tree, &self.chain, bound_var)
+            }
         }
         fn _from(ctx: &mut Context, index: BackingIndex) -> Debruijn {
             match &ctx.tree[index] {
-                Node::Var(variable) => {
-                    let debruijn_index = compute_debruijn_index(&ctx.abstraction_chain, *variable);
+                Node::FreeVar(free_var) => {
+                    let index = compute_debruijn_index_free(&ctx.chain, free_var);
+                    Debruijn::Index(index)
+                }
+                Node::BoundVar(bound_var) => {
+                    let debruijn_index = ctx.compute_debruijn_index(bound_var);
                     Debruijn::Index(debruijn_index)
                 }
                 Node::Abs(abstraction) => {
-                    ctx.abstraction_chain.push(index);
+                    let abs = AbsIndex(index);
+                    ctx.push(abs);
                     let body = _from(ctx, abstraction.body);
-                    ctx.abstraction_chain.pop();
+                    ctx.pop();
                     Debruijn::Abstraction {
                         body: Box::new(body),
                     }
@@ -300,77 +654,10 @@ impl From<&FlatTree> for Debruijn {
 
         let mut ctx = Context {
             tree,
-            abstraction_chain: vec![],
+            chain: vec![],
         };
         _from(&mut ctx, tree.root)
     }
-}
-
-pub fn compute_debruijn_index(abstraction_chain: &[BackingIndex], variable: Variable) -> usize {
-    let debruijn_depth = abstraction_chain.len();
-    match variable {
-        Variable::Bound(backing_index) => {
-            let index = abstraction_chain
-                .iter()
-                .position(|abstraction_index| *abstraction_index == backing_index)
-                .unwrap();
-            debruijn_depth - index
-        }
-        Variable::Free(free_height) => debruijn_depth + free_height.get() as usize,
-    }
-}
-
-/// Computes the number of usages that the first free variable appears in the body of an abstraction.
-/// (that is to say, this function computes the number times the input variable appears in the
-/// `body` must be the body of the abstraction!
-/// ter the body of an abstraction
-/// eg: in λ 1 λ 2 λ 3, we have that 1, 2, and 3 all refer to the same variable, so the usage is 3
-fn compute_usage(body: &Debruijn) -> Usage {
-    fn _compute_usage(term: &Debruijn, depth: DebruijnDepth) -> Usage {
-        match term {
-            Debruijn::Index(index) => (*index == depth) as Usage,
-            Debruijn::Application { func, arg } => {
-                _compute_usage(&func, depth) + _compute_usage(&arg, depth)
-            }
-            Debruijn::Abstraction { body, .. } => _compute_usage(body, depth + 1),
-        }
-    }
-    // Because this is the body of an abstraction, we actually are starting at depth 1
-    // (so Index(1) refers to the input variable). If we had started at top-level (or had
-    // the abstraction itself as input rather than it's body), then this would be 0.
-    _compute_usage(body, 1)
-}
-
-/// Computes the number of usages that the first free variable appears in the body of an abstraction.
-/// (that is to say, this function computes the number times the input variable appears in the
-/// eg: in λ 1 λ 2 λ 3, we have that 1, 2, and 3 all refer to the same variable, so the usage is 3
-/// Note that ctx needs to be pointing at an abstraction!
-pub fn compute_usage_flat(tree: &FlatTree, abstraction_index: BackingIndex) -> Usage {
-    fn _compute_usage_flat(
-        tree: &FlatTree,
-        abstraction_index: BackingIndex,
-        index: BackingIndex,
-    ) -> Usage {
-        match &tree[index] {
-            Node::Var(variable) => {
-                if variable.is_bound_to(abstraction_index) {
-                    1
-                } else {
-                    0
-                }
-            }
-            Node::Abs(abstraction) => {
-                _compute_usage_flat(tree, abstraction_index, abstraction.body)
-            }
-            Node::App(application) => {
-                _compute_usage_flat(tree, abstraction_index, application.func)
-                    + _compute_usage_flat(tree, abstraction_index, application.arg)
-            }
-        }
-    }
-
-    let abstraction = tree.get_abs(abstraction_index);
-    _compute_usage_flat(tree, abstraction_index, abstraction.body)
 }
 
 // The depth relative to some term. This is used to determine if a variable is free within a term
@@ -386,6 +673,8 @@ pub type Usage = u32;
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BackingIndex(u32);
 impl BackingIndex {
+    pub const DUMMY: BackingIndex = BackingIndex(u32::MAX);
+
     pub fn new(index: usize) -> Self {
         Self(index as _)
     }
@@ -416,7 +705,7 @@ pub enum ParentEdge {
     /// The "edge" has no parent, and the child here is the root of the tree
     IntoRoot,
     /// The edge is an abstraction to body edge, and the BackingIndex here is the index for the abstraction
-    AbsToBody(BackingIndex),
+    AbsToBody(AbsIndex),
     /// The edge is an application to function edge, and the BackingIndex here is the index for the application
     AppToFunc(BackingIndex),
     /// The edge is an application to argument edge, and the BackingIndex here is the index for the application
@@ -426,9 +715,42 @@ impl ParentEdge {
     pub fn backing_index(&self) -> Option<BackingIndex> {
         match self {
             ParentEdge::IntoRoot => None,
-            ParentEdge::AbsToBody(abs) => Some(*abs),
+            ParentEdge::AbsToBody(abs) => Some(abs.0),
             ParentEdge::AppToFunc(app) => Some(*app),
             ParentEdge::AppToArg(app) => Some(*app),
+        }
+    }
+}
+
+// Helper type -- the BackingIndex within this struct must point to a Node::Var
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BoundVarIndex(pub BackingIndex);
+impl Display for BoundVarIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+// Helper type -- the BackingIndex within this struct must point to a Node::Abs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AbsIndex(pub BackingIndex);
+impl Display for AbsIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrevIndex {
+    Var(BoundVarIndex),
+    Abs(AbsIndex),
+}
+
+impl From<PrevIndex> for BackingIndex {
+    fn from(value: PrevIndex) -> Self {
+        match value {
+            PrevIndex::Var(var) => var.0,
+            PrevIndex::Abs(abs) => abs.0,
         }
     }
 }
@@ -437,12 +759,12 @@ impl ParentEdge {
 pub struct Abstraction {
     // The index of the body of the abstraction
     pub body: BackingIndex,
-    /// Number of times the input argument is used in the body
-    /// If this is zero, then when doing argument substitution, the algorithm can just
-    /// return the body and throw away the argument!
-    /// This value is constant over the lifetime of the Abstraction (this will become not true if
-    /// we do "partial" substition where not all usages of the input argument are substituted)
-    pub usage: Usage,
+    // The head of the "contour" linked list. Each variable node in the linked list binds to this
+    // abstraction node and links to their neighbors in a doubly-linked list. The node that is pointed
+    // to by this field additionally points back to this abstraction node (making this abstraction node
+    // as the head of the linked list)
+    // If this is none, then this abstraction has no usages.
+    pub entrance: Option<BoundVarIndex>,
 }
 
 #[derive(Clone, Copy)]
@@ -452,9 +774,7 @@ pub struct Application {
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Variable {
-    // The backing index of the abstraction that the Index node binds to
-    Bound(BackingIndex),
+pub struct FreeVariable {
     // The number of abstractions above the root that this Index node binds to
     // For example, in λ x, if x = 2, then we have a free bind of 1
     // If x = 3, then we have a free bind of 2, and so on.
@@ -462,46 +782,67 @@ pub enum Variable {
     // Note that this is NOT a debruijn index, it's a debruijn depth, as it always refers
     // to a constant number of abstractions above the root, no matter how deeply nested the
     // actual index is
-    Free(NonZeroU32),
+    height: NonZeroU32,
 }
 
-impl Display for Variable {
+impl Display for FreeVariable {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Variable::Bound(backing_index) => write!(f, "{backing_index}"),
-            Variable::Free(free_index) => write!(f, "free ({free_index})"),
+        write!(f, "free ({})", self.height)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct BoundVariable {
+    pub prev: BackingIndex,
+    pub next: Option<BoundVarIndex>,
+}
+
+impl Display for BoundVariable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let prev = self.prev;
+        match self.next {
+            Some(next) => write!(f, "prev: {prev} -> next: {next}"),
+            None => write!(f, "prev: {prev}"),
         }
     }
 }
 
-impl Variable {
-    fn is_bound_to(&self, abs_index: BackingIndex) -> bool {
-        *self == Variable::Bound(abs_index)
+impl BoundVariable {
+    fn prev(&self, tree: &FlatTree) -> PrevIndex {
+        match &tree[self.prev] {
+            Node::BoundVar(_) => PrevIndex::Var(BoundVarIndex(self.prev)),
+            Node::Abs(_) => PrevIndex::Abs(AbsIndex(self.prev)),
+            node => panic!(
+                "Expected bound variable or abstraction at {}, got {node:?}",
+                self.prev
+            ),
+        }
     }
 }
 
 #[derive(Clone)]
 pub enum Node {
     // This backing index points to the abstraction that this index binds to
-    Var(Variable),
+    FreeVar(FreeVariable),
+    BoundVar(BoundVariable),
     Abs(Abstraction),
     App(Application),
 }
 impl Node {
-    pub fn var(variable: Variable) -> Node {
-        Node::Var(variable)
-    }
-
-    pub fn abs(body: BackingIndex, usage: Usage) -> Node {
-        Node::Abs(Abstraction { body, usage })
-    }
-
-    pub fn app(func: BackingIndex, arg: BackingIndex) -> Node {
-        Node::App(Application { func, arg })
-    }
-
     fn dummy_abs() -> Node {
-        Node::abs(BackingIndex(u32::MAX), Usage::MAX)
+        let abs = Abstraction {
+            body: BackingIndex::DUMMY,
+            entrance: None,
+        };
+        Node::Abs(abs)
+    }
+
+    fn dummy_var() -> Node {
+        let var = BoundVariable {
+            prev: BackingIndex::DUMMY,
+            next: None,
+        };
+        Node::BoundVar(var)
     }
 }
 
@@ -520,8 +861,12 @@ impl From<Application> for Node {
 impl std::fmt::Debug for Node {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
-            Self::Var(var) => write!(f, "var: {}", var),
-            Self::Abs(abs) => write!(f, "abs: body -> {} (usage={})", abs.body, abs.usage),
+            Self::FreeVar(free_var) => write!(f, "var: {free_var}"),
+            Self::BoundVar(bound_var) => write!(f, "var: {bound_var}"),
+            Self::Abs(abs) => match abs.entrance {
+                Some(entrance) => write!(f, "abs: body -> {} (entrance -> {})", abs.body, entrance),
+                None => write!(f, "abs: body -> {}", abs.body),
+            },
             Self::App(app) => write!(f, "app: func -> {}, arg -> {}", app.func, app.arg),
         }
     }
@@ -536,16 +881,35 @@ pub struct RedexMut {
     // The index of the redex application node
     pub app_index: BackingIndex,
     // The left child of the redex's application node. This should be an abstraction node
-    pub func_index: BackingIndex,
+    pub func_index: AbsIndex,
     // The child of the left child of the redex application
     body_index: BackingIndex,
     // The right child of the redex's application node.
     pub arg_index: BackingIndex,
-    // The usage of the `body`. Provided for convinence
-    pub body_usage: Usage,
+}
+
+#[derive(Debug, PartialEq, Eq, Clone, Copy)]
+enum BodyUsage {
+    Zero,
+    One,
+    Many,
 }
 
 impl RedexMut {
+    fn body_usage(&self, tree: &FlatTree) -> BodyUsage {
+        let abs = tree.get_abs(self.func_index);
+        match abs.entrance {
+            Some(entrance) => {
+                let var = tree.get_bound_var(entrance);
+                match var.next {
+                    Some(_) => BodyUsage::Many,
+                    None => BodyUsage::One,
+                }
+            }
+            None => BodyUsage::Zero,
+        }
+    }
+
     pub fn is_redex(tree: &FlatTree, term: BackingIndex) -> bool {
         match tree[term] {
             Node::App(app) => match tree[app.func] {
@@ -565,14 +929,14 @@ impl RedexMut {
         match tree[app_index] {
             Node::App(app) => match &tree[app.func] {
                 Node::Abs(abs) => {
+                    let func_index = AbsIndex(app.func);
                     let redex = RedexMut {
                         debruijn_depth,
                         parent_to_app,
                         app_index,
-                        func_index: app.func,
+                        func_index,
                         body_index: abs.body,
                         arg_index: app.arg,
-                        body_usage: abs.usage,
                     };
                     Some(redex)
                 }
@@ -593,8 +957,10 @@ impl FlatTree {
 
         fn _get_redexes(ctx: &mut Context, index: BackingIndex, parent_to_current: ParentEdge) {
             match &ctx.tree[index] {
-                Node::Var(_) => (),
+                Node::FreeVar(_) => (),
+                Node::BoundVar(_) => (),
                 Node::Abs(abstraction) => {
+                    let index = AbsIndex(index);
                     ctx.debruijn_depth += 1;
                     _get_redexes(ctx, abstraction.body, ParentEdge::AbsToBody(index));
                     ctx.debruijn_depth -= 1;
@@ -623,7 +989,8 @@ impl FlatTree {
     pub fn is_bnf(&self) -> bool {
         fn _is_bnf(tree: &FlatTree, index: BackingIndex) -> bool {
             match &tree[index] {
-                Node::Var(_) => false,
+                Node::FreeVar(_) => false,
+                Node::BoundVar(_) => false,
                 Node::Abs(abstraction) => _is_bnf(tree, abstraction.body),
                 Node::App(application) => {
                     !RedexMut::is_redex(tree, index)
@@ -669,13 +1036,6 @@ pub fn beta_reduce(tree: &mut FlatTree, redex: &RedexMut) -> BackingIndex {
     // Note that we can actually avoid arg from becoming garbage if we re-use it's allocation (assuming
     // it is ever actually used in body). However this is not implemented at time of writing
 
-    // Update parent usages. This should happen before the tree is updated as we may end up with
-    // arg becoming garbage or modified (it would technically be fine to actually still do that,
-    // because the way arg is modified would not affect it's usage counts, but semantically this
-    // is easier to reason aboout, so we do it first.)
-
-    update_usages(tree, &redex);
-
     // This is the following tree fragment
     // --> new_body
     // (the parent to this edge is supposed to be abs, although this will change later in this methods)
@@ -703,84 +1063,6 @@ pub fn beta_reduce(tree: &mut FlatTree, redex: &RedexMut) -> BackingIndex {
     new_body
 }
 
-// Updates the usages of the parent chain.
-// MEMORY: Modifies in place, does not allocate or make garbage.
-fn update_usages(tree: &mut FlatTree, redex: &RedexMut) {
-    // If there are no parents to update (which happens if the redex is the root)
-    // or otherwise has no abstractions in it's parent path, then do nothing.
-    if redex.debruijn_depth == 0 {
-        return;
-    }
-
-    let index_to_usage_in_arg = get_usage_by_depth(tree, redex.arg_index);
-    for (abstraction_index, usage_in_arg) in index_to_usage_in_arg {
-        let abs = tree.get_abs(abstraction_index);
-
-        let usage_delta: i32 = (redex.body_usage as i32 - 1) * usage_in_arg as i32;
-        let usage = abs.usage.checked_add_signed(usage_delta).unwrap();
-
-        tree[abstraction_index] = Node::abs(abs.body, usage)
-    }
-}
-
-// Computes the usage of the parents in the parent chain in arg.
-// For example, Suppose we have λ λ <body> (λ 1 2 2 3 4).
-// The argument here is (λ 1 2 2 3 4)
-// In the argument, 1 is bound to the abstraction in the argument, while 2, 3, and 4 are all
-// free variables relative to arg. In particular, 2 and 3 are explicitly bound outside of the redex,
-// while 4 is unbound.
-// Let's write this as a classic term:
-// λa. λb. <body> (λc. c b b a <unbound>)
-// The parent chain for the redex is effectively [a, b]. In arg, the usage of a is one, and the
-// usage of b is two, so the returned usage vector is [1, 2]
-// Note that the unbound variable is not included (we could talk about it's usage, but since there's
-// no abstraction term to bind it to, we will ignore it), and we also ignore the arg-bound term of c
-// since that won't get updated.
-fn get_usage_by_depth(tree: &FlatTree, arg_index: BackingIndex) -> HashMap<BackingIndex, Usage> {
-    struct Context<'a> {
-        tree: &'a FlatTree,
-        usages: HashMap<BackingIndex, Usage>,
-        arg_subtree_abstractions: Vec<BackingIndex>,
-    }
-    fn _get_usage_by_depth(ctx: &mut Context, index: BackingIndex) {
-        match &ctx.tree[index] {
-            Node::Var(variable) => {
-                if let Variable::Bound(backing_index) = variable {
-                    // We don't update usages for abstractions inside the argument subtree
-                    // This is because those abstractions will be duplicated and therefore not have
-                    // their usages change at all. Hence we need to check that the backing index
-                    // is binding to some abstraction in the arg abstraction chain and not just any
-                    // abstraction
-                    let bound_within_arg = ctx.arg_subtree_abstractions.contains(&backing_index);
-                    if !bound_within_arg {
-                        let entry = ctx.usages.entry(*backing_index).or_insert(0);
-                        *entry += 1;
-                    }
-                }
-            }
-            Node::Abs(abstraction) => {
-                ctx.arg_subtree_abstractions.push(index);
-                _get_usage_by_depth(ctx, abstraction.body);
-                ctx.arg_subtree_abstractions.pop();
-            }
-            Node::App(application) => {
-                _get_usage_by_depth(ctx, application.func);
-                _get_usage_by_depth(ctx, application.arg);
-            }
-        }
-    }
-
-    let mut ctx = Context {
-        tree,
-        usages: HashMap::new(),
-        arg_subtree_abstractions: vec![],
-    };
-
-    _get_usage_by_depth(&mut ctx, arg_index);
-
-    ctx.usages
-}
-
 /// Repoint the term at `child` so that it is the child of `parent`. This does not affect the
 /// existing parent (which means that the child should either be an orphan--eg: has no existing parent
 /// or is root).
@@ -804,16 +1086,16 @@ fn repoint_node(tree: &mut FlatTree, parent: ParentEdge, child: BackingIndex) {
     }
     match parent {
         ParentEdge::AbsToBody(parent) => {
-            let abs = tree.get_abs(parent);
-            tree[parent] = Node::abs(child, abs.usage);
+            let abs = tree.get_abs_mut(parent);
+            abs.body = child;
         }
         ParentEdge::AppToFunc(parent) => {
-            let app = tree.get_app(parent);
-            tree[parent] = Node::app(child, app.arg);
+            let app = tree.get_app_mut(parent);
+            app.func = child;
         }
         ParentEdge::AppToArg(parent) => {
-            let app = tree.get_app(parent);
-            tree[parent] = Node::app(app.func, child);
+            let app = tree.get_app_mut(parent);
+            app.arg = child;
         }
         ParentEdge::IntoRoot => tree.root = child,
     }
@@ -845,7 +1127,11 @@ fn repoint_node(tree: &mut FlatTree, parent: ParentEdge, child: BackingIndex) {
 // - Potentially invalidates redex.arg (becomes garbage in the zero usage case, may be altered in non-zero usage case)
 // - Potentially alters redex.parent pointer
 fn substitute(tree: &mut FlatTree, redex: &RedexMut) -> BackingIndex {
-    if redex.body_usage == 0 {
+    if redex.body_usage(tree) == BodyUsage::Zero {
+        // THIS IS GOING TO BLOW UP IMMEDIATELY!!!!!!!!!!!!!!
+        // Anything which has zero usage requires that we walk the arg subtree to remove BoundVars
+        // from their contours. Which is hugely annoying
+
         // No need to do anything with the argument because it is never used in the body
         // (Since the argument is not used, the entire arg subtree is garbage now.)
         redex.body_index
@@ -859,37 +1145,34 @@ fn substitute(tree: &mut FlatTree, redex: &RedexMut) -> BackingIndex {
     }
 }
 
-type PairedAbsChain = Vec<(BackingIndex, BackingIndex)>;
 fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
     struct Context<'a> {
         tree: &'a mut FlatTree,
-        chain: PairedAbsChain,
-        substitution_i: u32,
-        func_index: BackingIndex,
+        func_index: AbsIndex,
         arg_index: BackingIndex,
-        body_usage: Usage,
     }
 
     fn _substitute(ctx: &mut Context, node_index: BackingIndex, parent_to_node: ParentEdge) {
         match &ctx.tree[node_index] {
-            Node::Var(variable) => {
-                let is_substituting = variable.is_bound_to(ctx.func_index);
+            Node::FreeVar(_) => (), // Free variable will never be substituted
+            Node::BoundVar(bound_var) => {
+                let is_substituting = ctx.tree.get_binding_abs(bound_var) == ctx.func_index;
                 if is_substituting {
                     // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
-                    let last_arg_allocation = ctx.substitution_i == ctx.body_usage - 1;
+                    let last_arg_allocation = bound_var.next.is_none();
                     let new_child = if last_arg_allocation {
                         ctx.arg_index
                     } else {
-                        clone_subtree(ctx.tree, &mut ctx.chain, ctx.arg_index)
+                        clone_subtree(ctx.tree, ctx.arg_index)
                     };
 
                     // Point parent to the newly created subtree
                     repoint_node(ctx.tree, parent_to_node, new_child);
-                    ctx.substitution_i += 1;
                 }
             }
             Node::Abs(abstraction) => {
-                _substitute(ctx, abstraction.body, ParentEdge::AbsToBody(node_index))
+                let abs = AbsIndex(node_index);
+                _substitute(ctx, abstraction.body, ParentEdge::AbsToBody(abs))
             }
             Node::App(application) => {
                 let func = application.func;
@@ -901,17 +1184,9 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
         }
     }
 
-    let chain = if redex.body_usage > 1 {
-        PairedAbsChain::with_capacity(64)
-    } else {
-        PairedAbsChain::with_capacity(0)
-    };
     let mut ctx = Context {
         tree,
-        chain,
-        substitution_i: 0,
         func_index: redex.func_index,
-        body_usage: redex.body_usage,
         arg_index: redex.arg_index,
     };
 
@@ -920,91 +1195,124 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
         redex.body_index,
         ParentEdge::AbsToBody(redex.func_index),
     );
+}
 
-    assert_eq!(
-        ctx.substitution_i, redex.body_usage,
-        "Expected substitution count ({}) to equal usage ({})!",
-        ctx.substitution_i, redex.body_usage
-    );
+struct CloneContext {
+    old_to_new: Vec<(AbsIndex, AbsIndex)>,
+}
+impl CloneContext {
+    fn new() -> CloneContext {
+        CloneContext {
+            old_to_new: Vec::with_capacity(64),
+        }
+    }
+
+    fn push(&mut self, old_abs: AbsIndex, new_abs: AbsIndex) {
+        self.old_to_new.push((old_abs, new_abs));
+    }
+
+    fn pop(&mut self) {
+        self.old_to_new.pop();
+    }
+
+    fn get_new_abs(&self, old_abs: AbsIndex) -> Option<AbsIndex> {
+        self.old_to_new.iter().find_map(|pair| {
+            if pair.0 == old_abs {
+                Some(pair.1)
+            } else {
+                None
+            }
+        })
+    }
 }
 
 /// Clone the given subtree.
 ///
 /// MEMORY: Allocates new subtree, returned value is the newly allocated tree
-fn clone_subtree(
-    tree: &mut FlatTree,
-    chain: &mut PairedAbsChain,
-    index: BackingIndex,
-) -> BackingIndex {
+fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
     fn _clone_subtree(
         tree: &mut FlatTree,
-        chain: &mut PairedAbsChain,
+        ctx: &mut CloneContext,
         old_node_index: BackingIndex,
     ) -> BackingIndex {
         match &tree[old_node_index] {
-            Node::Var(variable) => {
-                let variable = match variable {
-                    Variable::Free(_) => variable,
-                    Variable::Bound(backing_index) => &{
-                        let pair = chain
-                            .iter()
-                            .find(|(old_abs_idx, _)| *old_abs_idx == *backing_index);
+            Node::FreeVar(free_var) => {
+                let node = Node::FreeVar(*free_var);
+                tree.alloc(node)
+            }
+            Node::BoundVar(variable) => {
+                let old_abs = tree.get_binding_abs(variable);
 
-                        if let Some((_, new_abstraction_index)) = pair {
-                            // If this is some, then the variable is bound within the subtree being cloned
-                            // In this case, the variable needs to be updated to point to the abstraction
-                            // in the cloned subtree.
-                            Variable::Bound(*new_abstraction_index)
-                        } else {
-                            // Otherwise, the variable is bound within the tree but outside of the subtree bieng cloned.
-                            // In that case, there is no need to update the variable
-                            *variable
-                        }
-                    },
-                };
+                let new_var = tree.alloc_blank_var();
+                if let Some(new_abs) = ctx.get_new_abs(old_abs) {
+                    // If this is some, then the variable is bound within the subtree being cloned
+                    // In this case, the variable needs to point to the new abstraction's contour
+                    insert_into_contour(tree, new_abs, new_var);
+                } else {
+                    // Otherwise, the variable is bound within the tree but outside of the subtree bieng cloned.
+                    // In that case, it will be inserted into the existing contour
+                    insert_into_contour(tree, old_abs, new_var);
+                }
 
-                let index = Node::var(*variable);
-                tree.alloc(index)
+                new_var.0
             }
             Node::Abs(abstraction) => {
                 let old_body_index = abstraction.body;
-                let old_usage = abstraction.usage;
 
-                let new_abstraction_index = tree.alloc_none();
+                let new_abs_index = tree.alloc_blank_abs();
 
-                chain.push((old_node_index, new_abstraction_index));
+                let old_abs = AbsIndex(old_node_index);
+                ctx.push(old_abs, new_abs_index);
+                let new_body = _clone_subtree(tree, ctx, old_body_index);
+                ctx.pop();
 
-                let new_body = _clone_subtree(tree, chain, old_body_index);
+                let new_abs = tree.get_abs_mut(new_abs_index);
+                new_abs.body = new_body;
 
-                chain.pop();
-
-                let new_abstraction = Node::abs(new_body, old_usage);
-                tree[new_abstraction_index] = new_abstraction;
-
-                new_abstraction_index
+                new_abs_index.0
             }
             Node::App(application) => {
                 let old_func_index = application.func;
                 let old_arg_index = application.arg;
 
-                let new_func = _clone_subtree(tree, chain, old_func_index);
-                let new_arg = _clone_subtree(tree, chain, old_arg_index);
+                let new_func = _clone_subtree(tree, ctx, old_func_index);
+                let new_arg = _clone_subtree(tree, ctx, old_arg_index);
 
-                let app = Node::app(new_func, new_arg);
-
-                let app_index = tree.alloc(app);
+                let app_index = tree.alloc_app(new_func, new_arg);
                 app_index
             }
         }
     }
-    chain.clear();
-    _clone_subtree(tree, chain, index)
+    let mut ctx = CloneContext::new();
+    _clone_subtree(tree, &mut ctx, index)
+}
+
+fn insert_into_contour(tree: &mut FlatTree, abs_index: AbsIndex, var_index: BoundVarIndex) {
+    let abs = tree.get_abs_mut(abs_index);
+
+    match abs.entrance {
+        Some(entrance) => {
+            abs.entrance = Some(var_index);
+
+            let entrance_var = tree.get_bound_var_mut(entrance);
+            entrance_var.prev = var_index.0;
+
+            let var = tree.get_bound_var_mut(var_index);
+            var.next = Some(entrance);
+            var.prev = abs_index.0;
+        }
+        None => {
+            abs.entrance = Some(var_index);
+
+            let var = tree.get_bound_var_mut(var_index);
+            var.next = None;
+            var.prev = abs_index.0;
+        }
+    }
 }
 
 #[cfg(test)]
 mod test {
-    use std::str::FromStr;
-
     macro_rules! mario {
         () => {
             use super::*;
@@ -1013,14 +1321,6 @@ mod test {
 
     mario!();
     use crate::debruijn::Debruijn;
-
-    fn compile(term: &str) -> FlatTree {
-        FlatTree::from(&Debruijn::from_str(term).unwrap())
-    }
-
-    fn redex_at_root(tree: &FlatTree) -> RedexMut {
-        RedexMut::try_get(tree, 0, ParentEdge::IntoRoot, tree.root).unwrap()
-    }
 
     #[test]
     fn round_trip() {
@@ -1046,85 +1346,5 @@ mod test {
             original, roundtripped,
             "Expected {original}, got {roundtripped}",
         );
-    }
-
-    #[test]
-    fn usage_zero() {
-        let mut tree = compile("(λ 2) (λ 50)");
-
-        let redex = redex_at_root(&tree);
-        assert_eq!(redex.body_usage, 0);
-
-        beta_reduce(&mut tree, &redex);
-
-        let expected = compile("1");
-
-        let actual = Debruijn::from(&tree);
-        let expected = Debruijn::from(&expected);
-        assert_eq!(actual, expected, "Expected {expected}, got {actual}");
-    }
-
-    #[test]
-    fn usage_one() {
-        let mut tree = compile("(λ 1) (λ 50)");
-
-        let redex = redex_at_root(&tree);
-        assert_eq!(redex.body_usage, 1);
-
-        beta_reduce(&mut tree, &redex);
-
-        let expected = compile("λ 50");
-
-        let actual = Debruijn::from(&tree);
-        let expected = Debruijn::from(&expected);
-        assert_eq!(actual, expected, "Expected {expected}, got {actual}");
-    }
-
-    #[test]
-    fn body_is_leaf() {
-        let mut tree = compile("(λ 1) (1 2 3 4)");
-
-        let redex = redex_at_root(&tree);
-        assert_eq!(redex.body_usage, 1);
-
-        beta_reduce(&mut tree, &redex);
-
-        let expected = compile("1 2 3 4");
-
-        let actual = Debruijn::from(&tree);
-        let expected = Debruijn::from(&expected);
-        assert_eq!(actual, expected, "Expected {expected}, got {actual}");
-    }
-
-    #[test]
-    fn body_is_not_leaf() {
-        let mut tree = compile("(λ λ 2) (1 2 3 4)");
-
-        let redex = redex_at_root(&tree);
-        assert_eq!(redex.body_usage, 1);
-
-        beta_reduce(&mut tree, &redex);
-
-        let expected = compile("λ 2 3 4 5");
-
-        let actual = Debruijn::from(&tree);
-        let expected = Debruijn::from(&expected);
-        assert_eq!(actual, expected, "Expected {expected}, got {actual}");
-    }
-
-    #[test]
-    fn usage_many() {
-        let mut tree = compile("(λ 1 λ 2 λ 3 λ 4) 100");
-
-        let redex = redex_at_root(&tree);
-        assert_eq!(redex.body_usage, 4);
-
-        beta_reduce(&mut tree, &redex);
-
-        let expected = compile("100 λ 101 λ 102 λ 103");
-
-        let actual = Debruijn::from(&tree);
-        let expected = Debruijn::from(&expected);
-        assert_eq!(actual, expected, "Expected {expected}, got {actual}");
     }
 }

@@ -14,12 +14,9 @@ impl std::fmt::Debug for DebruijnWrapper {
 }
 
 #[track_caller]
-fn assert_usage(reducer: &Reducer) {
-    if let Err((failing_term, actual, expected)) = reducer.tree.check_usage() {
-        panic!(
-            "Expected usage to be {expected} but got {actual} for node {failing_term} in {}",
-            reducer.tree
-        );
+fn assert_contour(reducer: &Reducer) {
+    if let Err(error) = reducer.tree.check_contours() {
+        panic!("Error for tree {}: {error:?}", reducer.tree);
     }
 }
 
@@ -43,20 +40,20 @@ fuzz_target!(|debruijn: DebruijnWrapper| -> Corpus {
     // println!("TEST CASE = {debruijn}");
     let mut reducer = Reducer::new(&debruijn.0);
 
-    assert_usage(&reducer);
+    assert_contour(&reducer);
     reducer.reduce_one();
-    assert_usage(&reducer);
+    assert_contour(&reducer);
     reducer.reduce_one();
-    assert_usage(&reducer);
+    assert_contour(&reducer);
     reducer.reduce_one();
-    assert_usage(&reducer);
+    assert_contour(&reducer);
     reducer.reduce_one();
-    assert_usage(&reducer);
+    assert_contour(&reducer);
     reducer.reduce_one();
-    assert_usage(&reducer);
+    assert_contour(&reducer);
     reducer.reduce_one();
-    assert_usage(&reducer);
+    assert_contour(&reducer);
     reducer.reduce_one();
-    assert_usage(&reducer);
+    assert_contour(&reducer);
     Corpus::Keep
 });
