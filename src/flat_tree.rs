@@ -666,9 +666,6 @@ impl From<&FlatTree> for Debruijn {
 // Zero indicates that there are no abstractions between the two terms, one indicates one abstraction, etc
 pub type DebruijnDepth = usize;
 
-// The number of times a variable is used in an abstraction.
-pub type Usage = u32;
-
 /// A pointer to a given DebruijnNode within a FlatTree
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub struct BackingIndex(u32);
