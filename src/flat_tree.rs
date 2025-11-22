@@ -169,21 +169,6 @@ impl IndexMut<BackingIndex> for FlatTree {
     }
 }
 
-impl From<Vec<Node>> for FlatTree {
-    fn from(backing: Vec<Node>) -> Self {
-        FlatTree {
-            backing,
-            root: BackingIndex(0),
-        }
-    }
-}
-
-impl From<Debruijn> for FlatTree {
-    fn from(value: Debruijn) -> Self {
-        FlatTree::from(&value)
-    }
-}
-
 impl From<&Debruijn> for FlatTree {
     fn from(term: &Debruijn) -> Self {
         flatten(term)
