@@ -3,7 +3,7 @@
 
 use lambda_beavers::{
     debruijn::Debruijn,
-    flat_tree::FlatTree,
+    flat_tree::{self, FlatTree},
     reduce::{Reducer, ReductionResult},
     term::Classic,
     utils::strong_reduction_test::{parse_line, reduce_with_timeout},
@@ -64,7 +64,7 @@ fn assert_contour(test: &str, test_i: usize) {
     let mut reducer = Reducer::new(&starting);
     loop {
         let result = reducer.reduce_one();
-        if let Err(err) = reducer.tree.check_contours() {
+        if let Err(err) = flat_tree::check_contours(&reducer.tree) {
             println!("Failed test case #{test_i} - {test}: ({starting} -> {expected})");
             panic!(
                 "Contour check failed in {} (original: {}). Error: {err:?}",

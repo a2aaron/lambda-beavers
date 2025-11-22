@@ -80,114 +80,6 @@ impl FlatTree {
         }
     }
 
-    pub fn normalized(&self) -> FlatTree {
-        struct Context<'a> {
-            old_tree: &'a FlatTree,
-            new_tree: &'a mut FlatTree,
-            old_abs_chain: Vec<AbsIndex>,
-            new_abs_chain: Vec<AbsIndex>,
-            new_abs_contours: HashMap<AbsIndex, Vec<BoundVarIndex>>,
-        }
-
-        impl<'a> Context<'a> {
-            fn push(&mut self, old_abs_index: AbsIndex, new_abs_index: AbsIndex) {
-                self.old_abs_chain.push(old_abs_index);
-                self.new_abs_chain.push(new_abs_index);
-                self.new_abs_contours.insert(new_abs_index, vec![]);
-            }
-
-            fn pop(&mut self) {
-                self.old_abs_chain.pop();
-                self.new_abs_chain.pop();
-            }
-
-            fn old_to_new(&self, old_abs: AbsIndex) -> AbsIndex {
-                let debruijn_depth = self
-                    .old_abs_chain
-                    .iter()
-                    .position(|idx| *idx == old_abs)
-                    .unwrap();
-
-                let new_abs_index = self.new_abs_chain[debruijn_depth];
-                new_abs_index
-            }
-
-            fn add_new_var(&mut self, new_abs: AbsIndex, new_var: BoundVarIndex) {
-                self.new_abs_contours
-                    .get_mut(&new_abs)
-                    .unwrap()
-                    .push(new_var)
-            }
-
-            fn get_prev_for_contour(&self, new_abs_idx: AbsIndex) -> PrevIndex {
-                match self.new_abs_contours.get(&new_abs_idx) {
-                    Some(contour) => match contour.last() {
-                        Some(last_var) => PrevIndex::Var(*last_var),
-                        None => PrevIndex::Abs(new_abs_idx),
-                    },
-                    None => unreachable!(),
-                }
-            }
-        }
-
-        fn _normalize(ctx: &mut Context, old_node_index: BackingIndex) -> BackingIndex {
-            match &ctx.old_tree[old_node_index] {
-                Node::FreeVar(free) => ctx.new_tree.alloc_free_var(*free),
-                Node::BoundVar(old_var) => {
-                    let old_abs_idx = ctx.old_tree.get_binding_abs(old_var);
-                    let new_abs_idx = ctx.old_to_new(old_abs_idx);
-                    let new_prev = ctx.get_prev_for_contour(new_abs_idx);
-
-                    let new_var_index = ctx.new_tree.alloc_blank_var();
-                    ctx.add_new_var(new_abs_idx, new_var_index);
-                    ctx.new_tree.fixup_next(new_prev, new_var_index);
-
-                    let new_var = ctx.new_tree.get_bound_var_mut(new_var_index);
-                    new_var.prev = new_prev.into();
-
-                    new_var_index.0
-                }
-                Node::Abs(abstraction) => {
-                    let old_abs_index = AbsIndex(old_node_index);
-                    let old_body_index = abstraction.body;
-
-                    let new_abs_index = ctx.new_tree.alloc_blank_abs();
-
-                    ctx.push(old_abs_index, new_abs_index);
-                    let new_body = _normalize(ctx, old_body_index);
-                    ctx.pop();
-
-                    let abs = ctx.new_tree.get_abs_mut(new_abs_index);
-                    abs.body = new_body;
-
-                    new_abs_index.0
-                }
-                Node::App(application) => {
-                    let old_func_index = application.func;
-                    let old_arg_index = application.arg;
-
-                    let new_func = _normalize(ctx, old_func_index);
-                    let new_arg = _normalize(ctx, old_arg_index);
-                    ctx.new_tree.alloc_app(new_func, new_arg)
-                }
-            }
-        }
-
-        let mut new_tree = FlatTree::new();
-
-        let mut ctx = Context {
-            old_tree: self,
-            new_tree: &mut new_tree,
-            old_abs_chain: vec![],
-            new_abs_chain: vec![],
-            new_abs_contours: HashMap::new(),
-        };
-
-        let root_node = _normalize(&mut ctx, self.root);
-        new_tree.root = root_node;
-        new_tree
-    }
-
     pub fn get_abs(&self, abs: AbsIndex) -> &Abstraction {
         match &self[abs.0] {
             Node::Abs(abs) => abs,
@@ -241,228 +133,6 @@ impl FlatTree {
             }
         }
     }
-
-    pub fn check_contours(&self) -> ContourResult<()> {
-        struct Context<'a> {
-            tree: &'a FlatTree,
-            contours: HashMap<AbsIndex, Vec<BoundVarIndex>>,
-            non_garbage: HashSet<BackingIndex>,
-        }
-
-        impl<'a> Context<'a> {
-            fn check_prev_index(&self, prev: BackingIndex) -> ContourResult<PrevIndex> {
-                match &self.tree[prev] {
-                    Node::BoundVar(_) => Ok(PrevIndex::Var(BoundVarIndex(prev))),
-                    Node::Abs(_) => Ok(PrevIndex::Abs(AbsIndex(prev))),
-                    node => Err(ContourError::ExpectedAbsOrBoundVar {
-                        index: prev,
-                        actual: node.clone(),
-                    }),
-                }
-            }
-
-            fn check_abs_index(&self, index: AbsIndex) -> ContourResult<&'a Abstraction> {
-                match &self.tree[index.0] {
-                    Node::Abs(abstraction) => ContourResult::Ok(abstraction),
-                    node => ContourResult::Err(ContourError::ExpectedAbs {
-                        index: index,
-                        actual: node.clone(),
-                    }),
-                }
-            }
-
-            fn check_bound_var_index(
-                &self,
-                index: BoundVarIndex,
-            ) -> ContourResult<&'a BoundVariable> {
-                match &self.tree[index.0] {
-                    Node::BoundVar(bound_variable) => ContourResult::Ok(bound_variable),
-                    node => ContourResult::Err(ContourError::ExpectedBoundVar {
-                        index,
-                        actual: node.clone(),
-                    }),
-                }
-            }
-
-            fn check_contour(&mut self, abs: &Abstraction, abs_idx: AbsIndex) -> ContourResult<()> {
-                let mut contour = vec![];
-
-                if let Some(entrance) = abs.entrance {
-                    let node1 = self.check_bound_var_index(entrance)?;
-                    let prev_of_node1 = self.check_prev_index(node1.prev)?;
-                    if prev_of_node1 != PrevIndex::Abs(abs_idx) {
-                        return Err(ContourError::PrevEntranceMismatch {
-                            abs: abs_idx,
-                            entrance_of_abs: entrance,
-                            entrance,
-                            prev_of_entrance: node1.prev(self.tree),
-                        });
-                    }
-
-                    let mut node1_idx = entrance;
-                    // We expect that each node in the contour has next and prev nodes that properly
-                    // match up.
-                    loop {
-                        contour.push(node1_idx);
-                        let node1 = self.check_bound_var_index(node1_idx)?;
-                        if let Some(next_of_node1) = node1.next {
-                            let node2 = self.check_bound_var_index(next_of_node1)?;
-
-                            let prev_of_node2 = self.check_prev_index(node2.prev)?;
-                            if prev_of_node2 != PrevIndex::Var(node1_idx) {
-                                return Err(ContourError::PrevNextMismatch {
-                                    node1: node1_idx,
-                                    next_of_node1,
-                                    prev_of_node2,
-                                });
-                            }
-
-                            node1_idx = next_of_node1;
-                        } else {
-                            break;
-                        }
-                    }
-                } else {
-                    // No contour--so nothing to check
-                    // (However, we do later check that bound variables do not lead back to this abstrction)
-                }
-
-                let expect_none = self.contours.insert(abs_idx, contour);
-                assert!(expect_none.is_none());
-                Ok(())
-            }
-
-            fn check_bound_var_for_loop(&self, bound_var: BoundVarIndex) -> ContourResult<()> {
-                // We expect this to be a non-looping linked list
-
-                // Check backwards
-                let mut contour_backwards = vec![];
-                let mut this_var = bound_var;
-                let abs_index = loop {
-                    let bound_var = self.check_bound_var_index(this_var)?;
-                    let prev = self.check_prev_index(bound_var.prev)?;
-                    match prev {
-                        PrevIndex::Var(prev) => {
-                            if contour_backwards.contains(&prev) {
-                                return Err(ContourError::LoopDetectedFromPrev {
-                                    node: this_var,
-                                    prev,
-                                });
-                            }
-                            contour_backwards.push(prev);
-                            this_var = prev;
-                        }
-                        PrevIndex::Abs(abs_index) => break abs_index,
-                    }
-                };
-
-                let mut contour_forwards = vec![];
-                let mut this_var = bound_var;
-                loop {
-                    let bound_var = self.check_bound_var_index(this_var)?;
-                    match bound_var.next {
-                        Some(next) => {
-                            if contour_forwards.contains(&next) {
-                                return Err(ContourError::LoopDetectedFromNext {
-                                    node: this_var,
-                                    next,
-                                });
-                            }
-                            contour_forwards.push(next);
-                            this_var = next;
-                        }
-                        None => break,
-                    }
-                }
-
-                let mut contour = vec![];
-
-                contour_backwards.reverse();
-                contour.extend(contour_backwards);
-                contour.push(bound_var);
-                contour.extend(contour_forwards);
-
-                let abs = self.check_abs_index(abs_index)?;
-                if abs.entrance.is_none() {
-                    return Err(ContourError::AbsIsNoneButHasBoundVars {
-                        abs: abs_index,
-                        contour,
-                    });
-                }
-
-                Ok(())
-            }
-
-            fn mark_not_garbage(&mut self, node: BackingIndex) {
-                self.non_garbage.insert(node);
-            }
-        }
-
-        fn _check_contours(ctx: &mut Context, node: BackingIndex) -> ContourResult<()> {
-            ctx.mark_not_garbage(node);
-            match &ctx.tree[node] {
-                Node::FreeVar(_) => Ok(()),
-                Node::BoundVar(_) => ctx.check_bound_var_for_loop(BoundVarIndex(node)),
-                Node::Abs(abstraction) => {
-                    ctx.check_contour(abstraction, AbsIndex(node))?;
-                    _check_contours(ctx, abstraction.body)
-                }
-                Node::App(application) => {
-                    _check_contours(ctx, application.func)?;
-                    _check_contours(ctx, application.arg)
-                }
-            }
-        }
-
-        let mut ctx = Context {
-            tree: self,
-            contours: HashMap::new(),
-            non_garbage: HashSet::new(),
-        };
-        _check_contours(&mut ctx, self.root)?;
-        Ok(())
-    }
-}
-
-pub type ContourResult<T> = Result<T, ContourError>;
-
-#[derive(Debug)]
-pub enum ContourError {
-    ExpectedBoundVar {
-        index: BoundVarIndex,
-        actual: Node,
-    },
-    ExpectedAbs {
-        index: AbsIndex,
-        actual: Node,
-    },
-    ExpectedAbsOrBoundVar {
-        index: BackingIndex,
-        actual: Node,
-    },
-    AbsIsNoneButHasBoundVars {
-        abs: AbsIndex,
-        contour: Vec<BoundVarIndex>,
-    },
-    PrevEntranceMismatch {
-        abs: AbsIndex,
-        entrance_of_abs: BoundVarIndex,
-        entrance: BoundVarIndex,
-        prev_of_entrance: PrevIndex,
-    },
-    PrevNextMismatch {
-        node1: BoundVarIndex,
-        next_of_node1: BoundVarIndex,
-        prev_of_node2: PrevIndex,
-    },
-    LoopDetectedFromPrev {
-        node: BoundVarIndex,
-        prev: BoundVarIndex,
-    },
-    LoopDetectedFromNext {
-        node: BoundVarIndex,
-        next: BoundVarIndex,
-    },
 }
 
 impl FromStr for FlatTree {
@@ -516,81 +186,481 @@ impl From<Debruijn> for FlatTree {
 
 impl From<&Debruijn> for FlatTree {
     fn from(term: &Debruijn) -> Self {
-        struct Context<'a> {
-            tree: &'a mut FlatTree,
-            abs_chain: Vec<(AbsIndex, PrevIndex)>,
-        }
-
-        impl<'a> Context<'a> {
-            fn push(&mut self, abs: AbsIndex) {
-                let prev = PrevIndex::Abs(abs);
-                self.abs_chain.push((abs, prev))
-            }
-
-            fn pop(&mut self) {
-                self.abs_chain.pop();
-            }
-
-            fn alloc_var_and_fixup(&mut self, debruijn_index: usize) -> BackingIndex {
-                if debruijn_index > self.abs_chain.len() {
-                    let free_height = debruijn_index - self.abs_chain.len();
-                    let height = NonZeroU32::new(free_height as u32).unwrap();
-                    let var = FreeVariable { height };
-                    self.tree.alloc_free_var(var)
-                } else {
-                    let chain_index = self.abs_chain.len() - debruijn_index;
-                    let (_, prev) = &mut self.abs_chain[chain_index];
-
-                    let this_var = BoundVariable {
-                        prev: (*prev).into(),
-                        next: None,
-                    };
-                    let this_var_index = self.tree.alloc_bound_var(this_var);
-
-                    self.tree.fixup_next(*prev, this_var_index);
-
-                    *prev = PrevIndex::Var(this_var_index);
-
-                    this_var_index.0
-                }
-            }
-        }
-
-        fn flatten(ctx: &mut Context, term: &Debruijn) -> BackingIndex {
-            match term {
-                Debruijn::Index(debruijn_index) => ctx.alloc_var_and_fixup(*debruijn_index),
-                Debruijn::Abstraction { body } => {
-                    // Pre-allocation is needed here so that we can have a spot for the abstraction
-                    // node to reside in. We will need this value to be allocated by the time we
-                    // go to compute the binding for any variable nodes that depend on it.
-                    let abs_index = ctx.tree.alloc_blank_abs();
-
-                    ctx.push(abs_index);
-                    let body = flatten(ctx, body);
-                    ctx.pop();
-
-                    let abs = ctx.tree.get_abs_mut(abs_index);
-                    abs.body = body;
-
-                    abs_index.0
-                }
-                Debruijn::Application { func, arg } => {
-                    let func = flatten(ctx, func);
-                    let arg = flatten(ctx, arg);
-                    ctx.tree.alloc_app(func, arg)
-                }
-            }
-        }
-
-        let mut tree = FlatTree::new();
-        let mut ctx = Context {
-            tree: &mut tree,
-            abs_chain: vec![],
-        };
-        let root_index = flatten(&mut ctx, term);
-        tree.root = root_index;
-        tree
+        flatten(term)
     }
+}
+
+impl From<&FlatTree> for Debruijn {
+    fn from(tree: &FlatTree) -> Self {
+        unflatten(tree)
+    }
+}
+
+// #############
+// # NORMALIZE #
+// #############
+pub fn normalize(tree: &FlatTree) -> FlatTree {
+    struct Context<'a> {
+        old_tree: &'a FlatTree,
+        new_tree: &'a mut FlatTree,
+        old_abs_chain: Vec<AbsIndex>,
+        new_abs_chain: Vec<AbsIndex>,
+        new_abs_contours: HashMap<AbsIndex, Vec<BoundVarIndex>>,
+    }
+
+    impl<'a> Context<'a> {
+        fn push(&mut self, old_abs_index: AbsIndex, new_abs_index: AbsIndex) {
+            self.old_abs_chain.push(old_abs_index);
+            self.new_abs_chain.push(new_abs_index);
+            self.new_abs_contours.insert(new_abs_index, vec![]);
+        }
+
+        fn pop(&mut self) {
+            self.old_abs_chain.pop();
+            self.new_abs_chain.pop();
+        }
+
+        fn old_to_new(&self, old_abs: AbsIndex) -> AbsIndex {
+            let debruijn_depth = self
+                .old_abs_chain
+                .iter()
+                .position(|idx| *idx == old_abs)
+                .unwrap();
+
+            let new_abs_index = self.new_abs_chain[debruijn_depth];
+            new_abs_index
+        }
+
+        fn add_new_var(&mut self, new_abs: AbsIndex, new_var: BoundVarIndex) {
+            self.new_abs_contours
+                .get_mut(&new_abs)
+                .unwrap()
+                .push(new_var)
+        }
+
+        fn get_prev_for_contour(&self, new_abs_idx: AbsIndex) -> PrevIndex {
+            match self.new_abs_contours.get(&new_abs_idx) {
+                Some(contour) => match contour.last() {
+                    Some(last_var) => PrevIndex::Var(*last_var),
+                    None => PrevIndex::Abs(new_abs_idx),
+                },
+                None => unreachable!(),
+            }
+        }
+    }
+
+    fn _normalize(ctx: &mut Context, old_node_index: BackingIndex) -> BackingIndex {
+        match &ctx.old_tree[old_node_index] {
+            Node::FreeVar(free) => ctx.new_tree.alloc_free_var(*free),
+            Node::BoundVar(old_var) => {
+                let old_abs_idx = ctx.old_tree.get_binding_abs(old_var);
+                let new_abs_idx = ctx.old_to_new(old_abs_idx);
+                let new_prev = ctx.get_prev_for_contour(new_abs_idx);
+
+                let new_var_index = ctx.new_tree.alloc_blank_var();
+                ctx.add_new_var(new_abs_idx, new_var_index);
+                ctx.new_tree.fixup_next(new_prev, new_var_index);
+
+                let new_var = ctx.new_tree.get_bound_var_mut(new_var_index);
+                new_var.prev = new_prev.into();
+
+                new_var_index.0
+            }
+            Node::Abs(abstraction) => {
+                let old_abs_index = AbsIndex(old_node_index);
+                let old_body_index = abstraction.body;
+
+                let new_abs_index = ctx.new_tree.alloc_blank_abs();
+
+                ctx.push(old_abs_index, new_abs_index);
+                let new_body = _normalize(ctx, old_body_index);
+                ctx.pop();
+
+                let abs = ctx.new_tree.get_abs_mut(new_abs_index);
+                abs.body = new_body;
+
+                new_abs_index.0
+            }
+            Node::App(application) => {
+                let old_func_index = application.func;
+                let old_arg_index = application.arg;
+
+                let new_func = _normalize(ctx, old_func_index);
+                let new_arg = _normalize(ctx, old_arg_index);
+                ctx.new_tree.alloc_app(new_func, new_arg)
+            }
+        }
+    }
+
+    let mut new_tree = FlatTree::new();
+
+    let mut ctx = Context {
+        old_tree: tree,
+        new_tree: &mut new_tree,
+        old_abs_chain: vec![],
+        new_abs_chain: vec![],
+        new_abs_contours: HashMap::new(),
+    };
+
+    let root_node = _normalize(&mut ctx, tree.root);
+    new_tree.root = root_node;
+    new_tree
+}
+
+pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
+    struct Context<'a> {
+        tree: &'a FlatTree,
+        contours: HashMap<AbsIndex, Vec<BoundVarIndex>>,
+        non_garbage: HashSet<BackingIndex>,
+    }
+
+    impl<'a> Context<'a> {
+        fn check_prev_index(&self, prev: BackingIndex) -> ContourResult<PrevIndex> {
+            match &self.tree[prev] {
+                Node::BoundVar(_) => Ok(PrevIndex::Var(BoundVarIndex(prev))),
+                Node::Abs(_) => Ok(PrevIndex::Abs(AbsIndex(prev))),
+                node => Err(ContourError::ExpectedAbsOrBoundVar {
+                    index: prev,
+                    actual: node.clone(),
+                }),
+            }
+        }
+
+        fn check_abs_index(&self, index: AbsIndex) -> ContourResult<&'a Abstraction> {
+            match &self.tree[index.0] {
+                Node::Abs(abstraction) => ContourResult::Ok(abstraction),
+                node => ContourResult::Err(ContourError::ExpectedAbs {
+                    index: index,
+                    actual: node.clone(),
+                }),
+            }
+        }
+
+        fn check_bound_var_index(&self, index: BoundVarIndex) -> ContourResult<&'a BoundVariable> {
+            match &self.tree[index.0] {
+                Node::BoundVar(bound_variable) => ContourResult::Ok(bound_variable),
+                node => ContourResult::Err(ContourError::ExpectedBoundVar {
+                    index,
+                    actual: node.clone(),
+                }),
+            }
+        }
+
+        fn check_contour(&mut self, abs: &Abstraction, abs_idx: AbsIndex) -> ContourResult<()> {
+            let mut contour = vec![];
+
+            if let Some(entrance) = abs.entrance {
+                let node1 = self.check_bound_var_index(entrance)?;
+                let prev_of_node1 = self.check_prev_index(node1.prev)?;
+                if prev_of_node1 != PrevIndex::Abs(abs_idx) {
+                    return Err(ContourError::PrevEntranceMismatch {
+                        abs: abs_idx,
+                        entrance_of_abs: entrance,
+                        entrance,
+                        prev_of_entrance: node1.prev(self.tree),
+                    });
+                }
+
+                let mut node1_idx = entrance;
+                // We expect that each node in the contour has next and prev nodes that properly
+                // match up.
+                loop {
+                    contour.push(node1_idx);
+                    let node1 = self.check_bound_var_index(node1_idx)?;
+                    if let Some(next_of_node1) = node1.next {
+                        let node2 = self.check_bound_var_index(next_of_node1)?;
+
+                        let prev_of_node2 = self.check_prev_index(node2.prev)?;
+                        if prev_of_node2 != PrevIndex::Var(node1_idx) {
+                            return Err(ContourError::PrevNextMismatch {
+                                node1: node1_idx,
+                                next_of_node1,
+                                prev_of_node2,
+                            });
+                        }
+
+                        node1_idx = next_of_node1;
+                    } else {
+                        break;
+                    }
+                }
+            } else {
+                // No contour--so nothing to check
+                // (However, we do later check that bound variables do not lead back to this abstrction)
+            }
+
+            let expect_none = self.contours.insert(abs_idx, contour);
+            assert!(expect_none.is_none());
+            Ok(())
+        }
+
+        fn check_bound_var_for_loop(&self, bound_var: BoundVarIndex) -> ContourResult<()> {
+            // We expect this to be a non-looping linked list
+
+            // Check backwards
+            let mut contour_backwards = vec![];
+            let mut this_var = bound_var;
+            let abs_index = loop {
+                let bound_var = self.check_bound_var_index(this_var)?;
+                let prev = self.check_prev_index(bound_var.prev)?;
+                match prev {
+                    PrevIndex::Var(prev) => {
+                        if contour_backwards.contains(&prev) {
+                            return Err(ContourError::LoopDetectedFromPrev {
+                                node: this_var,
+                                prev,
+                            });
+                        }
+                        contour_backwards.push(prev);
+                        this_var = prev;
+                    }
+                    PrevIndex::Abs(abs_index) => break abs_index,
+                }
+            };
+
+            let mut contour_forwards = vec![];
+            let mut this_var = bound_var;
+            loop {
+                let bound_var = self.check_bound_var_index(this_var)?;
+                match bound_var.next {
+                    Some(next) => {
+                        if contour_forwards.contains(&next) {
+                            return Err(ContourError::LoopDetectedFromNext {
+                                node: this_var,
+                                next,
+                            });
+                        }
+                        contour_forwards.push(next);
+                        this_var = next;
+                    }
+                    None => break,
+                }
+            }
+
+            let mut contour = vec![];
+
+            contour_backwards.reverse();
+            contour.extend(contour_backwards);
+            contour.push(bound_var);
+            contour.extend(contour_forwards);
+
+            let abs = self.check_abs_index(abs_index)?;
+            if abs.entrance.is_none() {
+                return Err(ContourError::AbsIsNoneButHasBoundVars {
+                    abs: abs_index,
+                    contour,
+                });
+            }
+
+            Ok(())
+        }
+
+        fn mark_not_garbage(&mut self, node: BackingIndex) {
+            self.non_garbage.insert(node);
+        }
+    }
+
+    fn _check_contours(ctx: &mut Context, node: BackingIndex) -> ContourResult<()> {
+        ctx.mark_not_garbage(node);
+        match &ctx.tree[node] {
+            Node::FreeVar(_) => Ok(()),
+            Node::BoundVar(_) => ctx.check_bound_var_for_loop(BoundVarIndex(node)),
+            Node::Abs(abstraction) => {
+                ctx.check_contour(abstraction, AbsIndex(node))?;
+                _check_contours(ctx, abstraction.body)
+            }
+            Node::App(application) => {
+                _check_contours(ctx, application.func)?;
+                _check_contours(ctx, application.arg)
+            }
+        }
+    }
+
+    let mut ctx = Context {
+        tree,
+        contours: HashMap::new(),
+        non_garbage: HashSet::new(),
+    };
+    _check_contours(&mut ctx, tree.root)?;
+    Ok(())
+}
+pub type ContourResult<T> = Result<T, ContourError>;
+
+#[derive(Debug)]
+pub enum ContourError {
+    ExpectedBoundVar {
+        index: BoundVarIndex,
+        actual: Node,
+    },
+    ExpectedAbs {
+        index: AbsIndex,
+        actual: Node,
+    },
+    ExpectedAbsOrBoundVar {
+        index: BackingIndex,
+        actual: Node,
+    },
+    AbsIsNoneButHasBoundVars {
+        abs: AbsIndex,
+        contour: Vec<BoundVarIndex>,
+    },
+    PrevEntranceMismatch {
+        abs: AbsIndex,
+        entrance_of_abs: BoundVarIndex,
+        entrance: BoundVarIndex,
+        prev_of_entrance: PrevIndex,
+    },
+    PrevNextMismatch {
+        node1: BoundVarIndex,
+        next_of_node1: BoundVarIndex,
+        prev_of_node2: PrevIndex,
+    },
+    LoopDetectedFromPrev {
+        node: BoundVarIndex,
+        prev: BoundVarIndex,
+    },
+    LoopDetectedFromNext {
+        node: BoundVarIndex,
+        next: BoundVarIndex,
+    },
+}
+
+// ###########
+// # FLATTEN #
+// ###########
+pub fn flatten(debruijn: &Debruijn) -> FlatTree {
+    struct Context<'a> {
+        tree: &'a mut FlatTree,
+        abs_chain: Vec<(AbsIndex, PrevIndex)>,
+    }
+
+    impl<'a> Context<'a> {
+        fn push(&mut self, abs: AbsIndex) {
+            let prev = PrevIndex::Abs(abs);
+            self.abs_chain.push((abs, prev))
+        }
+
+        fn pop(&mut self) {
+            self.abs_chain.pop();
+        }
+
+        fn alloc_var_and_fixup(&mut self, debruijn_index: usize) -> BackingIndex {
+            if debruijn_index > self.abs_chain.len() {
+                let free_height = debruijn_index - self.abs_chain.len();
+                let height = NonZeroU32::new(free_height as u32).unwrap();
+                let var = FreeVariable { height };
+                self.tree.alloc_free_var(var)
+            } else {
+                let chain_index = self.abs_chain.len() - debruijn_index;
+                let (_, prev) = &mut self.abs_chain[chain_index];
+
+                let this_var = BoundVariable {
+                    prev: (*prev).into(),
+                    next: None,
+                };
+                let this_var_index = self.tree.alloc_bound_var(this_var);
+
+                self.tree.fixup_next(*prev, this_var_index);
+
+                *prev = PrevIndex::Var(this_var_index);
+
+                this_var_index.0
+            }
+        }
+    }
+
+    fn _flatten(ctx: &mut Context, term: &Debruijn) -> BackingIndex {
+        match term {
+            Debruijn::Index(debruijn_index) => ctx.alloc_var_and_fixup(*debruijn_index),
+            Debruijn::Abstraction { body } => {
+                // Pre-allocation is needed here so that we can have a spot for the abstraction
+                // node to reside in. We will need this value to be allocated by the time we
+                // go to compute the binding for any variable nodes that depend on it.
+                let abs_index = ctx.tree.alloc_blank_abs();
+
+                ctx.push(abs_index);
+                let body = _flatten(ctx, body);
+                ctx.pop();
+
+                let abs = ctx.tree.get_abs_mut(abs_index);
+                abs.body = body;
+
+                abs_index.0
+            }
+            Debruijn::Application { func, arg } => {
+                let func = _flatten(ctx, func);
+                let arg = _flatten(ctx, arg);
+                ctx.tree.alloc_app(func, arg)
+            }
+        }
+    }
+
+    let mut tree = FlatTree::new();
+    let mut ctx = Context {
+        tree: &mut tree,
+        abs_chain: vec![],
+    };
+    let root_index = _flatten(&mut ctx, debruijn);
+    tree.root = root_index;
+    tree
+}
+
+// #############
+// # UNFLATTEN #
+// #############
+fn unflatten(tree: &FlatTree) -> Debruijn {
+    struct Context<'a> {
+        tree: &'a FlatTree,
+        chain: Vec<AbsIndex>,
+    }
+    impl<'a> Context<'a> {
+        fn push(&mut self, abs: AbsIndex) {
+            self.chain.push(abs);
+        }
+
+        fn pop(&mut self) {
+            self.chain.pop();
+        }
+
+        fn compute_debruijn_index(&self, bound_var: &BoundVariable) -> usize {
+            compute_debruijn_index_bound(self.tree, &self.chain, bound_var)
+        }
+    }
+    fn _from(ctx: &mut Context, index: BackingIndex) -> Debruijn {
+        match &ctx.tree[index] {
+            Node::FreeVar(free_var) => {
+                let index = compute_debruijn_index_free(&ctx.chain, free_var);
+                Debruijn::Index(index)
+            }
+            Node::BoundVar(bound_var) => {
+                let debruijn_index = ctx.compute_debruijn_index(bound_var);
+                Debruijn::Index(debruijn_index)
+            }
+            Node::Abs(abstraction) => {
+                let abs = AbsIndex(index);
+                ctx.push(abs);
+                let body = _from(ctx, abstraction.body);
+                ctx.pop();
+                Debruijn::Abstraction {
+                    body: Box::new(body),
+                }
+            }
+            Node::App(application) => {
+                let func = _from(ctx, application.func);
+                let arg: Debruijn = _from(ctx, application.arg);
+                Debruijn::Application {
+                    func: Box::new(func),
+                    arg: Box::new(arg),
+                }
+            }
+        }
+    }
+
+    let mut ctx = Context {
+        tree,
+        chain: vec![],
+    };
+    _from(&mut ctx, tree.root)
 }
 
 pub fn compute_debruijn_index_free(abs_chain: &[AbsIndex], free_var: &FreeVariable) -> usize {
@@ -608,63 +678,6 @@ pub fn compute_debruijn_index_bound(
     let debruijn_depth = chain.len();
     let debruijn_index = debruijn_depth - index;
     debruijn_index
-}
-
-impl From<&FlatTree> for Debruijn {
-    fn from(tree: &FlatTree) -> Self {
-        struct Context<'a> {
-            tree: &'a FlatTree,
-            chain: Vec<AbsIndex>,
-        }
-        impl<'a> Context<'a> {
-            fn push(&mut self, abs: AbsIndex) {
-                self.chain.push(abs);
-            }
-
-            fn pop(&mut self) {
-                self.chain.pop();
-            }
-
-            fn compute_debruijn_index(&self, bound_var: &BoundVariable) -> usize {
-                compute_debruijn_index_bound(self.tree, &self.chain, bound_var)
-            }
-        }
-        fn _from(ctx: &mut Context, index: BackingIndex) -> Debruijn {
-            match &ctx.tree[index] {
-                Node::FreeVar(free_var) => {
-                    let index = compute_debruijn_index_free(&ctx.chain, free_var);
-                    Debruijn::Index(index)
-                }
-                Node::BoundVar(bound_var) => {
-                    let debruijn_index = ctx.compute_debruijn_index(bound_var);
-                    Debruijn::Index(debruijn_index)
-                }
-                Node::Abs(abstraction) => {
-                    let abs = AbsIndex(index);
-                    ctx.push(abs);
-                    let body = _from(ctx, abstraction.body);
-                    ctx.pop();
-                    Debruijn::Abstraction {
-                        body: Box::new(body),
-                    }
-                }
-                Node::App(application) => {
-                    let func = _from(ctx, application.func);
-                    let arg: Debruijn = _from(ctx, application.arg);
-                    Debruijn::Application {
-                        func: Box::new(func),
-                        arg: Box::new(arg),
-                    }
-                }
-            }
-        }
-
-        let mut ctx = Context {
-            tree,
-            chain: vec![],
-        };
-        _from(&mut ctx, tree.root)
-    }
 }
 
 // The depth relative to some term. This is used to determine if a variable is free within a term
@@ -904,7 +917,7 @@ mod test {
         let original = Debruijn::from("(((λ (λ ((2 1) 2))) (λ (λ 2))) (λ (λ 1)))");
         let original2 = Debruijn::from("(λ λ 2 1 2) (λ λ 2) λ λ 1");
         assert_eq!(original, original2);
-        let flat = FlatTree::from(&original).normalized();
+        let flat = normalize(&FlatTree::from(&original));
         let roundtripped = Debruijn::from(&flat);
 
         assert_eq!(

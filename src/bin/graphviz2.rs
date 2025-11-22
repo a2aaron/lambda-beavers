@@ -3,7 +3,9 @@
 use std::str::FromStr;
 
 use clap::Parser;
-use lambda_beavers::{debruijn::Debruijn, graphviz::GraphvizArgs, parse, reduce::Reducer};
+use lambda_beavers::{
+    debruijn::Debruijn, flat_tree, graphviz::GraphvizArgs, parse, reduce::Reducer,
+};
 
 #[derive(Parser, Debug)]
 #[command(about, long_about = None)]
@@ -54,7 +56,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     }
 
     let tree = if args.normalized {
-        reducer.tree.normalized()
+        flat_tree::normalize(&reducer.tree)
     } else {
         reducer.tree
     };

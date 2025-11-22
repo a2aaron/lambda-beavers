@@ -309,12 +309,13 @@ mod test {
 
     use crate::{
         debruijn::Debruijn,
+        flat_tree::check_contours,
         reduce::{Reducer, ReductionResult},
     };
 
     #[track_caller]
     fn assert_contour(reducer: &Reducer) {
-        if let Err(error) = reducer.tree.check_contours() {
+        if let Err(error) = check_contours(&reducer.tree) {
             panic!("Error for tree {}: {error:?}", reducer.tree);
         }
     }
