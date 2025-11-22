@@ -4,6 +4,7 @@
 #![feature(trait_alias)]
 #![feature(more_float_constants)]
 
+pub mod beta_reduce;
 pub mod common_terms;
 pub mod debruijn;
 pub mod flat_tree;

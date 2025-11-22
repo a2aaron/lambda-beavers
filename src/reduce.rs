@@ -3,10 +3,9 @@ use std::fmt::Display;
 use clap::ValueEnum;
 
 use crate::{
+    beta_reduce::{self, RedexMut},
     debruijn::Debruijn,
-    flat_tree::{
-        self, AbsIndex, BackingIndex, DebruijnDepth, FlatTree, Node, ParentEdge, RedexMut,
-    },
+    flat_tree::{AbsIndex, BackingIndex, DebruijnDepth, FlatTree, Node, ParentEdge},
     graphviz,
     utils::Rng,
 };
@@ -207,7 +206,7 @@ impl Reducer {
                 "before_beta_reduce",
             );
 
-            let new_body = flat_tree::beta_reduce(&mut self.tree, &redex);
+            let new_body = beta_reduce::beta_reduce(&mut self.tree, &redex);
 
             graphviz::debug_write_to_file_with_ctx(
                 &self.tree,

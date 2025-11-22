@@ -3,8 +3,9 @@ use std::{fmt::Display, str::FromStr};
 use clap::Parser;
 use inquire::Select;
 use lambda_beavers::{
+    beta_reduce,
     debruijn::Debruijn,
-    flat_tree::{self, AbsIndex, BackingIndex, FlatTree, beta_reduce},
+    flat_tree::{self, AbsIndex, BackingIndex, FlatTree},
     parse,
     print::{NodeLabelType, PrintableTerm},
 };
@@ -144,7 +145,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             Choice::Quit => break,
             Choice::Reduce(redex_index, _highlighted_string) => {
                 history.push(current_term.clone());
-                beta_reduce(&mut current_term, &redexes[redex_index]);
+                beta_reduce::beta_reduce(&mut current_term, &redexes[redex_index]);
             }
         }
     }
