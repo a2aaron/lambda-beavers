@@ -240,7 +240,7 @@ struct NodeInfo {
 
 impl NodeInfo {
     fn garbage(root: &FlatTree, index: BackingIndex) -> NodeInfo {
-        let node = root[index].clone();
+        let node = root.get(index).clone();
         NodeInfo {
             node,
             index,
@@ -289,7 +289,7 @@ fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
 fn get_non_garbage(tree: &FlatTree) -> Vec<BackingIndex> {
     fn _get_non_garbage(tree: &FlatTree, non_garbage: &mut Vec<BackingIndex>, index: BackingIndex) {
         non_garbage.push(index);
-        match &tree[index] {
+        match tree.get(index) {
             Node::FreeVar(_) => (),
             Node::BoundVar(_) => (),
             Node::Abs(abstraction) => _get_non_garbage(tree, non_garbage, abstraction.body),

@@ -5,7 +5,7 @@ use inquire::Select;
 use lambda_beavers::{
     beta_reduce,
     debruijn::Debruijn,
-    flat_tree::{self, AbsIndex, BackingIndex, FlatTree},
+    flat_tree::{self, AbsIndex, BackingIndex, FlatTree, NodeRef},
     parse,
     print::{NodeLabelType, PrintableTerm},
 };
@@ -28,12 +28,12 @@ fn print_highlighted(tree: &FlatTree, highlighted: BackingIndex) -> String {
     }
 
     fn _print_highlighted(ctx: &mut Context, index: BackingIndex) -> PrintableTerm {
-        match &ctx.tree[index] {
-            flat_tree::Node::FreeVar(free_var) => {
+        match ctx.tree.get_ref(index) {
+            NodeRef::FreeVar(free_var, _) => {
                 let index = flat_tree::compute_debruijn_index_free(ctx.chain.as_slice(), free_var);
                 PrintableTerm::Leaf(format!("{}", index))
             }
-            flat_tree::Node::BoundVar(variable) => {
+            NodeRef::BoundVar(variable, _) => {
                 let index = flat_tree::compute_debruijn_index_bound(
                     &ctx.tree,
                     ctx.chain.as_slice(),
@@ -41,8 +41,7 @@ fn print_highlighted(tree: &FlatTree, highlighted: BackingIndex) -> String {
                 );
                 PrintableTerm::Leaf(format!("{}", index))
             }
-            flat_tree::Node::Abs(abstraction) => {
-                let index = AbsIndex(index);
+            NodeRef::Abs(abstraction, index) => {
                 ctx.chain.push(index);
                 let body = _print_highlighted(ctx, abstraction.body);
                 ctx.chain.pop();
@@ -52,7 +51,7 @@ fn print_highlighted(tree: &FlatTree, highlighted: BackingIndex) -> String {
                     body: Box::new(body),
                 }
             }
-            flat_tree::Node::App(application) => {
+            NodeRef::App(application, _) => {
                 let func = _print_highlighted(ctx, application.func);
                 let arg = _print_highlighted(ctx, application.arg);
 

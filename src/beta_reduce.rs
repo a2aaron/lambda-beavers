@@ -1,5 +1,7 @@
 use crate::{
-    flat_tree::{AbsIndex, BackingIndex, BoundVarIndex, DebruijnDepth, FlatTree, Node, ParentEdge},
+    flat_tree::{
+        AbsIndex, BackingIndex, BoundVarIndex, DebruijnDepth, FlatTree, Node, NodeRef, ParentEdge,
+    },
     graphviz,
 };
 
@@ -114,9 +116,9 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
     }
 
     fn _substitute(ctx: &mut Context, node_index: BackingIndex, parent_to_node: ParentEdge) {
-        match &ctx.tree[node_index] {
-            Node::FreeVar(_) => (), // Free variable will never be substituted
-            Node::BoundVar(bound_var) => {
+        match ctx.tree.get_ref(node_index) {
+            NodeRef::FreeVar(_, _) => (), // Free variable will never be substituted
+            NodeRef::BoundVar(bound_var, _) => {
                 let is_substituting = ctx.tree.get_binding_abs(bound_var) == ctx.func_index;
                 if is_substituting {
                     // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
@@ -131,11 +133,10 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
                     repoint_node(ctx.tree, parent_to_node, new_child);
                 }
             }
-            Node::Abs(abstraction) => {
-                let abs = AbsIndex(node_index);
+            NodeRef::Abs(abstraction, abs) => {
                 _substitute(ctx, abstraction.body, ParentEdge::AbsToBody(abs))
             }
-            Node::App(application) => {
+            NodeRef::App(application, _) => {
                 let func = application.func;
                 let arg = application.arg;
 
@@ -196,12 +197,12 @@ fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
         ctx: &mut CloneContext,
         old_node_index: BackingIndex,
     ) -> BackingIndex {
-        match &tree[old_node_index] {
-            Node::FreeVar(free_var) => {
+        match tree.get_ref(old_node_index) {
+            NodeRef::FreeVar(free_var, _) => {
                 let node = Node::FreeVar(*free_var);
                 tree.alloc(node)
             }
-            Node::BoundVar(variable) => {
+            NodeRef::BoundVar(variable, _) => {
                 let old_abs = tree.get_binding_abs(variable);
 
                 let new_var = tree.alloc_blank_var();
@@ -217,12 +218,11 @@ fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
 
                 new_var.0
             }
-            Node::Abs(abstraction) => {
+            NodeRef::Abs(abstraction, old_abs) => {
                 let old_body_index = abstraction.body;
 
                 let new_abs_index = tree.alloc_blank_abs();
 
-                let old_abs = AbsIndex(old_node_index);
                 ctx.push(old_abs, new_abs_index);
                 let new_body = _clone_subtree(tree, ctx, old_body_index);
                 ctx.pop();
@@ -232,7 +232,7 @@ fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
 
                 new_abs_index.0
             }
-            Node::App(application) => {
+            NodeRef::App(application, _) => {
                 let old_func_index = application.func;
                 let old_arg_index = application.arg;
 
@@ -349,12 +349,14 @@ impl RedexMut {
     }
 
     pub fn is_redex(tree: &FlatTree, term: BackingIndex) -> bool {
-        match tree[term] {
-            Node::App(app) => match tree[app.func] {
-                Node::Abs { .. } => true,
-                _ => false,
-            },
-            _ => false,
+        if let Node::App(app) = tree.get(term) {
+            if let Node::Abs(_) = tree.get(app.func) {
+                true
+            } else {
+                false
+            }
+        } else {
+            false
         }
     }
 
@@ -364,24 +366,20 @@ impl RedexMut {
         parent_to_app: ParentEdge,
         app_index: BackingIndex,
     ) -> Option<RedexMut> {
-        match tree[app_index] {
-            Node::App(app) => match &tree[app.func] {
-                Node::Abs(abs) => {
-                    let func_index = AbsIndex(app.func);
-                    let redex = RedexMut {
-                        debruijn_depth,
-                        parent_to_app,
-                        app_index,
-                        func_index,
-                        body_index: abs.body,
-                        arg_index: app.arg,
-                    };
-                    Some(redex)
-                }
-                _ => None,
-            },
-            _ => None,
+        if let NodeRef::App(app, _) = tree.get_ref(app_index) {
+            if let NodeRef::Abs(abs, func_index) = tree.get_ref(app.func) {
+                let redex = RedexMut {
+                    debruijn_depth,
+                    parent_to_app,
+                    app_index,
+                    func_index,
+                    body_index: abs.body,
+                    arg_index: app.arg,
+                };
+                return Some(redex);
+            }
         }
+        None
     }
 }
 
@@ -394,16 +392,15 @@ impl FlatTree {
         }
 
         fn _get_redexes(ctx: &mut Context, index: BackingIndex, parent_to_current: ParentEdge) {
-            match &ctx.tree[index] {
-                Node::FreeVar(_) => (),
-                Node::BoundVar(_) => (),
-                Node::Abs(abstraction) => {
-                    let index = AbsIndex(index);
+            match ctx.tree.get_ref(index) {
+                NodeRef::FreeVar(_, _) => (),
+                NodeRef::BoundVar(_, _) => (),
+                NodeRef::Abs(abstraction, index) => {
                     ctx.debruijn_depth += 1;
                     _get_redexes(ctx, abstraction.body, ParentEdge::AbsToBody(index));
                     ctx.debruijn_depth -= 1;
                 }
-                Node::App(application) => {
+                NodeRef::App(application, _) => {
                     if let Some(redex) =
                         RedexMut::try_get(ctx.tree, ctx.debruijn_depth, parent_to_current, index)
                     {
@@ -426,11 +423,11 @@ impl FlatTree {
 
     pub fn is_bnf(&self) -> bool {
         fn _is_bnf(tree: &FlatTree, index: BackingIndex) -> bool {
-            match &tree[index] {
-                Node::FreeVar(_) => false,
-                Node::BoundVar(_) => false,
-                Node::Abs(abstraction) => _is_bnf(tree, abstraction.body),
-                Node::App(application) => {
+            match tree.get_ref(index) {
+                NodeRef::FreeVar(_, _) => false,
+                NodeRef::BoundVar(_, _) => false,
+                NodeRef::Abs(abstraction, _) => _is_bnf(tree, abstraction.body),
+                NodeRef::App(application, _) => {
                     !RedexMut::is_redex(tree, index)
                         && _is_bnf(tree, application.func)
                         && _is_bnf(tree, application.arg)

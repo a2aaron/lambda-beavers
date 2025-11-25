@@ -5,7 +5,7 @@ use clap::ValueEnum;
 use crate::{
     beta_reduce::{self, RedexMut},
     debruijn::Debruijn,
-    flat_tree::{AbsIndex, BackingIndex, DebruijnDepth, FlatTree, Node, ParentEdge},
+    flat_tree::{BackingIndex, DebruijnDepth, FlatTree, NodeRef, ParentEdge},
     graphviz,
     utils::Rng,
 };
@@ -124,18 +124,17 @@ impl WalkContext {
                 depth,
                 state,
             } = frame;
-            match &tree[index] {
-                Node::BoundVar(_) => (),
-                Node::FreeVar(_) => (),
-                Node::Abs(abstraction) => {
-                    let index = AbsIndex(index);
+            match tree.get_ref(index) {
+                NodeRef::BoundVar(_, _) => (),
+                NodeRef::FreeVar(_, _) => (),
+                NodeRef::Abs(abstraction, index) => {
                     self.push(WalkFrame::first_visit(
                         abstraction.body,
                         ParentEdge::AbsToBody(index),
                         depth + 1,
                     ));
                 }
-                Node::App(application) => {
+                NodeRef::App(application, _) => {
                     match state {
                         WalkState::FirstVisit => {
                             if let Some(redex) = RedexMut::try_get(tree, depth, parent, index) {
@@ -216,7 +215,7 @@ impl Reducer {
 
             // If the most recent application is the immediate parent of the redex, revisit it to check if it's a redex
             let should_rewalk_parent = if let Some(last_frame) = self.walk_ctx.stack.last_mut() {
-                let is_app = matches!(self.tree[last_frame.index], Node::App(_));
+                let is_app = matches!(self.tree.get_ref(last_frame.index), NodeRef::App(_, _));
                 assert!(is_app);
                 assert!(last_frame.state != WalkState::FirstVisit);
 
