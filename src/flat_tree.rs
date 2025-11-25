@@ -753,7 +753,7 @@ pub enum ParentEdge {
     AppToArg(BackingIndex),
 }
 impl ParentEdge {
-    pub fn backing_index(&self) -> Option<BackingIndex> {
+    pub fn parent(&self) -> Option<BackingIndex> {
         match self {
             ParentEdge::IntoRoot => None,
             ParentEdge::AbsToBody(abs) => Some(abs.0),

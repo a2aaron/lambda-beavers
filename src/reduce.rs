@@ -219,7 +219,7 @@ impl Reducer {
                 assert!(is_app);
                 assert!(last_frame.state != WalkState::FirstVisit);
 
-                if let Some(immediate_parent) = redex.parent_to_app.backing_index()
+                if let Some(immediate_parent) = redex.parent_to_app.parent()
                     && immediate_parent == last_frame.index
                 {
                     Some(last_frame)

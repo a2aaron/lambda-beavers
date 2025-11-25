@@ -289,7 +289,7 @@ fn insert_into_contour(tree: &mut FlatTree, abs_index: AbsIndex, var_index: Boun
 ///
 /// MEMORY: Old child becomes garbage after repointing.
 fn repoint_node(tree: &mut FlatTree, parent: ParentEdge, child: BackingIndex) {
-    if parent.backing_index() == Some(child) {
+    if parent.parent() == Some(child) {
         graphviz::debug_write_to_file(tree, "bad_repoint");
         panic!("attempt to repoint {parent:?} to {child} which would cause a loop (tree: {tree:?}");
     }
