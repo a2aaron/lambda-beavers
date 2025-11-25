@@ -10,6 +10,12 @@ use std::{
 
 use crate::debruijn::Debruijn;
 
+// The depth relative to some term. This is used to determine if a variable is free within a term
+// If a given Index node has a DebruijnIndex >= DebruijnDepth, then that Index node is a free variable
+// with respect to that subtree)
+// Zero indicates that there are no abstractions between the two terms, one indicates one abstraction, etc
+pub type DebruijnDepth = usize;
+
 #[derive(Debug, Clone)]
 pub struct FlatTree {
     pub backing: Vec<Node>,
@@ -55,57 +61,17 @@ impl FlatTree {
         }
     }
 
-    pub fn alloc_blank_var(&mut self) -> BoundVarIndex {
-        let backing_index = BackingIndex::new(self.backing.len());
-        let dummy = Node::dummy_var();
-        self.backing.push(dummy);
-        BoundVarIndex(backing_index)
+    pub fn get_bound_var(&self, var: BoundVarIndex) -> &BoundVariable {
+        match self.get(var.0) {
+            Node::BoundVar(var) => var,
+            node => panic!("Expected variable for term @ {var}, got {node:?}",),
+        }
     }
 
-    // Allocate a dummy node and return the backing index to the dummy.
-    // This dummy node should be set to something reasonable.
-    pub fn alloc_blank_abs(&mut self) -> AbsIndex {
-        let backing_index = BackingIndex::new(self.backing.len());
-        let dummy = Node::dummy_abs();
-        self.backing.push(dummy);
-        AbsIndex(backing_index)
-    }
-
-    /// Allocate the given term onto the backing vector. The node is set to the node
-    /// in the input `term`.
-    /// The return value is the index to the newly allocated node.
-    pub fn alloc(&mut self, term: Node) -> BackingIndex {
-        let term_index = BackingIndex::new(self.backing.len());
-        self.backing.push(term);
-        term_index
-    }
-
-    pub fn alloc_app(&mut self, func: BackingIndex, arg: BackingIndex) -> BackingIndex {
-        let app = Node::App(Application { func, arg });
-        self.alloc(app)
-    }
-
-    pub fn alloc_bound_var(&mut self, bound_var: BoundVariable) -> BoundVarIndex {
-        let node = Node::BoundVar(bound_var);
-        let index = self.alloc(node);
-        BoundVarIndex(index)
-    }
-
-    pub fn alloc_free_var(&mut self, free_var: FreeVariable) -> BackingIndex {
-        let node = Node::FreeVar(free_var);
-        self.alloc(node)
-    }
-
-    fn fixup_next(&mut self, prev: PrevIndex, this_var: BoundVarIndex) {
-        match prev {
-            PrevIndex::Var(var) => {
-                let var = self.get_bound_var_mut(var);
-                var.next = Some(this_var);
-            }
-            PrevIndex::Abs(abs) => {
-                let abs = self.get_abs_mut(abs);
-                abs.entrance = Some(this_var);
-            }
+    pub fn get_bound_var_mut(&mut self, var: BoundVarIndex) -> &mut BoundVariable {
+        match self.get_mut(var.0) {
+            Node::BoundVar(var) => var,
+            node => panic!("Expected variable for term @ {var}, got {node:?}",),
         }
     }
 
@@ -137,20 +103,49 @@ impl FlatTree {
         }
     }
 
-    pub fn get_bound_var(&self, var: BoundVarIndex) -> &BoundVariable {
-        match self.get(var.0) {
-            Node::BoundVar(var) => var,
-            node => panic!("Expected variable for term @ {var}, got {node:?}",),
-        }
+    /// Allocate the given term onto the backing vector. The node is set to the node in the input `term`.
+    /// The return value is the index to the newly allocated node.
+    pub fn alloc(&mut self, term: Node) -> BackingIndex {
+        let term_index = BackingIndex::new(self.backing.len());
+        self.backing.push(term);
+        term_index
     }
 
-    pub fn get_bound_var_mut(&mut self, var: BoundVarIndex) -> &mut BoundVariable {
-        match self.get_mut(var.0) {
-            Node::BoundVar(var) => var,
-            node => panic!("Expected variable for term @ {var}, got {node:?}",),
-        }
+    pub fn alloc_bound_var(&mut self, bound_var: BoundVariable) -> BoundVarIndex {
+        let node = Node::BoundVar(bound_var);
+        let index = self.alloc(node);
+        BoundVarIndex(index)
     }
 
+    pub fn alloc_free_var(&mut self, free_var: FreeVariable) -> BackingIndex {
+        let node = Node::FreeVar(free_var);
+        self.alloc(node)
+    }
+
+    pub fn alloc_app(&mut self, func: BackingIndex, arg: BackingIndex) -> BackingIndex {
+        let app = Node::App(Application { func, arg });
+        self.alloc(app)
+    }
+
+    // Allocate a dummy BoundVar and return the BoundVarIndex to the dummy.
+    // This dummy node should be set to something reasonable.
+    pub fn alloc_blank_var(&mut self) -> BoundVarIndex {
+        let backing_index = BackingIndex::new(self.backing.len());
+        let dummy = Node::dummy_var();
+        self.backing.push(dummy);
+        BoundVarIndex(backing_index)
+    }
+
+    // Allocate a dummy Abstraction and return the AbsIndex to the dummy.
+    // This dummy node should be set to something reasonable.
+    pub fn alloc_blank_abs(&mut self) -> AbsIndex {
+        let backing_index = BackingIndex::new(self.backing.len());
+        let dummy = Node::dummy_abs();
+        self.backing.push(dummy);
+        AbsIndex(backing_index)
+    }
+
+    /// Given a bound variable, returns AbsIndex of the abstraction that the bound variable binds to
     pub fn get_binding_abs<'a>(&'a self, mut bound_var: &'a BoundVariable) -> AbsIndex {
         loop {
             match bound_var.prev(self) {
@@ -159,6 +154,20 @@ impl FlatTree {
                     bound_var = prev_var;
                 }
                 PrevIndex::Abs(abs_index) => return abs_index,
+            }
+        }
+    }
+
+    // Fix up a contour so that "this_var" is inserted between prev and next
+    fn fixup_next(&mut self, prev: PrevIndex, this_var: BoundVarIndex) {
+        match prev {
+            PrevIndex::Var(var) => {
+                let var = self.get_bound_var_mut(var);
+                var.next = Some(this_var);
+            }
+            PrevIndex::Abs(abs) => {
+                let abs = self.get_abs_mut(abs);
+                abs.entrance = Some(this_var);
             }
         }
     }
@@ -193,6 +202,262 @@ impl From<&Debruijn> for FlatTree {
 impl From<&FlatTree> for Debruijn {
     fn from(tree: &FlatTree) -> Self {
         unflatten(tree)
+    }
+}
+
+/// ####################
+/// # NODE AND NODEREF #
+/// ####################
+
+#[derive(Clone)]
+pub enum Node {
+    // This backing index points to the abstraction that this index binds to
+    FreeVar(FreeVariable),
+    BoundVar(BoundVariable),
+    Abs(Abstraction),
+    App(Application),
+}
+impl Node {
+    fn dummy_abs() -> Node {
+        let abs = Abstraction {
+            body: BackingIndex::DUMMY,
+            entrance: None,
+        };
+        Node::Abs(abs)
+    }
+
+    fn dummy_var() -> Node {
+        let var = BoundVariable {
+            prev: BackingIndex::DUMMY,
+            next: None,
+        };
+        Node::BoundVar(var)
+    }
+}
+
+impl From<Abstraction> for Node {
+    fn from(abs: Abstraction) -> Self {
+        Node::Abs(abs)
+    }
+}
+
+impl From<Application> for Node {
+    fn from(app: Application) -> Self {
+        Node::App(app)
+    }
+}
+
+impl std::fmt::Debug for Node {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::FreeVar(free_var) => write!(f, "var: {free_var}"),
+            Self::BoundVar(bound_var) => write!(f, "var: {bound_var}"),
+            Self::Abs(abs) => match abs.entrance {
+                Some(entrance) => write!(f, "abs: body -> {} (entrance -> {})", abs.body, entrance),
+                None => write!(f, "abs: body -> {}", abs.body),
+            },
+            Self::App(app) => write!(f, "app: func -> {}, arg -> {}", app.func, app.arg),
+        }
+    }
+}
+
+/// Helper enum for working with both a node reference and it's typed BackingIndex
+pub enum NodeRef<'a> {
+    BoundVar(&'a BoundVariable, BoundVarIndex),
+    FreeVar(&'a FreeVariable, FreeVarIndex),
+    Abs(&'a Abstraction, AbsIndex),
+    App(&'a Application, AppIndex),
+}
+impl<'a> NodeRef<'a> {
+    fn clone_node(&self) -> Node {
+        match *self {
+            NodeRef::BoundVar(bound_variable, _) => Node::BoundVar(bound_variable.clone()),
+            NodeRef::FreeVar(free_variable, _) => Node::FreeVar(free_variable.clone()),
+            NodeRef::Abs(abstraction, _) => Node::Abs(abstraction.clone()),
+            NodeRef::App(application, _) => Node::App(application.clone()),
+        }
+    }
+}
+
+/// Helper enum for working with both a mutable node reference and it's typed BackingIndex
+pub enum NodeRefMut<'a> {
+    BoundVar(&'a mut BoundVariable, BoundVarIndex),
+    FreeVar(&'a mut FreeVariable, FreeVarIndex),
+    Abs(&'a mut Abstraction, AbsIndex),
+    App(&'a mut Application, AppIndex),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct FreeVariable {
+    // The number of abstractions above the root that this Index node binds to
+    // For example, in λ x, if x = 2, then we have a free bind of 1
+    // If x = 3, then we have a free bind of 2, and so on.
+    // Zero is not a valid value for this because we start 1-indexed
+    // Note that this is NOT a debruijn index, it's a debruijn depth, as it always refers
+    // to a constant number of abstractions above the root, no matter how deeply nested the
+    // actual index is
+    height: NonZeroU32,
+}
+
+impl Display for FreeVariable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "free ({})", self.height)
+    }
+}
+
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub struct BoundVariable {
+    pub prev: BackingIndex,
+    pub next: Option<BoundVarIndex>,
+}
+
+impl Display for BoundVariable {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let prev = self.prev;
+        match self.next {
+            Some(next) => write!(f, "prev: {prev} -> next: {next}"),
+            None => write!(f, "prev: {prev}"),
+        }
+    }
+}
+
+impl BoundVariable {
+    fn prev(&self, tree: &FlatTree) -> PrevIndex {
+        match tree.get_ref(self.prev) {
+            NodeRef::BoundVar(_, bound_var) => PrevIndex::Var(bound_var),
+            NodeRef::Abs(_, abs) => PrevIndex::Abs(abs),
+            node_ref => panic!(
+                "Expected bound variable or abstraction at {}, got free var: {:?}",
+                self.prev,
+                node_ref.clone_node()
+            ),
+        }
+    }
+}
+
+#[derive(Debug, Clone)]
+pub struct Abstraction {
+    // The index of the body of the abstraction
+    pub body: BackingIndex,
+    // The head of the "contour" linked list. Each variable node in the linked list binds to this
+    // abstraction node and links to their neighbors in a doubly-linked list. The node that is pointed
+    // to by this field additionally points back to this abstraction node (making this abstraction node
+    // as the head of the linked list)
+    // If this is none, then this abstraction has no usages.
+    pub entrance: Option<BoundVarIndex>,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct Application {
+    pub func: BackingIndex,
+    pub arg: BackingIndex,
+}
+
+/// #################
+/// # BACKING INDEX #
+/// #################
+
+/// A pointer to a given DebruijnNode within a FlatTree
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BackingIndex(u32);
+impl BackingIndex {
+    pub const DUMMY: BackingIndex = BackingIndex(u32::MAX);
+
+    pub fn new(index: usize) -> Self {
+        Self(index as _)
+    }
+
+    pub fn get(&self) -> usize {
+        self.0 as usize
+    }
+}
+
+impl Display for BackingIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "@{}", self.0)
+    }
+}
+
+// Helper type -- the BackingIndex within this struct must point to a Node::FreeVar
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct FreeVarIndex(pub BackingIndex);
+impl Display for FreeVarIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+// Helper type -- the BackingIndex within this struct must point to a Node::BoundVar
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct BoundVarIndex(pub BackingIndex);
+impl Display for BoundVarIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+// Helper type -- the BackingIndex within this struct must point to a Node::Abs
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AbsIndex(pub BackingIndex);
+impl Display for AbsIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+// Helper type -- the BackingIndex within this struct must point to a Node::App
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
+pub struct AppIndex(pub BackingIndex);
+impl Display for AppIndex {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{}", self.0)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PrevIndex {
+    Var(BoundVarIndex),
+    Abs(AbsIndex),
+}
+
+impl From<PrevIndex> for BackingIndex {
+    fn from(value: PrevIndex) -> Self {
+        match value {
+            PrevIndex::Var(var) => var.0,
+            PrevIndex::Abs(abs) => abs.0,
+        }
+    }
+}
+
+/// An edge in the Debruijn tree, containing:
+/// - The parent node (if there is one. for the root, there is no parent)
+/// - The type of parent-edge this edge is (ie: is this an edge from an abstraction to body,
+/// from application to arg, application to func, or into-root)
+/// It does not contain the child edge
+/// ```
+/// parent (if present)
+///    | edge type
+///    V
+/// ```
+#[derive(Debug, Clone, Copy)]
+pub enum ParentEdge {
+    /// The "edge" has no parent, and the child here is the root of the tree
+    IntoRoot,
+    /// The edge is an abstraction to body edge, and the BackingIndex here is the index for the abstraction
+    AbsToBody(AbsIndex),
+    /// The edge is an application to function edge, and the BackingIndex here is the index for the application
+    AppToFunc(BackingIndex),
+    /// The edge is an application to argument edge, and the BackingIndex here is the index for the application
+    AppToArg(BackingIndex),
+}
+impl ParentEdge {
+    pub fn parent(&self) -> Option<BackingIndex> {
+        match self {
+            ParentEdge::IntoRoot => None,
+            ParentEdge::AbsToBody(abs) => Some(abs.0),
+            ParentEdge::AppToFunc(app) => Some(*app),
+            ParentEdge::AppToArg(app) => Some(*app),
+        }
     }
 }
 
@@ -676,260 +941,6 @@ pub fn compute_debruijn_index_bound(
     let debruijn_depth = chain.len();
     let debruijn_index = debruijn_depth - index;
     debruijn_index
-}
-
-// The depth relative to some term. This is used to determine if a variable is free within a term
-// If a given Index node has a DebruijnIndex >= DebruijnDepth, then that Index node is a free variable
-// with respect to that subtree)
-// Zero indicates that there are no abstractions between the two terms, one indicates one abstraction, etc
-pub type DebruijnDepth = usize;
-
-/// Helper enum for working with both a node reference and it's typed BackingIndex
-pub enum NodeRef<'a> {
-    BoundVar(&'a BoundVariable, BoundVarIndex),
-    FreeVar(&'a FreeVariable, FreeVarIndex),
-    Abs(&'a Abstraction, AbsIndex),
-    App(&'a Application, AppIndex),
-}
-impl<'a> NodeRef<'a> {
-    fn clone_node(&self) -> Node {
-        match *self {
-            NodeRef::BoundVar(bound_variable, _) => Node::BoundVar(bound_variable.clone()),
-            NodeRef::FreeVar(free_variable, _) => Node::FreeVar(free_variable.clone()),
-            NodeRef::Abs(abstraction, _) => Node::Abs(abstraction.clone()),
-            NodeRef::App(application, _) => Node::App(application.clone()),
-        }
-    }
-}
-
-/// Helper enum for working with both a mutable node reference and it's typed BackingIndex
-pub enum NodeRefMut<'a> {
-    BoundVar(&'a mut BoundVariable, BoundVarIndex),
-    FreeVar(&'a mut FreeVariable, FreeVarIndex),
-    Abs(&'a mut Abstraction, AbsIndex),
-    App(&'a mut Application, AppIndex),
-}
-
-/// A pointer to a given DebruijnNode within a FlatTree
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct BackingIndex(u32);
-impl BackingIndex {
-    pub const DUMMY: BackingIndex = BackingIndex(u32::MAX);
-
-    pub fn new(index: usize) -> Self {
-        Self(index as _)
-    }
-
-    pub fn get(&self) -> usize {
-        self.0 as usize
-    }
-}
-
-impl Display for BackingIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "@{}", self.0)
-    }
-}
-
-/// An edge in the Debruijn tree, containing:
-/// - The parent node (if there is one. for the root, there is no parent)
-/// - The type of parent-edge this edge is (ie: is this an edge from an abstraction to body,
-/// from application to arg, application to func, or into-root)
-/// It does not contain the child edge
-/// ```
-/// parent (if present)
-///    | edge type
-///    V
-/// ```
-#[derive(Debug, Clone, Copy)]
-pub enum ParentEdge {
-    /// The "edge" has no parent, and the child here is the root of the tree
-    IntoRoot,
-    /// The edge is an abstraction to body edge, and the BackingIndex here is the index for the abstraction
-    AbsToBody(AbsIndex),
-    /// The edge is an application to function edge, and the BackingIndex here is the index for the application
-    AppToFunc(BackingIndex),
-    /// The edge is an application to argument edge, and the BackingIndex here is the index for the application
-    AppToArg(BackingIndex),
-}
-impl ParentEdge {
-    pub fn parent(&self) -> Option<BackingIndex> {
-        match self {
-            ParentEdge::IntoRoot => None,
-            ParentEdge::AbsToBody(abs) => Some(abs.0),
-            ParentEdge::AppToFunc(app) => Some(*app),
-            ParentEdge::AppToArg(app) => Some(*app),
-        }
-    }
-}
-
-// Helper type -- the BackingIndex within this struct must point to a Node::FreeVar
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct FreeVarIndex(pub BackingIndex);
-impl Display for FreeVarIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-// Helper type -- the BackingIndex within this struct must point to a Node::BoundVar
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct BoundVarIndex(pub BackingIndex);
-impl Display for BoundVarIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-// Helper type -- the BackingIndex within this struct must point to a Node::Abs
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct AbsIndex(pub BackingIndex);
-impl Display for AbsIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-// Helper type -- the BackingIndex within this struct must point to a Node::App
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
-pub struct AppIndex(pub BackingIndex);
-impl Display for AppIndex {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "{}", self.0)
-    }
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum PrevIndex {
-    Var(BoundVarIndex),
-    Abs(AbsIndex),
-}
-
-impl From<PrevIndex> for BackingIndex {
-    fn from(value: PrevIndex) -> Self {
-        match value {
-            PrevIndex::Var(var) => var.0,
-            PrevIndex::Abs(abs) => abs.0,
-        }
-    }
-}
-
-#[derive(Debug, Clone)]
-pub struct Abstraction {
-    // The index of the body of the abstraction
-    pub body: BackingIndex,
-    // The head of the "contour" linked list. Each variable node in the linked list binds to this
-    // abstraction node and links to their neighbors in a doubly-linked list. The node that is pointed
-    // to by this field additionally points back to this abstraction node (making this abstraction node
-    // as the head of the linked list)
-    // If this is none, then this abstraction has no usages.
-    pub entrance: Option<BoundVarIndex>,
-}
-
-#[derive(Debug, Clone, Copy)]
-pub struct Application {
-    pub func: BackingIndex,
-    pub arg: BackingIndex,
-}
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct FreeVariable {
-    // The number of abstractions above the root that this Index node binds to
-    // For example, in λ x, if x = 2, then we have a free bind of 1
-    // If x = 3, then we have a free bind of 2, and so on.
-    // Zero is not a valid value for this because we start 1-indexed
-    // Note that this is NOT a debruijn index, it's a debruijn depth, as it always refers
-    // to a constant number of abstractions above the root, no matter how deeply nested the
-    // actual index is
-    height: NonZeroU32,
-}
-
-impl Display for FreeVariable {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        write!(f, "free ({})", self.height)
-    }
-}
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub struct BoundVariable {
-    pub prev: BackingIndex,
-    pub next: Option<BoundVarIndex>,
-}
-
-impl Display for BoundVariable {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        let prev = self.prev;
-        match self.next {
-            Some(next) => write!(f, "prev: {prev} -> next: {next}"),
-            None => write!(f, "prev: {prev}"),
-        }
-    }
-}
-
-impl BoundVariable {
-    fn prev(&self, tree: &FlatTree) -> PrevIndex {
-        match tree.get_ref(self.prev) {
-            NodeRef::BoundVar(_, bound_var) => PrevIndex::Var(bound_var),
-            NodeRef::Abs(_, abs) => PrevIndex::Abs(abs),
-            node_ref => panic!(
-                "Expected bound variable or abstraction at {}, got free var: {:?}",
-                self.prev,
-                node_ref.clone_node()
-            ),
-        }
-    }
-}
-
-#[derive(Clone)]
-pub enum Node {
-    // This backing index points to the abstraction that this index binds to
-    FreeVar(FreeVariable),
-    BoundVar(BoundVariable),
-    Abs(Abstraction),
-    App(Application),
-}
-impl Node {
-    fn dummy_abs() -> Node {
-        let abs = Abstraction {
-            body: BackingIndex::DUMMY,
-            entrance: None,
-        };
-        Node::Abs(abs)
-    }
-
-    fn dummy_var() -> Node {
-        let var = BoundVariable {
-            prev: BackingIndex::DUMMY,
-            next: None,
-        };
-        Node::BoundVar(var)
-    }
-}
-
-impl From<Abstraction> for Node {
-    fn from(abs: Abstraction) -> Self {
-        Node::Abs(abs)
-    }
-}
-
-impl From<Application> for Node {
-    fn from(app: Application) -> Self {
-        Node::App(app)
-    }
-}
-
-impl std::fmt::Debug for Node {
-    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-        match self {
-            Self::FreeVar(free_var) => write!(f, "var: {free_var}"),
-            Self::BoundVar(bound_var) => write!(f, "var: {bound_var}"),
-            Self::Abs(abs) => match abs.entrance {
-                Some(entrance) => write!(f, "abs: body -> {} (entrance -> {})", abs.body, entrance),
-                None => write!(f, "abs: body -> {}", abs.body),
-            },
-            Self::App(app) => write!(f, "app: func -> {}, arg -> {}", app.func, app.arg),
-        }
-    }
 }
 
 #[cfg(test)]
