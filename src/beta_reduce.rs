@@ -155,54 +155,73 @@ fn remove_bound_vars_from_contours(tree: &mut FlatTree, arg_index: BackingIndex)
 }
 
 fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
-    struct Context<'a> {
-        tree: &'a mut FlatTree,
-        func_index: AbsIndex,
-        arg_index: BackingIndex,
-    }
+    let abs = tree.get_abs(redex.func_index);
+    let mut bound_var_index = abs.entrance.unwrap();
+    loop {
+        let bound_var = tree.get_bound_var(bound_var_index);
+        let next = bound_var.next;
 
-    fn _substitute(ctx: &mut Context, node_index: BackingIndex, parent_to_node: ParentEdge) {
-        match ctx.tree.get_ref(node_index) {
-            NodeRef::FreeVar(_, _) => (), // Free variable will never be substituted
-            NodeRef::BoundVar(bound_var, _) => {
-                let is_substituting = ctx.tree.get_binding_abs(bound_var) == ctx.func_index;
-                if is_substituting {
-                    // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
-                    let last_arg_allocation = bound_var.next.is_none();
-                    let new_child = if last_arg_allocation {
-                        ctx.arg_index
-                    } else {
-                        clone_subtree(ctx.tree, ctx.arg_index)
-                    };
-
-                    // Point parent to the newly created subtree
-                    repoint_node(ctx.tree, parent_to_node, new_child);
-                }
+        match next {
+            Some(next) => {
+                let subtree = clone_subtree(tree, redex.arg_index);
+                move_onto(tree, subtree, bound_var_index.0);
+                bound_var_index = next;
             }
-            NodeRef::Abs(abstraction, abs) => {
-                _substitute(ctx, abstraction.body, ParentEdge::AbsToBody(abs))
-            }
-            NodeRef::App(application, _) => {
-                let func = application.func;
-                let arg = application.arg;
-
-                _substitute(ctx, func, ParentEdge::AppToFunc(node_index));
-                _substitute(ctx, arg, ParentEdge::AppToArg(node_index));
+            None => {
+                // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
+                move_onto(tree, redex.arg_index, bound_var_index.0);
+                break;
             }
         }
     }
+}
 
-    let mut ctx = Context {
-        tree,
-        func_index: redex.func_index,
-        arg_index: redex.arg_index,
-    };
+fn move_onto(tree: &mut FlatTree, src_node: BackingIndex, dest_node: BackingIndex) {
+    // Copy the src_node onto the dest_node
+    {
+        let src_node = tree.get(src_node).clone();
+        let dest_node = tree.get_mut(dest_node);
+        *dest_node = src_node;
+    }
 
-    _substitute(
-        &mut ctx,
-        redex.body_index,
-        ParentEdge::AbsToBody(redex.func_index),
-    );
+    match tree.get_ref(dest_node) {
+        // Nothing to update for free vars
+        NodeRef::FreeVar(_, _) => (),
+        // Nothing to update for applications
+        NodeRef::App(_, _) => (),
+        // Need to update the contour.
+        // The next of this bound_var should have it's prev pointed to the new index
+        // And the prev of this bound_var should it's next/entrance pointed to the new index
+        NodeRef::BoundVar(bound_variable, bound_var_index) => {
+            let next = bound_variable.next;
+            let prev = bound_variable.prev(&tree);
+            // Fixup next
+            if let Some(next) = next {
+                let next = tree.get_bound_var_mut(next);
+                next.prev = bound_var_index.0;
+            }
+
+            // Fixup prev
+            match prev {
+                PrevIndex::Var(prev_var) => {
+                    let var = tree.get_bound_var_mut(prev_var);
+                    var.next = Some(bound_var_index);
+                }
+                PrevIndex::Abs(prev_abs) => {
+                    let abs = tree.get_abs_mut(prev_abs);
+                    abs.entrance = Some(bound_var_index);
+                }
+            }
+        }
+        // Need to update the contour
+        // If there is any entrance value, that bound var should have it's prev pointed to the new index
+        NodeRef::Abs(abstraction, abs_index) => {
+            if let Some(entrance) = abstraction.entrance {
+                let bound_var = tree.get_bound_var_mut(entrance);
+                bound_var.prev = abs_index.0;
+            }
+        }
+    }
 }
 
 struct CloneContext {
