@@ -313,6 +313,28 @@ mod test {
     };
 
     #[track_caller]
+    fn run_contour_testcase(testcase: &str) {
+        let term = Debruijn::from_str(testcase).unwrap();
+        let mut reducer = Reducer::new(&term);
+
+        assert_contour(&reducer);
+        reducer.reduce_one();
+        assert_contour(&reducer);
+        reducer.reduce_one();
+        assert_contour(&reducer);
+        reducer.reduce_one();
+        assert_contour(&reducer);
+        reducer.reduce_one();
+        assert_contour(&reducer);
+        reducer.reduce_one();
+        assert_contour(&reducer);
+        reducer.reduce_one();
+        assert_contour(&reducer);
+        reducer.reduce_one();
+        assert_contour(&reducer);
+    }
+
+    #[track_caller]
     fn assert_contour(reducer: &Reducer) {
         if let Err(error) = check_contours(&reducer.tree) {
             panic!("Error for tree {}: {error:?}", reducer.tree);
@@ -711,5 +733,10 @@ mod test {
         // λ 256 λ λ λ 2
         let testcase = "λ (λ 257 (1 1)) λ λ (λ 3) 2";
         assert_matches_reference(testcase);
+    }
+
+    #[test]
+    fn contour_fuzzer1() {
+        run_contour_testcase("λ (λ 61) 1");
     }
 }

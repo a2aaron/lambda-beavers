@@ -1,6 +1,7 @@
 use crate::{
     flat_tree::{
         AbsIndex, BackingIndex, BoundVarIndex, DebruijnDepth, FlatTree, Node, NodeRef, ParentEdge,
+        PrevIndex,
     },
     graphviz,
 };
@@ -91,9 +92,9 @@ pub fn beta_reduce(tree: &mut FlatTree, redex: &RedexMut) -> BackingIndex {
 // - Potentially alters redex.parent pointer
 fn substitute(tree: &mut FlatTree, redex: &RedexMut) -> BackingIndex {
     if redex.body_usage(tree) == BodyUsage::Zero {
-        // THIS IS GOING TO BLOW UP IMMEDIATELY!!!!!!!!!!!!!!
         // Anything which has zero usage requires that we walk the arg subtree to remove BoundVars
         // from their contours. Which is hugely annoying
+        remove_bound_vars_from_contours(tree, redex.arg_index);
 
         // No need to do anything with the argument because it is never used in the body
         // (Since the argument is not used, the entire arg subtree is garbage now.)
@@ -106,6 +107,51 @@ fn substitute(tree: &mut FlatTree, redex: &RedexMut) -> BackingIndex {
         // Hence, we need to check for this and get the actually new body.
         tree.get_abs(redex.func_index).body
     }
+}
+
+fn remove_bound_vars_from_contours(tree: &mut FlatTree, arg_index: BackingIndex) {
+    struct Context<'a> {
+        tree: &'a mut FlatTree,
+    }
+
+    // TODO: Would be nice to check if the bound var is bound within the arg subtree--in these cases
+    // there is no need to fix up the contours
+    fn walk(ctx: &mut Context, node: BackingIndex) {
+        match ctx.tree.get_ref(node) {
+            NodeRef::FreeVar(_, _) => (),
+            NodeRef::BoundVar(bound_variable, _) => {
+                let prev = bound_variable.prev(ctx.tree);
+                let next = bound_variable.next;
+                // Fix up next so that it's prev points to `prev`
+                if let Some(next) = next {
+                    let next = ctx.tree.get_bound_var_mut(next);
+                    next.prev = prev.into();
+                }
+
+                // Fix up prev so that it's next points to `next`
+                match prev {
+                    PrevIndex::Var(prev) => {
+                        let prev = ctx.tree.get_bound_var_mut(prev);
+                        prev.next = next;
+                    }
+                    PrevIndex::Abs(prev) => {
+                        let prev = ctx.tree.get_abs_mut(prev);
+                        prev.entrance = next;
+                    }
+                }
+            }
+            NodeRef::Abs(abstraction, _) => walk(ctx, abstraction.body),
+            NodeRef::App(application, _) => {
+                let func = application.func;
+                let arg = application.arg;
+                walk(ctx, func);
+                walk(ctx, arg);
+            }
+        }
+    }
+
+    let mut ctx = Context { tree };
+    walk(&mut ctx, arg_index);
 }
 
 fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {

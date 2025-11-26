@@ -322,7 +322,7 @@ impl Display for BoundVariable {
 }
 
 impl BoundVariable {
-    fn prev(&self, tree: &FlatTree) -> PrevIndex {
+    pub fn prev(&self, tree: &FlatTree) -> PrevIndex {
         match tree.get_ref(self.prev) {
             NodeRef::BoundVar(_, bound_var) => PrevIndex::Var(bound_var),
             NodeRef::Abs(_, abs) => PrevIndex::Abs(abs),
