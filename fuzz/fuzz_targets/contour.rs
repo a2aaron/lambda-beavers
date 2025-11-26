@@ -2,7 +2,7 @@
 
 use libfuzzer_sys::{Corpus, arbitrary::Arbitrary, fuzz_target};
 
-use lambda_beavers::{debruijn::Debruijn, reduce::Reducer};
+use lambda_beavers::{debruijn::Debruijn, flat_tree::check_contours, reduce::Reducer};
 
 #[derive(Arbitrary)]
 struct DebruijnWrapper(Debruijn);
@@ -15,7 +15,7 @@ impl std::fmt::Debug for DebruijnWrapper {
 
 #[track_caller]
 fn assert_contour(reducer: &Reducer) {
-    if let Err(error) = reducer.tree.check_contours() {
+    if let Err(error) = check_contours(&reducer.tree) {
         panic!("Error for tree {}: {error:?}", reducer.tree);
     }
 }

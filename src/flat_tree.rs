@@ -575,11 +575,12 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
     struct Context<'a> {
         tree: &'a FlatTree,
         contours: HashMap<AbsIndex, Vec<BoundVarIndex>>,
-        non_garbage: HashSet<BackingIndex>,
+        alive: HashSet<BackingIndex>,
     }
 
     impl<'a> Context<'a> {
         fn check_prev_index(&self, index: BackingIndex) -> ContourResult<PrevIndex> {
+            self.check_not_garbage(index)?;
             match self.tree.get_ref(index) {
                 NodeRef::BoundVar(_, index) => Ok(PrevIndex::Var(index)),
                 NodeRef::Abs(_, index) => Ok(PrevIndex::Abs(index)),
@@ -591,6 +592,7 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
         }
 
         fn check_abs_index(&self, index: AbsIndex) -> ContourResult<&'a Abstraction> {
+            self.check_not_garbage(index.0)?;
             match self.tree.get(index.0) {
                 Node::Abs(abstraction) => ContourResult::Ok(abstraction),
                 node => ContourResult::Err(ContourError::ExpectedAbs {
@@ -601,6 +603,7 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
         }
 
         fn check_bound_var_index(&self, index: BoundVarIndex) -> ContourResult<&'a BoundVariable> {
+            self.check_not_garbage(index.0)?;
             match self.tree.get(index.0) {
                 Node::BoundVar(bound_variable) => ContourResult::Ok(bound_variable),
                 node => ContourResult::Err(ContourError::ExpectedBoundVar {
@@ -658,7 +661,7 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
             Ok(())
         }
 
-        fn check_bound_var_for_loop(&self, bound_var: BoundVarIndex) -> ContourResult<()> {
+        fn check_binding_abs(&self, bound_var: BoundVarIndex) -> ContourResult<()> {
             // We expect this to be a non-looping linked list
 
             // Check backwards
@@ -719,16 +722,42 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
             Ok(())
         }
 
-        fn mark_not_garbage(&mut self, node: BackingIndex) {
-            self.non_garbage.insert(node);
+        fn mark_not_garbage(&mut self, node: BackingIndex) -> ContourResult<()> {
+            let is_new_value = self.alive.insert(node);
+            if is_new_value {
+                Ok(())
+            } else {
+                Err(ContourError::LoopDetectedInTree { node })
+            }
+        }
+
+        fn check_not_garbage(&self, node: BackingIndex) -> ContourResult<()> {
+            if self.alive.contains(&node) {
+                Ok(())
+            } else {
+                Err(ContourError::NodeIsGarbage { node })
+            }
         }
     }
 
+    fn get_alive_nodes(ctx: &mut Context, node: BackingIndex) -> ContourResult<()> {
+        ctx.mark_not_garbage(node)?;
+        match ctx.tree.get(node) {
+            Node::FreeVar(_) => (),
+            Node::BoundVar(_) => (),
+            Node::Abs(abstraction) => get_alive_nodes(ctx, abstraction.body)?,
+            Node::App(application) => {
+                get_alive_nodes(ctx, application.func)?;
+                get_alive_nodes(ctx, application.arg)?;
+            }
+        }
+        Ok(())
+    }
+
     fn _check_contours(ctx: &mut Context, node: BackingIndex) -> ContourResult<()> {
-        ctx.mark_not_garbage(node);
         match ctx.tree.get_ref(node) {
             NodeRef::FreeVar(_, _) => Ok(()),
-            NodeRef::BoundVar(_, bound_var) => ctx.check_bound_var_for_loop(bound_var),
+            NodeRef::BoundVar(_, bound_var) => ctx.check_binding_abs(bound_var),
             NodeRef::Abs(abstraction, abs_idx) => {
                 ctx.check_contour(abstraction, abs_idx)?;
                 _check_contours(ctx, abstraction.body)
@@ -743,9 +772,11 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
     let mut ctx = Context {
         tree,
         contours: HashMap::new(),
-        non_garbage: HashSet::new(),
+        alive: HashSet::new(),
     };
+    get_alive_nodes(&mut ctx, tree.root)?;
     _check_contours(&mut ctx, tree.root)?;
+
     Ok(())
 }
 pub type ContourResult<T> = Result<T, ContourError>;
@@ -786,6 +817,12 @@ pub enum ContourError {
     LoopDetectedFromNext {
         node: BoundVarIndex,
         next: BoundVarIndex,
+    },
+    NodeIsGarbage {
+        node: BackingIndex,
+    },
+    LoopDetectedInTree {
+        node: BackingIndex,
     },
 }
 
