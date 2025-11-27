@@ -1,4 +1,6 @@
-#
+benchmaxx:
+    cargo nextest run --release --profile strong-only --features strong-only --test-threads=1
+
 benchmark:
     cargo nextest run --release --profile strong-only --features strong-only
 
