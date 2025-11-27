@@ -14,9 +14,7 @@ static TEST_COUNT: LazyLock<u64> =
 #[derive(Debug, Parser)]
 struct Args {
     #[arg(value_parser = clap::value_parser!(u64).range(0..*TEST_COUNT))]
-    start: u64,
-    #[arg(value_parser = clap::value_parser!(u64).range(0..*TEST_COUNT))]
-    end: Option<u64>,
+    tests: Vec<u64>,
     #[arg(short, long)]
     all: bool,
     #[arg(short, long, action)]
@@ -28,19 +26,16 @@ struct Args {
 }
 
 fn main() {
-    let mut args = Args::parse();
+    let args = Args::parse();
 
-    let n = args.start;
-    if args.all {
-        args.end = Some(*TEST_COUNT - 1);
-    }
-
-    if let Some(end) = args.end {
-        for i in n..=end {
-            run(i as _, &args);
-        }
+    let tests = if args.all {
+        (0..(*TEST_COUNT - 1)).collect::<Vec<_>>()
     } else {
-        run(n as _, &args);
+        args.tests.clone()
+    };
+
+    for i in tests {
+        run(i as _, &args);
     }
 }
 
