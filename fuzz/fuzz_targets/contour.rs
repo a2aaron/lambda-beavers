@@ -2,7 +2,11 @@
 
 use libfuzzer_sys::{Corpus, arbitrary::Arbitrary, fuzz_target};
 
-use lambda_beavers::{debruijn::Debruijn, flat_tree::check_contours, reduce::Reducer};
+use lambda_beavers::{
+    debruijn::Debruijn,
+    flat_tree::check_contours,
+    reduce::{GarbageCollectionStrategy, Reducer},
+};
 
 #[derive(Arbitrary)]
 struct DebruijnWrapper(Debruijn);
@@ -39,7 +43,7 @@ fuzz_target!(|debruijn: DebruijnWrapper| -> Corpus {
     }
     // println!("TEST CASE = {debruijn}");
     let mut reducer = Reducer::new(&debruijn.0);
-
+    reducer.gc_strategy = Some(GarbageCollectionStrategy::with_ratio(0.0));
     assert_contour(&reducer);
     reducer.reduce_one();
     assert_contour(&reducer);

@@ -486,52 +486,41 @@ pub fn normalize(tree: &FlatTree) -> FlatTree {
 }
 
 pub fn normalize_into(old_tree: &FlatTree, new_tree: &mut FlatTree) {
+    struct Contour {
+        old_abs: AbsIndex,
+        new_abs: AbsIndex,
+    }
+
     struct Context<'a> {
         old_tree: &'a FlatTree,
         new_tree: &'a mut FlatTree,
-        old_abs_chain: Vec<AbsIndex>,
-        new_abs_chain: Vec<AbsIndex>,
-        new_abs_contours: HashMap<AbsIndex, Vec<BoundVarIndex>>,
+        contours: Vec<Contour>,
     }
 
     impl<'a> Context<'a> {
         fn push(&mut self, old_abs_index: AbsIndex, new_abs_index: AbsIndex) {
-            self.old_abs_chain.push(old_abs_index);
-            self.new_abs_chain.push(new_abs_index);
-            self.new_abs_contours.insert(new_abs_index, vec![]);
+            let contour = Contour {
+                old_abs: old_abs_index,
+                new_abs: new_abs_index,
+            };
+            self.contours.push(contour);
         }
 
         fn pop(&mut self) {
-            self.old_abs_chain.pop();
-            self.new_abs_chain.pop();
+            self.contours.pop();
         }
 
         fn old_to_new(&self, old_abs: AbsIndex) -> AbsIndex {
-            let debruijn_depth = self
-                .old_abs_chain
+            self.contours
                 .iter()
-                .position(|idx| *idx == old_abs)
-                .unwrap();
-
-            let new_abs_index = self.new_abs_chain[debruijn_depth];
-            new_abs_index
-        }
-
-        fn add_new_var(&mut self, new_abs: AbsIndex, new_var: BoundVarIndex) {
-            self.new_abs_contours
-                .get_mut(&new_abs)
+                .find_map(|contour| {
+                    if contour.old_abs == old_abs {
+                        Some(contour.new_abs)
+                    } else {
+                        None
+                    }
+                })
                 .unwrap()
-                .push(new_var)
-        }
-
-        fn get_prev_for_contour(&self, new_abs_idx: AbsIndex) -> PrevIndex {
-            match self.new_abs_contours.get(&new_abs_idx) {
-                Some(contour) => match contour.last() {
-                    Some(last_var) => PrevIndex::Var(*last_var),
-                    None => PrevIndex::Abs(new_abs_idx),
-                },
-                None => unreachable!(),
-            }
         }
     }
 
@@ -540,20 +529,27 @@ pub fn normalize_into(old_tree: &FlatTree, new_tree: &mut FlatTree) {
             NodeRef::FreeVar(free, _) => ctx.new_tree.alloc_free_var(*free),
             NodeRef::BoundVar(old_var, _) => {
                 let old_abs_idx = ctx.old_tree.get_binding_abs(old_var);
-                let new_abs_idx = ctx.old_to_new(old_abs_idx);
-                let new_prev = ctx.get_prev_for_contour(new_abs_idx);
+                let new_abs = ctx.old_to_new(old_abs_idx);
 
                 let new_var_index = ctx.new_tree.alloc_blank_var();
-                ctx.add_new_var(new_abs_idx, new_var_index);
-                ctx.new_tree.fixup_next(new_prev, new_var_index);
+
+                let abs = ctx.new_tree.get_abs_mut(new_abs);
+                let entrance = abs.entrance;
+                abs.entrance = Some(new_var_index);
 
                 let new_var = ctx.new_tree.get_bound_var_mut(new_var_index);
-                new_var.prev = new_prev.into();
+                new_var.next = entrance;
+                new_var.prev = new_abs.0;
+
+                if let Some(entrance) = entrance {
+                    let entrance = ctx.new_tree.get_bound_var_mut(entrance);
+                    entrance.prev = new_var_index.0;
+                }
 
                 new_var_index.0
             }
-            NodeRef::Abs(abstraction, old_abs_index) => {
-                let old_body_index = abstraction.body;
+            NodeRef::Abs(old_abs, old_abs_index) => {
+                let old_body_index = old_abs.body;
 
                 let new_abs_index = ctx.new_tree.alloc_blank_abs();
 
@@ -580,9 +576,7 @@ pub fn normalize_into(old_tree: &FlatTree, new_tree: &mut FlatTree) {
     let mut ctx = Context {
         old_tree,
         new_tree,
-        old_abs_chain: vec![],
-        new_abs_chain: vec![],
-        new_abs_contours: HashMap::new(),
+        contours: vec![],
     };
 
     let root_node = _normalize(&mut ctx, old_tree.root);
