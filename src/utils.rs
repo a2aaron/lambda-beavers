@@ -59,7 +59,7 @@ pub mod strong_reduction_test {
     use crate::{
         debruijn::Debruijn,
         parse,
-        reduce::{Reducer, ReductionResult},
+        reduce::{GarbageCollectionStrategy, Reducer, ReductionResult},
     };
 
     pub fn parse_line(line: &str) -> (Debruijn, Debruijn) {
@@ -80,6 +80,7 @@ pub mod strong_reduction_test {
         timeout: Option<Duration>,
     ) -> (Option<ReductionResult>, Duration) {
         let mut reducer = Reducer::new(term);
+        reducer.gc_strategy = Some(GarbageCollectionStrategy::with_ratio(8.0));
         let now = Instant::now();
         loop {
             if let Some(value) = reducer.reduce_one() {

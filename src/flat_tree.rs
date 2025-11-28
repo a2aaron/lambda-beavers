@@ -22,13 +22,27 @@ pub struct FlatTree {
     // The into-root edge, which has no parent and whose child is the root node itself
     // --> root
     pub root: BackingIndex,
+    pub garbage_count: usize,
 }
 impl FlatTree {
-    fn new() -> FlatTree {
+    pub fn new() -> FlatTree {
+        FlatTree::with_capacity(0)
+    }
+
+    fn with_capacity(capacity: usize) -> FlatTree {
         FlatTree {
-            backing: vec![],
+            backing: Vec::with_capacity(capacity),
             root: BackingIndex(0),
+            garbage_count: 0,
         }
+    }
+
+    pub fn total_count(&self) -> usize {
+        self.backing.len()
+    }
+
+    pub fn alive_count(&self) -> usize {
+        self.total_count() - self.garbage_count
     }
 
     pub fn get(&self, index: BackingIndex) -> &Node {
@@ -465,6 +479,13 @@ impl ParentEdge {
 // # NORMALIZE #
 // #############
 pub fn normalize(tree: &FlatTree) -> FlatTree {
+    let alive_count = tree.alive_count();
+    let mut new_tree = FlatTree::with_capacity(alive_count);
+    normalize_into(tree, &mut new_tree);
+    new_tree
+}
+
+pub fn normalize_into(old_tree: &FlatTree, new_tree: &mut FlatTree) {
     struct Context<'a> {
         old_tree: &'a FlatTree,
         new_tree: &'a mut FlatTree,
@@ -556,19 +577,16 @@ pub fn normalize(tree: &FlatTree) -> FlatTree {
         }
     }
 
-    let mut new_tree = FlatTree::new();
-
     let mut ctx = Context {
-        old_tree: tree,
-        new_tree: &mut new_tree,
+        old_tree,
+        new_tree,
         old_abs_chain: vec![],
         new_abs_chain: vec![],
         new_abs_contours: HashMap::new(),
     };
 
-    let root_node = _normalize(&mut ctx, tree.root);
+    let root_node = _normalize(&mut ctx, old_tree.root);
     new_tree.root = root_node;
-    new_tree
 }
 
 pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {

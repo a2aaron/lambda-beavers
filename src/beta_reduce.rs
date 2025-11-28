@@ -62,6 +62,12 @@ pub fn beta_reduce(tree: &mut FlatTree, redex: &RedexMut) -> BackingIndex {
     //  VV
     // [various copies of arg]
     repoint_node(tree, redex.parent_to_app, new_body);
+
+    // The app and abs nodes will always be garbage after this method.
+    // The arg subtree becomes garbage if the usage for it was zero (the accounting for this
+    // occurs in substitute, so there's no need to do it here)
+    tree.garbage_count += 2;
+
     new_body
 }
 
@@ -117,6 +123,10 @@ fn remove_bound_vars_from_contours(tree: &mut FlatTree, arg_index: BackingIndex)
     // TODO: Would be nice to check if the bound var is bound within the arg subtree--in these cases
     // there is no need to fix up the contours
     fn walk(ctx: &mut Context, node: BackingIndex) {
+        // The entire arg subtree will turn into garbage after this method, so we
+        // bump the garbage count for each node reached.
+        ctx.tree.garbage_count += 1;
+
         match ctx.tree.get_ref(node) {
             NodeRef::FreeVar(_, _) => (),
             NodeRef::BoundVar(bound_variable, _) => {
@@ -177,6 +187,9 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
 }
 
 fn move_onto(tree: &mut FlatTree, src_node: BackingIndex, dest_node: BackingIndex) {
+    // src_node is garbage after this method
+    tree.garbage_count += 1;
+
     // Copy the src_node onto the dest_node
     {
         let src_node = tree.get(src_node).clone();

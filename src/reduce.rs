@@ -5,7 +5,7 @@ use clap::ValueEnum;
 use crate::{
     beta_reduce::{self, RedexMut},
     debruijn::Debruijn,
-    flat_tree::{BackingIndex, DebruijnDepth, FlatTree, NodeRef, ParentEdge},
+    flat_tree::{BackingIndex, DebruijnDepth, FlatTree, NodeRef, ParentEdge, normalize_into},
     graphviz,
     utils::Rng,
 };
@@ -171,9 +171,26 @@ impl WalkContext {
     }
 }
 
+pub struct GarbageCollectionStrategy {
+    // Ratio of garbage nodes to alive nodes to determine when to do GC
+    minimum_ratio: f32,
+    other_tree: FlatTree,
+}
+
+impl GarbageCollectionStrategy {
+    pub fn with_ratio(minimum_ratio: f32) -> GarbageCollectionStrategy {
+        GarbageCollectionStrategy {
+            minimum_ratio,
+            other_tree: FlatTree::new(),
+        }
+    }
+}
+
 pub struct Reducer {
     pub tree: FlatTree,
     walk_ctx: WalkContext,
+    pub gc_strategy: Option<GarbageCollectionStrategy>,
+    pub total_gc: usize,
 }
 
 impl Reducer {
@@ -182,6 +199,8 @@ impl Reducer {
         Self {
             walk_ctx: WalkContext::new(&tree),
             tree,
+            gc_strategy: None,
+            total_gc: 0,
         }
     }
 
@@ -196,53 +215,78 @@ impl Reducer {
         None
     }
 
-    pub fn reduce_one(&mut self) -> Option<ReductionResult> {
-        graphviz::debug_write_to_file_with_ctx(&self.tree, Some(&self.walk_ctx), "before_find");
-        if let Some(redex) = self.find_redex() {
-            graphviz::debug_write_to_file_with_ctx(
-                &self.tree,
-                Some(&self.walk_ctx),
-                "before_beta_reduce",
-            );
+    fn should_gc(&self) -> bool {
+        if let Some(gc_strategy) = &self.gc_strategy {
+            let garbage_count = self.tree.garbage_count;
+            let alive_count = self.tree.alive_count();
+            let garbage_ratio = garbage_count as f32 / alive_count as f32;
+            garbage_ratio > gc_strategy.minimum_ratio
+        } else {
+            false
+        }
+    }
 
-            let new_body = beta_reduce::beta_reduce(&mut self.tree, &redex);
-
-            graphviz::debug_write_to_file_with_ctx(
-                &self.tree,
-                Some(&self.walk_ctx),
-                "after_beta_reduce",
-            );
-
-            // If the most recent application is the immediate parent of the redex, revisit it to check if it's a redex
-            let should_rewalk_parent = if let Some(last_frame) = self.walk_ctx.stack.last_mut() {
-                let is_app = matches!(self.tree.get_ref(last_frame.index), NodeRef::App(_, _));
-                assert!(is_app);
-                assert!(last_frame.state != WalkState::FirstVisit);
-
-                if let Some(immediate_parent) = redex.parent_to_app.parent()
-                    && immediate_parent == last_frame.index
-                {
-                    Some(last_frame)
-                } else {
-                    None
-                }
-            } else {
-                None
-            };
-
-            if let Some(last_frame) = should_rewalk_parent {
-                last_frame.state = WalkState::FirstVisit;
-            } else {
-                let frame =
-                    WalkFrame::first_visit(new_body, redex.parent_to_app, redex.debruijn_depth);
-                self.walk_ctx.push(frame)
+    fn perform_gc(&mut self) {
+        if let Some(gc) = &mut self.gc_strategy {
+            let alive_count = self.tree.alive_count();
+            let other_capacity = gc.other_tree.backing.capacity();
+            if alive_count > other_capacity {
+                let additional = alive_count - other_capacity;
+                gc.other_tree.backing.reserve(additional);
             }
 
-            graphviz::debug_write_to_file_with_ctx(&self.tree, Some(&self.walk_ctx), "after_fixup");
+            gc.other_tree.backing.clear();
+            gc.other_tree.garbage_count = 0;
+            normalize_into(&self.tree, &mut gc.other_tree);
+            std::mem::swap(&mut self.tree, &mut gc.other_tree);
+
+            // Need to reset the walk context to the beginning, as all of it's pointers are now stale
+            self.walk_ctx = WalkContext::new(&self.tree);
+            self.total_gc += 1;
+        }
+    }
+
+    pub fn reduce_one(&mut self) -> Option<ReductionResult> {
+        if let Some(redex) = self.find_redex() {
+            let new_body = beta_reduce::beta_reduce(&mut self.tree, &redex);
+
+            if self.should_gc() {
+                self.perform_gc();
+            } else {
+                self.fixup_walkcontext_after_reduction(new_body, redex);
+            }
             None
         } else {
             // This clone is fine, it occurs at the end of all reductions
             Some(ReductionResult::NormalForm(Debruijn::from(&self.tree)))
+        }
+    }
+
+    fn fixup_walkcontext_after_reduction(&mut self, new_body: BackingIndex, redex: RedexMut) {
+        // If the most recent application is the immediate parent of the redex, revisit it to check if it's a redex
+        let should_rewalk_parent = if let Some(last_frame) = self.walk_ctx.stack.last_mut() {
+            let is_app = matches!(self.tree.get_ref(last_frame.index), NodeRef::App(_, _));
+            assert!(is_app);
+            assert!(last_frame.state != WalkState::FirstVisit);
+
+            if let Some(immediate_parent) = redex.parent_to_app.parent()
+                && immediate_parent == last_frame.index
+            {
+                Some(last_frame)
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
+        if let Some(last_frame) = should_rewalk_parent {
+            // Re-walk the parent of the redex (because the parent is now a redex)
+            last_frame.state = WalkState::FirstVisit;
+        } else {
+            // Walk the body instead
+            let frame = WalkFrame::first_visit(new_body, redex.parent_to_app, redex.debruijn_depth);
+            self.walk_ctx.push(frame)
         }
     }
 }
