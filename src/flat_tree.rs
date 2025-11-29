@@ -310,7 +310,7 @@ pub struct FreeVariable {
     // Note that this is NOT a debruijn index, it's a debruijn depth, as it always refers
     // to a constant number of abstractions above the root, no matter how deeply nested the
     // actual index is
-    height: NonZeroU32,
+    pub height: NonZeroU32,
 }
 
 impl Display for FreeVariable {
