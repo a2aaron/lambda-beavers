@@ -23,14 +23,18 @@ def read_csv(csv_reader: csv.DictReader):
 
 def save_plot(filename, alive_nodes, garbage_nodes):
     # Plot the extracted data as a stacked area chart
-    plt.stackplot(
+    fig, ax = plt.subplots()
+    ax.stackplot(
         range(len(alive_nodes)),
-        alive_nodes,
-        garbage_nodes,
+        [alive_nodes, garbage_nodes],
         labels=[ALIVE_NODES, GARBAGE_NODES],
         colors=["#4CAF50", "#B0ACAC"],
     )
-    plt.legend(loc="upper left")
+    ax.set_xlabel("Reduction Step")
+    ax.set_ylabel("Number of Nodes")
+    ax.set_yscale("log")
+
+    ax.legend(loc="upper left")
 
     directory = os.path.dirname(filename)
     if not os.path.exists(directory):
