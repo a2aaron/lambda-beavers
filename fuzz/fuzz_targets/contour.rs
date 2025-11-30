@@ -4,7 +4,7 @@ use libfuzzer_sys::{Corpus, arbitrary::Arbitrary, fuzz_target};
 
 use lambda_beavers::{
     debruijn::Debruijn,
-    flat_tree::check_contours,
+    flat_tree::check_invariants,
     reduce::{GarbageCollectionStrategy, Reducer},
 };
 
@@ -19,7 +19,7 @@ impl std::fmt::Debug for DebruijnWrapper {
 
 #[track_caller]
 fn assert_contour(reducer: &Reducer) {
-    if let Err(error) = check_contours(&reducer.tree) {
+    if let Err(error) = check_invariants(&reducer.tree) {
         if reducer.gc_strategy.is_none() {
             panic!("[GC = N] Error for tree {}: {error:?}", reducer.tree);
         } else {
