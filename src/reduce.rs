@@ -5,7 +5,7 @@ use clap::ValueEnum;
 use crate::{
     beta_reduce::{self, RedexMut},
     debruijn::Debruijn,
-    flat_tree::{BackingIndex, DebruijnDepth, FlatTree, NodeRef, ParentEdge, normalize_into},
+    flat_tree::{BackingIndex, FlatTree, NodeRef, ParentEdge, normalize_into},
     graphviz,
     utils::Rng,
 };
@@ -20,16 +20,14 @@ pub enum WalkResult {
 pub struct WalkFrame {
     pub index: BackingIndex,
     pub parent: ParentEdge,
-    pub depth: DebruijnDepth,
     pub state: WalkState,
 }
 
 impl WalkFrame {
-    fn first_visit(index: BackingIndex, parent: ParentEdge, depth: DebruijnDepth) -> WalkFrame {
+    fn first_visit(index: BackingIndex, parent: ParentEdge) -> WalkFrame {
         WalkFrame {
             index,
             parent,
-            depth,
             state: WalkState::FirstVisit,
         }
     }
@@ -111,7 +109,7 @@ impl WalkContext {
 
     pub fn new(tree: &FlatTree) -> WalkContext {
         WalkContext {
-            stack: vec![WalkFrame::first_visit(tree.root, ParentEdge::IntoRoot, 0)],
+            stack: vec![WalkFrame::first_visit(tree.root, ParentEdge::IntoRoot)],
         }
     }
 
@@ -121,7 +119,6 @@ impl WalkContext {
             let WalkFrame {
                 index,
                 parent,
-                depth,
                 state,
             } = frame;
             match tree.get_ref(index) {
@@ -131,13 +128,12 @@ impl WalkContext {
                     self.push(WalkFrame::first_visit(
                         abstraction.body,
                         ParentEdge::AbsToBody(index),
-                        depth + 1,
                     ));
                 }
                 NodeRef::App(application, app_index) => {
                     match state {
                         WalkState::FirstVisit => {
-                            if let Some(redex) = RedexMut::try_get(tree, depth, parent, app_index) {
+                            if let Some(redex) = RedexMut::try_get(tree, parent, app_index) {
                                 // Don't push anything onto the stack--we expect this redex to be processed before returning to walk_one
                                 return WalkResult::Some(redex);
                             } else {
@@ -148,7 +144,6 @@ impl WalkContext {
                                 self.push(WalkFrame::first_visit(
                                     application.func,
                                     ParentEdge::AppToFunc(app_index),
-                                    depth,
                                 ));
                             }
                         }
@@ -157,7 +152,6 @@ impl WalkContext {
                             self.push(WalkFrame::first_visit(
                                 application.arg,
                                 ParentEdge::AppToArg(app_index),
-                                depth,
                             ));
                         }
                         WalkState::ThirdVisit => (),
@@ -285,7 +279,7 @@ impl Reducer {
             last_frame.state = WalkState::FirstVisit;
         } else {
             // Walk the body instead
-            let frame = WalkFrame::first_visit(new_body, redex.parent_to_app, redex.debruijn_depth);
+            let frame = WalkFrame::first_visit(new_body, redex.parent_to_app);
             self.walk_ctx.push(frame)
         }
     }

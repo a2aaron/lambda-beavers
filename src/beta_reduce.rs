@@ -1,7 +1,7 @@
 use crate::{
     flat_tree::{
-        AbsIndex, AppIndex, BackingIndex, BoundVarIndex, DebruijnDepth, FlatTree, Node, NodeRef,
-        ParentEdge, PrevIndex,
+        AbsIndex, AppIndex, BackingIndex, BoundVarIndex, FlatTree, Node, NodeRef, ParentEdge,
+        PrevIndex,
     },
     graphviz,
 };
@@ -371,8 +371,7 @@ fn repoint_parent_to_child(tree: &mut FlatTree, parent: ParentEdge, child: Backi
 #[derive(Debug, Clone)]
 pub struct RedexMut {
     // The number of abstractions in the parent chain above this redex
-    pub debruijn_depth: DebruijnDepth,
-
+    // pub debruijn_depth: DebruijnDepth,
     pub parent_to_app: ParentEdge,
     // The index of the redex application node
     pub app_index: AppIndex,
@@ -420,14 +419,12 @@ impl RedexMut {
 
     pub fn try_get(
         tree: &FlatTree,
-        debruijn_depth: DebruijnDepth,
         parent_to_app: ParentEdge,
         app_index: AppIndex,
     ) -> Option<RedexMut> {
         let app = tree.get_app(app_index);
         if let NodeRef::Abs(abs, func_index) = tree.get_ref(app.func) {
             let redex = RedexMut {
-                debruijn_depth,
                 parent_to_app,
                 app_index,
                 func_index,
@@ -444,7 +441,6 @@ impl FlatTree {
     pub fn get_redexes(&self) -> Vec<RedexMut> {
         struct Context<'a> {
             tree: &'a FlatTree,
-            debruijn_depth: DebruijnDepth,
             redexes: Vec<RedexMut>,
         }
 
@@ -453,17 +449,10 @@ impl FlatTree {
                 NodeRef::FreeVar(_, _) => (),
                 NodeRef::BoundVar(_, _) => (),
                 NodeRef::Abs(abstraction, index) => {
-                    ctx.debruijn_depth += 1;
                     _get_redexes(ctx, abstraction.body, ParentEdge::AbsToBody(index));
-                    ctx.debruijn_depth -= 1;
                 }
                 NodeRef::App(application, app_index) => {
-                    if let Some(redex) = RedexMut::try_get(
-                        ctx.tree,
-                        ctx.debruijn_depth,
-                        parent_to_current,
-                        app_index,
-                    ) {
+                    if let Some(redex) = RedexMut::try_get(ctx.tree, parent_to_current, app_index) {
                         ctx.redexes.push(redex);
                     }
                     _get_redexes(ctx, application.func, ParentEdge::AppToFunc(app_index));
@@ -474,7 +463,6 @@ impl FlatTree {
 
         let mut ctx = Context {
             tree: self,
-            debruijn_depth: 0,
             redexes: vec![],
         };
         _get_redexes(&mut ctx, self.root, ParentEdge::IntoRoot);

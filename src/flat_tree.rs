@@ -10,12 +10,6 @@ use std::{
 
 use crate::debruijn::Debruijn;
 
-// The depth relative to some term. This is used to determine if a variable is free within a term
-// If a given Index node has a DebruijnIndex >= DebruijnDepth, then that Index node is a free variable
-// with respect to that subtree)
-// Zero indicates that there are no abstractions between the two terms, one indicates one abstraction, etc
-pub type DebruijnDepth = usize;
-
 #[derive(Debug, Clone)]
 pub struct FlatTree {
     pub backing: Vec<Node>,
