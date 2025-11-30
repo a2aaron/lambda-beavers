@@ -352,7 +352,7 @@ mod test {
 
     use crate::{
         debruijn::Debruijn,
-        flat_tree::check_contours,
+        flat_tree::check_invariants,
         reduce::{GarbageCollectionStrategy, Reducer, ReductionResult},
     };
 
@@ -368,15 +368,10 @@ mod test {
         let mut reducer = Reducer::new(debruijn);
         reducer.gc_strategy = gc_strategy;
         for _ in 0..10 {
-            assert_contour(&reducer);
+            if let Err(error) = check_invariants(&reducer.tree) {
+                panic!("Error for tree {}: {error:?}", reducer.tree);
+            }
             reducer.reduce_one();
-        }
-    }
-
-    #[track_caller]
-    fn assert_contour(reducer: &Reducer) {
-        if let Err(error) = check_contours(&reducer.tree) {
-            panic!("Error for tree {}: {error:?}", reducer.tree);
         }
     }
 

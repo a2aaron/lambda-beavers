@@ -64,7 +64,7 @@ fn assert_contour(test: &str, test_i: usize) {
     let mut reducer = Reducer::new(&starting);
     loop {
         let result = reducer.reduce_one();
-        if let Err(err) = flat_tree::check_contours(&reducer.tree) {
+        if let Err(err) = flat_tree::check_invariants(&reducer.tree) {
             println!("Failed test case #{test_i} - {test}: ({starting} -> {expected})");
             panic!(
                 "Contour check failed in {} (original: {}). Error: {err:?}",

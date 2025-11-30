@@ -609,7 +609,7 @@ pub fn normalize_into(old_tree: &FlatTree, new_tree: &mut FlatTree) {
     new_tree.root = root_node;
 }
 
-pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
+pub fn check_invariants(tree: &FlatTree) -> CheckResult<()> {
     struct Context<'a> {
         tree: &'a FlatTree,
         contours: HashMap<AbsIndex, Vec<BoundVarIndex>>,
@@ -617,59 +617,59 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
     }
 
     impl<'a> Context<'a> {
-        fn check_prev_index(&self, index: BackingIndex) -> ContourResult<PrevIndex> {
+        fn get_prev_checked(&self, index: BackingIndex) -> CheckResult<PrevIndex> {
             self.check_not_garbage(index)?;
             match self.tree.get_ref(index) {
                 NodeRef::BoundVar(_, index) => Ok(PrevIndex::Var(index)),
                 NodeRef::Abs(_, index) => Ok(PrevIndex::Abs(index)),
-                noderef => Err(ContourError::ExpectedAbsOrBoundVar {
+                noderef => Err(CheckError::ExpectedAbsOrBoundVar {
                     index,
                     actual: noderef.clone_node(),
                 }),
             }
         }
 
-        fn check_abs_index(&self, index: AbsIndex) -> ContourResult<&'a Abstraction> {
+        fn get_abs_checked(&self, index: AbsIndex) -> CheckResult<&'a Abstraction> {
             self.check_not_garbage(index.0)?;
             match self.tree.get(index.0) {
-                Node::Abs(abstraction) => ContourResult::Ok(abstraction),
-                node => ContourResult::Err(ContourError::ExpectedAbs {
+                Node::Abs(abstraction) => CheckResult::Ok(abstraction),
+                node => CheckResult::Err(CheckError::ExpectedAbs {
                     index,
                     actual: node.clone(),
                 }),
             }
         }
 
-        fn check_app_index(&self, index: AppIndex) -> ContourResult<&'a Application> {
+        fn get_app_checked(&self, index: AppIndex) -> CheckResult<&'a Application> {
             self.check_not_garbage(index.0)?;
             match self.tree.get(index.0) {
-                Node::App(application) => ContourResult::Ok(application),
-                node => ContourResult::Err(ContourError::ExpectedApp {
+                Node::App(application) => CheckResult::Ok(application),
+                node => CheckResult::Err(CheckError::ExpectedApp {
                     index,
                     actual: node.clone(),
                 }),
             }
         }
 
-        fn check_bound_var_index(&self, index: BoundVarIndex) -> ContourResult<&'a BoundVariable> {
+        fn get_bound_var_checked(&self, index: BoundVarIndex) -> CheckResult<&'a BoundVariable> {
             self.check_not_garbage(index.0)?;
             match self.tree.get(index.0) {
-                Node::BoundVar(bound_variable) => ContourResult::Ok(bound_variable),
-                node => ContourResult::Err(ContourError::ExpectedBoundVar {
+                Node::BoundVar(bound_variable) => CheckResult::Ok(bound_variable),
+                node => CheckResult::Err(CheckError::ExpectedBoundVar {
                     index,
                     actual: node.clone(),
                 }),
             }
         }
 
-        fn check_contour(&mut self, abs: &Abstraction, abs_idx: AbsIndex) -> ContourResult<()> {
+        fn check_contour(&mut self, abs: &Abstraction, abs_idx: AbsIndex) -> CheckResult<()> {
             let mut contour = vec![];
 
             if let Some(entrance) = abs.entrance {
-                let node1 = self.check_bound_var_index(entrance)?;
-                let prev_of_node1 = self.check_prev_index(node1.prev)?;
+                let node1 = self.get_bound_var_checked(entrance)?;
+                let prev_of_node1 = self.get_prev_checked(node1.prev)?;
                 if prev_of_node1 != PrevIndex::Abs(abs_idx) {
-                    return Err(ContourError::PrevEntranceMismatch {
+                    return Err(CheckError::PrevEntranceMismatch {
                         abs: abs_idx,
                         entrance_of_abs: entrance,
                         entrance,
@@ -682,13 +682,13 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
                 // match up.
                 loop {
                     contour.push(node1_idx);
-                    let node1 = self.check_bound_var_index(node1_idx)?;
+                    let node1 = self.get_bound_var_checked(node1_idx)?;
                     if let Some(next_of_node1) = node1.next {
-                        let node2 = self.check_bound_var_index(next_of_node1)?;
+                        let node2 = self.get_bound_var_checked(next_of_node1)?;
 
-                        let prev_of_node2 = self.check_prev_index(node2.prev)?;
+                        let prev_of_node2 = self.get_prev_checked(node2.prev)?;
                         if prev_of_node2 != PrevIndex::Var(node1_idx) {
-                            return Err(ContourError::PrevNextMismatch {
+                            return Err(CheckError::PrevNextMismatch {
                                 node1: node1_idx,
                                 next_of_node1,
                                 prev_of_node2,
@@ -710,19 +710,19 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
             Ok(())
         }
 
-        fn check_binding_abs(&self, bound_var: BoundVarIndex) -> ContourResult<()> {
+        fn check_binding_abs(&self, bound_var: BoundVarIndex) -> CheckResult<()> {
             // We expect this to be a non-looping linked list
 
             // Check backwards
             let mut contour_backwards = vec![];
             let mut this_var = bound_var;
             let abs_index = loop {
-                let bound_var = self.check_bound_var_index(this_var)?;
-                let prev = self.check_prev_index(bound_var.prev)?;
+                let bound_var = self.get_bound_var_checked(this_var)?;
+                let prev = self.get_prev_checked(bound_var.prev)?;
                 match prev {
                     PrevIndex::Var(prev) => {
                         if contour_backwards.contains(&prev) {
-                            return Err(ContourError::LoopDetectedFromPrev {
+                            return Err(CheckError::LoopDetectedFromPrev {
                                 node: this_var,
                                 prev,
                             });
@@ -737,11 +737,11 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
             let mut contour_forwards = vec![];
             let mut this_var = bound_var;
             loop {
-                let bound_var = self.check_bound_var_index(this_var)?;
+                let bound_var = self.get_bound_var_checked(this_var)?;
                 match bound_var.next {
                     Some(next) => {
                         if contour_forwards.contains(&next) {
-                            return Err(ContourError::LoopDetectedFromNext {
+                            return Err(CheckError::LoopDetectedFromNext {
                                 node: this_var,
                                 next,
                             });
@@ -760,9 +760,9 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
             contour.push(bound_var);
             contour.extend(contour_forwards);
 
-            let abs = self.check_abs_index(abs_index)?;
+            let abs = self.get_abs_checked(abs_index)?;
             if abs.entrance.is_none() {
-                return Err(ContourError::AbsIsNoneButHasBoundVars {
+                return Err(CheckError::AbsIsNoneButHasBoundVars {
                     abs: abs_index,
                     contour,
                 });
@@ -771,37 +771,37 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
             Ok(())
         }
 
-        fn mark_not_garbage(&mut self, node: BackingIndex) -> ContourResult<()> {
+        fn mark_not_garbage(&mut self, node: BackingIndex) -> CheckResult<()> {
             let is_new_value = self.alive.insert(node);
             if is_new_value {
                 Ok(())
             } else {
-                Err(ContourError::LoopDetectedInTree { node })
+                Err(CheckError::LoopDetectedInTree { node })
             }
         }
 
-        fn check_not_garbage(&self, node: BackingIndex) -> ContourResult<()> {
+        fn check_not_garbage(&self, node: BackingIndex) -> CheckResult<()> {
             if self.alive.contains(&node) {
                 Ok(())
             } else {
-                Err(ContourError::NodeIsGarbage { node })
+                Err(CheckError::NodeIsGarbage { node })
             }
         }
 
-        fn check_back_edge(&self, bound_var_index: BoundVarIndex) -> ContourResult<()> {
-            let bound_var = *self.check_bound_var_index(bound_var_index)?;
+        fn check_back_edge(&self, bound_var_index: BoundVarIndex) -> CheckResult<()> {
+            let bound_var = *self.get_bound_var_checked(bound_var_index)?;
             let parent_edge = bound_var.parent;
             match parent_edge {
                 ParentEdge::IntoRoot => {
-                    return Err(ContourError::MissingParent {
+                    return Err(CheckError::MissingParent {
                         bound_var,
                         bound_var_index,
                     });
                 }
                 ParentEdge::AbsToBody(abs_index) => {
-                    let abs = self.check_abs_index(abs_index)?;
+                    let abs = self.get_abs_checked(abs_index)?;
                     if abs.body != bound_var_index.0 {
-                        return Err(ContourError::BoundVarParentMismatch {
+                        return Err(CheckError::BoundVarParentMismatch {
                             bound_var,
                             parent_edge,
                             actual_parent: Node::Abs(abs.clone()),
@@ -809,9 +809,9 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
                     }
                 }
                 ParentEdge::AppToFunc(app_index) => {
-                    let app = self.check_app_index(app_index)?;
+                    let app = self.get_app_checked(app_index)?;
                     if app.func != bound_var_index.0 {
-                        return Err(ContourError::BoundVarParentMismatch {
+                        return Err(CheckError::BoundVarParentMismatch {
                             bound_var,
                             parent_edge,
                             actual_parent: Node::App(app.clone()),
@@ -819,9 +819,9 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
                     }
                 }
                 ParentEdge::AppToArg(app_index) => {
-                    let app = self.check_app_index(app_index)?;
+                    let app = self.get_app_checked(app_index)?;
                     if app.arg != bound_var_index.0 {
-                        return Err(ContourError::BoundVarParentMismatch {
+                        return Err(CheckError::BoundVarParentMismatch {
                             bound_var,
                             parent_edge,
                             actual_parent: Node::App(app.clone()),
@@ -833,7 +833,7 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
         }
     }
 
-    fn get_alive_nodes(ctx: &mut Context, node: BackingIndex) -> ContourResult<()> {
+    fn get_alive_nodes(ctx: &mut Context, node: BackingIndex) -> CheckResult<()> {
         ctx.mark_not_garbage(node)?;
         match ctx.tree.get(node) {
             Node::FreeVar(_) => (),
@@ -847,7 +847,7 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
         Ok(())
     }
 
-    fn _check_contours(ctx: &mut Context, node: BackingIndex) -> ContourResult<()> {
+    fn walk(ctx: &mut Context, node: BackingIndex) -> CheckResult<()> {
         match ctx.tree.get_ref(node) {
             NodeRef::FreeVar(_, _) => Ok(()),
             NodeRef::BoundVar(_, bound_var) => {
@@ -857,11 +857,11 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
             }
             NodeRef::Abs(abstraction, abs_idx) => {
                 ctx.check_contour(abstraction, abs_idx)?;
-                _check_contours(ctx, abstraction.body)
+                walk(ctx, abstraction.body)
             }
             NodeRef::App(application, _) => {
-                _check_contours(ctx, application.func)?;
-                _check_contours(ctx, application.arg)
+                walk(ctx, application.func)?;
+                walk(ctx, application.arg)
             }
         }
     }
@@ -872,14 +872,14 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
         alive: HashSet::new(),
     };
     get_alive_nodes(&mut ctx, tree.root)?;
-    _check_contours(&mut ctx, tree.root)?;
+    walk(&mut ctx, tree.root)?;
 
     Ok(())
 }
-pub type ContourResult<T> = Result<T, ContourError>;
+pub type CheckResult<T> = Result<T, CheckError>;
 
 #[derive(Debug)]
-pub enum ContourError {
+pub enum CheckError {
     ExpectedBoundVar {
         index: BoundVarIndex,
         actual: Node,
