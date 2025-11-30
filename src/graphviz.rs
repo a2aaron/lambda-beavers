@@ -217,6 +217,11 @@ fn get_edges(node_info: &NodeInfo) -> Vec<GraphvizEdge> {
                 let edge = GraphvizEdge::make_contour_edge(node_info, next.0);
                 edges.push(edge);
             }
+
+            if let Some(parent) = bound_var.parent.parent() {
+                let edge = GraphvizEdge::make_parent_edge(node_info, parent);
+                edges.push(edge);
+            }
         }
         // Add normal edges
         Node::Abs(abs) => {
@@ -473,6 +478,22 @@ impl GraphvizEdge {
         // Grey out edge if it is part of garbage
         if node_info.is_garbage {
             // attributes.set("constraint", "false");
+            attributes.set("color", GARBAGE_COLOR);
+            attributes.set("fontcolor", GARBAGE_COLOR);
+        }
+
+        GraphvizEdge::new(start, end, &attributes)
+    }
+
+    fn make_parent_edge(node_info: &NodeInfo, end: BackingIndex) -> GraphvizEdge {
+        let start = node_info.index;
+
+        let mut attributes = Attributes::new();
+        attributes.set("color", NORMAL_COLOR);
+        attributes.set("constraint", "false");
+
+        // Grey out edge if it is part of garbage
+        if node_info.is_garbage {
             attributes.set("color", GARBAGE_COLOR);
             attributes.set("fontcolor", GARBAGE_COLOR);
         }

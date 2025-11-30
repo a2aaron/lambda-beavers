@@ -20,7 +20,20 @@ impl std::fmt::Debug for DebruijnWrapper {
 #[track_caller]
 fn assert_contour(reducer: &Reducer) {
     if let Err(error) = check_contours(&reducer.tree) {
-        panic!("Error for tree {}: {error:?}", reducer.tree);
+        if reducer.gc_strategy.is_none() {
+            panic!("[GC = N] Error for tree {}: {error:?}", reducer.tree);
+        } else {
+            panic!("[GC = Y] Error for tree {}: {error:?}", reducer.tree);
+        }
+    }
+}
+
+fn assert_test_case(debruijn: &Debruijn, gc_strategy: Option<GarbageCollectionStrategy>) {
+    let mut reducer = Reducer::new(debruijn);
+    reducer.gc_strategy = gc_strategy;
+    for _ in 0..10 {
+        assert_contour(&reducer);
+        reducer.reduce_one();
     }
 }
 
@@ -41,23 +54,11 @@ fuzz_target!(|debruijn: DebruijnWrapper| -> Corpus {
     if !is_valid(&debruijn.0, 10) {
         return Corpus::Reject;
     }
-    // println!("TEST CASE = {debruijn}");
-    let mut reducer = Reducer::new(&debruijn.0);
-    reducer.gc_strategy = Some(GarbageCollectionStrategy::with_ratio(0.0));
-    assert_contour(&reducer);
-    reducer.reduce_one();
-    assert_contour(&reducer);
-    reducer.reduce_one();
-    assert_contour(&reducer);
-    reducer.reduce_one();
-    assert_contour(&reducer);
-    reducer.reduce_one();
-    assert_contour(&reducer);
-    reducer.reduce_one();
-    assert_contour(&reducer);
-    reducer.reduce_one();
-    assert_contour(&reducer);
-    reducer.reduce_one();
-    assert_contour(&reducer);
+    assert_test_case(&debruijn.0, None);
+    assert_test_case(
+        &debruijn.0,
+        Some(GarbageCollectionStrategy::with_ratio(0.0)),
+    );
+
     Corpus::Keep
 });

@@ -61,7 +61,7 @@ pub fn beta_reduce(tree: &mut FlatTree, redex: &RedexMut) -> BackingIndex {
     //  ||
     //  VV
     // [various copies of arg]
-    repoint_node(tree, redex.parent_to_app, new_body);
+    repoint_parent_to_child(tree, redex.parent_to_app, new_body);
 
     // The app and abs nodes will always be garbage after this method.
     // The arg subtree becomes garbage if the usage for it was zero (the accounting for this
@@ -168,70 +168,22 @@ fn substitute_nonzero_usage(tree: &mut FlatTree, redex: &RedexMut) {
     let abs = tree.get_abs(redex.func_index);
     let mut bound_var_index = abs.entrance.unwrap();
     loop {
+        tree.garbage_count += 1; // Bound Var becomes garbage at this point
+
         let bound_var = tree.get_bound_var(bound_var_index);
+        let parent = bound_var.parent;
         let next = bound_var.next;
 
         match next {
             Some(next) => {
                 let subtree = clone_subtree(tree, redex.arg_index);
-                move_onto(tree, subtree, bound_var_index.0);
+                repoint_parent_to_child(tree, parent, subtree);
                 bound_var_index = next;
             }
             None => {
                 // Optimization opportunity: Instead of making `arg` become garbage, instead reuse it and avoid doing one alloc.
-                move_onto(tree, redex.arg_index, bound_var_index.0);
+                repoint_parent_to_child(tree, parent, redex.arg_index);
                 break;
-            }
-        }
-    }
-}
-
-fn move_onto(tree: &mut FlatTree, src_node: BackingIndex, dest_node: BackingIndex) {
-    // src_node is garbage after this method
-    tree.garbage_count += 1;
-
-    // Copy the src_node onto the dest_node
-    {
-        let src_node = tree.get(src_node).clone();
-        let dest_node = tree.get_mut(dest_node);
-        *dest_node = src_node;
-    }
-
-    match tree.get_ref(dest_node) {
-        // Nothing to update for free vars
-        NodeRef::FreeVar(_, _) => (),
-        // Nothing to update for applications
-        NodeRef::App(_, _) => (),
-        // Need to update the contour.
-        // The next of this bound_var should have it's prev pointed to the new index
-        // And the prev of this bound_var should it's next/entrance pointed to the new index
-        NodeRef::BoundVar(bound_variable, bound_var_index) => {
-            let next = bound_variable.next;
-            let prev = bound_variable.prev(&tree);
-            // Fixup next
-            if let Some(next) = next {
-                let next = tree.get_bound_var_mut(next);
-                next.prev = bound_var_index.0;
-            }
-
-            // Fixup prev
-            match prev {
-                PrevIndex::Var(prev_var) => {
-                    let var = tree.get_bound_var_mut(prev_var);
-                    var.next = Some(bound_var_index);
-                }
-                PrevIndex::Abs(prev_abs) => {
-                    let abs = tree.get_abs_mut(prev_abs);
-                    abs.entrance = Some(bound_var_index);
-                }
-            }
-        }
-        // Need to update the contour
-        // If there is any entrance value, that bound var should have it's prev pointed to the new index
-        NodeRef::Abs(abstraction, abs_index) => {
-            if let Some(entrance) = abstraction.entrance {
-                let bound_var = tree.get_bound_var_mut(entrance);
-                bound_var.prev = abs_index.0;
             }
         }
     }
@@ -274,6 +226,7 @@ fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
         tree: &mut FlatTree,
         ctx: &mut CloneContext,
         old_node_index: BackingIndex,
+        parent: ParentEdge,
     ) -> BackingIndex {
         match tree.get_ref(old_node_index) {
             NodeRef::FreeVar(free_var, _) => {
@@ -283,7 +236,7 @@ fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
             NodeRef::BoundVar(variable, _) => {
                 let old_abs = tree.get_binding_abs(variable);
 
-                let new_var = tree.alloc_blank_var();
+                let new_var = tree.alloc_blank_var(parent);
                 if let Some(new_abs) = ctx.get_new_abs(old_abs) {
                     // If this is some, then the variable is bound within the subtree being cloned
                     // In this case, the variable needs to point to the new abstraction's contour
@@ -302,7 +255,12 @@ fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
                 let new_abs_index = tree.alloc_blank_abs();
 
                 ctx.push(old_abs, new_abs_index);
-                let new_body = _clone_subtree(tree, ctx, old_body_index);
+                let new_body = _clone_subtree(
+                    tree,
+                    ctx,
+                    old_body_index,
+                    ParentEdge::AbsToBody(new_abs_index),
+                );
                 ctx.pop();
 
                 let new_abs = tree.get_abs_mut(new_abs_index);
@@ -313,17 +271,30 @@ fn clone_subtree(tree: &mut FlatTree, index: BackingIndex) -> BackingIndex {
             NodeRef::App(application, _) => {
                 let old_func_index = application.func;
                 let old_arg_index = application.arg;
+                let new_app_index = tree.alloc_blank_app();
 
-                let new_func = _clone_subtree(tree, ctx, old_func_index);
-                let new_arg = _clone_subtree(tree, ctx, old_arg_index);
+                let new_func = _clone_subtree(
+                    tree,
+                    ctx,
+                    old_func_index,
+                    ParentEdge::AppToFunc(new_app_index),
+                );
+                let new_arg = _clone_subtree(
+                    tree,
+                    ctx,
+                    old_arg_index,
+                    ParentEdge::AppToArg(new_app_index),
+                );
 
-                let app_index = tree.alloc_app(new_func, new_arg);
-                app_index
+                let new_app = tree.get_app_mut(new_app_index);
+                new_app.func = new_func;
+                new_app.arg = new_arg;
+                new_app_index.0
             }
         }
     }
     let mut ctx = CloneContext::new();
-    _clone_subtree(tree, &mut ctx, index)
+    _clone_subtree(tree, &mut ctx, index, ParentEdge::IntoRoot)
 }
 
 fn insert_into_contour(tree: &mut FlatTree, abs_index: AbsIndex, var_index: BoundVarIndex) {
@@ -366,7 +337,7 @@ fn insert_into_contour(tree: &mut FlatTree, abs_index: AbsIndex, var_index: Boun
 /// child                  old child <- garbage
 ///
 /// MEMORY: Old child becomes garbage after repointing.
-fn repoint_node(tree: &mut FlatTree, parent: ParentEdge, child: BackingIndex) {
+fn repoint_parent_to_child(tree: &mut FlatTree, parent: ParentEdge, child: BackingIndex) {
     if parent.parent() == Some(child) {
         graphviz::debug_write_to_file(tree, "bad_repoint");
         panic!("attempt to repoint {parent:?} to {child} which would cause a loop (tree: {tree:?}");
@@ -385,6 +356,15 @@ fn repoint_node(tree: &mut FlatTree, parent: ParentEdge, child: BackingIndex) {
             app.arg = child;
         }
         ParentEdge::IntoRoot => tree.root = child,
+    }
+
+    // Also, if the child being re-parented is a bound var, fix up the bound var's
+    // backedge as well.
+    match tree.get_mut(child) {
+        Node::BoundVar(bound_variable) => {
+            bound_variable.parent = parent;
+        }
+        _ => (),
     }
 }
 

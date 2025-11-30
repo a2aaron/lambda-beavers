@@ -143,9 +143,16 @@ impl FlatTree {
 
     // Allocate a dummy BoundVar and return the BoundVarIndex to the dummy.
     // This dummy node should be set to something reasonable.
-    pub fn alloc_blank_var(&mut self) -> BoundVarIndex {
+    pub fn alloc_blank_var(&mut self, parent: ParentEdge) -> BoundVarIndex {
         let backing_index = BackingIndex::new(self.backing.len());
-        let dummy = Node::dummy_var();
+
+        let var = BoundVariable {
+            prev: BackingIndex::DUMMY,
+            next: None,
+            parent,
+        };
+
+        let dummy = Node::BoundVar(var);
         self.backing.push(dummy);
         BoundVarIndex(backing_index)
     }
@@ -154,9 +161,25 @@ impl FlatTree {
     // This dummy node should be set to something reasonable.
     pub fn alloc_blank_abs(&mut self) -> AbsIndex {
         let backing_index = BackingIndex::new(self.backing.len());
-        let dummy = Node::dummy_abs();
+        let abs = Abstraction {
+            body: BackingIndex::DUMMY,
+            entrance: None,
+        };
+        let dummy = Node::Abs(abs);
         self.backing.push(dummy);
         AbsIndex(backing_index)
+    }
+
+    pub fn alloc_blank_app(&mut self) -> AppIndex {
+        let backing_index = BackingIndex::new(self.backing.len());
+
+        let app = Application {
+            func: BackingIndex::DUMMY,
+            arg: BackingIndex::DUMMY,
+        };
+        let dummy = Node::App(app);
+        self.backing.push(dummy);
+        AppIndex(backing_index)
     }
 
     /// Given a bound variable, returns AbsIndex of the abstraction that the bound variable binds to
@@ -231,23 +254,6 @@ pub enum Node {
     Abs(Abstraction),
     App(Application),
 }
-impl Node {
-    fn dummy_abs() -> Node {
-        let abs = Abstraction {
-            body: BackingIndex::DUMMY,
-            entrance: None,
-        };
-        Node::Abs(abs)
-    }
-
-    fn dummy_var() -> Node {
-        let var = BoundVariable {
-            prev: BackingIndex::DUMMY,
-            next: None,
-        };
-        Node::BoundVar(var)
-    }
-}
 
 impl From<Abstraction> for Node {
     fn from(abs: Abstraction) -> Self {
@@ -319,10 +325,11 @@ impl Display for FreeVariable {
     }
 }
 
-#[derive(Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct BoundVariable {
     pub prev: BackingIndex,
     pub next: Option<BoundVarIndex>,
+    pub parent: ParentEdge,
 }
 
 impl Display for BoundVariable {
@@ -453,7 +460,7 @@ impl From<PrevIndex> for BackingIndex {
 ///    | edge type
 ///    V
 /// ```
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum ParentEdge {
     /// The "edge" has no parent, and the child here is the root of the tree
     IntoRoot,
@@ -522,29 +529,41 @@ pub fn normalize_into(old_tree: &FlatTree, new_tree: &mut FlatTree) {
                 })
                 .unwrap()
         }
+
+        fn add_to_contour(&mut self, new_abs: AbsIndex, new_var_index: BoundVarIndex) {
+            // Fixup abs entrance
+            let abs = self.new_tree.get_abs_mut(new_abs);
+            let entrance = abs.entrance;
+            abs.entrance = Some(new_var_index);
+
+            // Fixup bound var next + prev
+            let new_var = self.new_tree.get_bound_var_mut(new_var_index);
+            new_var.next = entrance;
+            new_var.prev = new_abs.0;
+
+            // Fixup the head-of-contour bound var, if one exists
+            if let Some(entrance) = entrance {
+                let entrance = self.new_tree.get_bound_var_mut(entrance);
+                entrance.prev = new_var_index.0;
+            }
+        }
     }
 
-    fn _normalize(ctx: &mut Context, old_node_index: BackingIndex) -> BackingIndex {
+    fn _normalize(
+        ctx: &mut Context,
+        old_node_index: BackingIndex,
+        parent: ParentEdge,
+    ) -> BackingIndex {
         match ctx.old_tree.get_ref(old_node_index) {
             NodeRef::FreeVar(free, _) => ctx.new_tree.alloc_free_var(*free),
             NodeRef::BoundVar(old_var, _) => {
                 let old_abs_idx = ctx.old_tree.get_binding_abs(old_var);
                 let new_abs = ctx.old_to_new(old_abs_idx);
 
-                let new_var_index = ctx.new_tree.alloc_blank_var();
+                let new_var_index = ctx.new_tree.alloc_blank_var(parent);
 
-                let abs = ctx.new_tree.get_abs_mut(new_abs);
-                let entrance = abs.entrance;
-                abs.entrance = Some(new_var_index);
-
-                let new_var = ctx.new_tree.get_bound_var_mut(new_var_index);
-                new_var.next = entrance;
-                new_var.prev = new_abs.0;
-
-                if let Some(entrance) = entrance {
-                    let entrance = ctx.new_tree.get_bound_var_mut(entrance);
-                    entrance.prev = new_var_index.0;
-                }
+                // Push newly allocated bound var into contour of abs
+                ctx.add_to_contour(new_abs, new_var_index);
 
                 new_var_index.0
             }
@@ -554,7 +573,8 @@ pub fn normalize_into(old_tree: &FlatTree, new_tree: &mut FlatTree) {
                 let new_abs_index = ctx.new_tree.alloc_blank_abs();
 
                 ctx.push(old_abs_index, new_abs_index);
-                let new_body = _normalize(ctx, old_body_index);
+                let new_body =
+                    _normalize(ctx, old_body_index, ParentEdge::AbsToBody(new_abs_index));
                 ctx.pop();
 
                 let abs = ctx.new_tree.get_abs_mut(new_abs_index);
@@ -565,10 +585,16 @@ pub fn normalize_into(old_tree: &FlatTree, new_tree: &mut FlatTree) {
             NodeRef::App(application, _) => {
                 let old_func_index = application.func;
                 let old_arg_index = application.arg;
+                let new_app_index = ctx.new_tree.alloc_blank_app();
 
-                let new_func = _normalize(ctx, old_func_index);
-                let new_arg = _normalize(ctx, old_arg_index);
-                ctx.new_tree.alloc_app(new_func, new_arg)
+                let new_func =
+                    _normalize(ctx, old_func_index, ParentEdge::AppToFunc(new_app_index));
+                let new_arg = _normalize(ctx, old_arg_index, ParentEdge::AppToArg(new_app_index));
+
+                let new_app = ctx.new_tree.get_app_mut(new_app_index);
+                new_app.func = new_func;
+                new_app.arg = new_arg;
+                new_app_index.0
             }
         }
     }
@@ -579,7 +605,7 @@ pub fn normalize_into(old_tree: &FlatTree, new_tree: &mut FlatTree) {
         contours: vec![],
     };
 
-    let root_node = _normalize(&mut ctx, old_tree.root);
+    let root_node = _normalize(&mut ctx, old_tree.root, ParentEdge::IntoRoot);
     new_tree.root = root_node;
 }
 
@@ -608,6 +634,17 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
             match self.tree.get(index.0) {
                 Node::Abs(abstraction) => ContourResult::Ok(abstraction),
                 node => ContourResult::Err(ContourError::ExpectedAbs {
+                    index,
+                    actual: node.clone(),
+                }),
+            }
+        }
+
+        fn check_app_index(&self, index: AppIndex) -> ContourResult<&'a Application> {
+            self.check_not_garbage(index.0)?;
+            match self.tree.get(index.0) {
+                Node::App(application) => ContourResult::Ok(application),
+                node => ContourResult::Err(ContourError::ExpectedApp {
                     index,
                     actual: node.clone(),
                 }),
@@ -750,6 +787,50 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
                 Err(ContourError::NodeIsGarbage { node })
             }
         }
+
+        fn check_back_edge(&self, bound_var_index: BoundVarIndex) -> ContourResult<()> {
+            let bound_var = *self.check_bound_var_index(bound_var_index)?;
+            let parent_edge = bound_var.parent;
+            match parent_edge {
+                ParentEdge::IntoRoot => {
+                    return Err(ContourError::MissingParent {
+                        bound_var,
+                        bound_var_index,
+                    });
+                }
+                ParentEdge::AbsToBody(abs_index) => {
+                    let abs = self.check_abs_index(abs_index)?;
+                    if abs.body != bound_var_index.0 {
+                        return Err(ContourError::BoundVarParentMismatch {
+                            bound_var,
+                            parent_edge,
+                            actual_parent: Node::Abs(abs.clone()),
+                        });
+                    }
+                }
+                ParentEdge::AppToFunc(app_index) => {
+                    let app = self.check_app_index(app_index)?;
+                    if app.func != bound_var_index.0 {
+                        return Err(ContourError::BoundVarParentMismatch {
+                            bound_var,
+                            parent_edge,
+                            actual_parent: Node::App(app.clone()),
+                        });
+                    }
+                }
+                ParentEdge::AppToArg(app_index) => {
+                    let app = self.check_app_index(app_index)?;
+                    if app.arg != bound_var_index.0 {
+                        return Err(ContourError::BoundVarParentMismatch {
+                            bound_var,
+                            parent_edge,
+                            actual_parent: Node::App(app.clone()),
+                        });
+                    }
+                }
+            }
+            Ok(())
+        }
     }
 
     fn get_alive_nodes(ctx: &mut Context, node: BackingIndex) -> ContourResult<()> {
@@ -769,7 +850,11 @@ pub fn check_contours(tree: &FlatTree) -> ContourResult<()> {
     fn _check_contours(ctx: &mut Context, node: BackingIndex) -> ContourResult<()> {
         match ctx.tree.get_ref(node) {
             NodeRef::FreeVar(_, _) => Ok(()),
-            NodeRef::BoundVar(_, bound_var) => ctx.check_binding_abs(bound_var),
+            NodeRef::BoundVar(_, bound_var) => {
+                ctx.check_binding_abs(bound_var)?;
+                ctx.check_back_edge(bound_var)?;
+                Ok(())
+            }
             NodeRef::Abs(abstraction, abs_idx) => {
                 ctx.check_contour(abstraction, abs_idx)?;
                 _check_contours(ctx, abstraction.body)
@@ -836,6 +921,19 @@ pub enum ContourError {
     LoopDetectedInTree {
         node: BackingIndex,
     },
+    BoundVarParentMismatch {
+        bound_var: BoundVariable,
+        parent_edge: ParentEdge,
+        actual_parent: Node,
+    },
+    MissingParent {
+        bound_var: BoundVariable,
+        bound_var_index: BoundVarIndex,
+    },
+    ExpectedApp {
+        index: AppIndex,
+        actual: Node,
+    },
 }
 
 // ###########
@@ -857,7 +955,11 @@ pub fn flatten(debruijn: &Debruijn) -> FlatTree {
             self.abs_chain.pop();
         }
 
-        fn alloc_var_and_fixup(&mut self, debruijn_index: usize) -> BackingIndex {
+        fn alloc_var_and_add_to_contour(
+            &mut self,
+            debruijn_index: usize,
+            parent: ParentEdge,
+        ) -> BackingIndex {
             if debruijn_index > self.abs_chain.len() {
                 let free_height = debruijn_index - self.abs_chain.len();
                 let height = NonZeroU32::new(free_height as u32).unwrap();
@@ -870,6 +972,7 @@ pub fn flatten(debruijn: &Debruijn) -> FlatTree {
                 let this_var = BoundVariable {
                     prev: (*prev).into(),
                     next: None,
+                    parent,
                 };
                 let this_var_index = self.tree.alloc_bound_var(this_var);
 
@@ -882,9 +985,11 @@ pub fn flatten(debruijn: &Debruijn) -> FlatTree {
         }
     }
 
-    fn _flatten(ctx: &mut Context, term: &Debruijn) -> BackingIndex {
+    fn _flatten(ctx: &mut Context, term: &Debruijn, parent: ParentEdge) -> BackingIndex {
         match term {
-            Debruijn::Index(debruijn_index) => ctx.alloc_var_and_fixup(*debruijn_index),
+            Debruijn::Index(debruijn_index) => {
+                ctx.alloc_var_and_add_to_contour(*debruijn_index, parent)
+            }
             Debruijn::Abstraction { body } => {
                 // Pre-allocation is needed here so that we can have a spot for the abstraction
                 // node to reside in. We will need this value to be allocated by the time we
@@ -892,7 +997,7 @@ pub fn flatten(debruijn: &Debruijn) -> FlatTree {
                 let abs_index = ctx.tree.alloc_blank_abs();
 
                 ctx.push(abs_index);
-                let body = _flatten(ctx, body);
+                let body = _flatten(ctx, body, ParentEdge::AbsToBody(abs_index));
                 ctx.pop();
 
                 let abs = ctx.tree.get_abs_mut(abs_index);
@@ -901,9 +1006,16 @@ pub fn flatten(debruijn: &Debruijn) -> FlatTree {
                 abs_index.0
             }
             Debruijn::Application { func, arg } => {
-                let func = _flatten(ctx, func);
-                let arg = _flatten(ctx, arg);
-                ctx.tree.alloc_app(func, arg)
+                let app_index = ctx.tree.alloc_blank_app();
+
+                let func = _flatten(ctx, func, ParentEdge::AppToFunc(app_index));
+                let arg = _flatten(ctx, arg, ParentEdge::AppToArg(app_index));
+
+                let app = ctx.tree.get_app_mut(app_index);
+                app.func = func;
+                app.arg = arg;
+
+                app_index.0
             }
         }
     }
@@ -913,7 +1025,7 @@ pub fn flatten(debruijn: &Debruijn) -> FlatTree {
         tree: &mut tree,
         abs_chain: vec![],
     };
-    let root_index = _flatten(&mut ctx, debruijn);
+    let root_index = _flatten(&mut ctx, debruijn, ParentEdge::IntoRoot);
     tree.root = root_index;
     tree
 }

@@ -353,13 +353,14 @@ mod test {
     use crate::{
         debruijn::Debruijn,
         flat_tree::check_contours,
-        reduce::{Reducer, ReductionResult},
+        reduce::{GarbageCollectionStrategy, Reducer, ReductionResult},
     };
 
     #[track_caller]
     fn run_contour_testcase(testcase: &str) {
         let term = Debruijn::from_str(testcase).unwrap();
         let mut reducer = Reducer::new(&term);
+        reducer.gc_strategy = Some(GarbageCollectionStrategy::with_ratio(0.0));
 
         assert_contour(&reducer);
         reducer.reduce_one();
@@ -782,5 +783,15 @@ mod test {
     #[test]
     fn contour_fuzzer1() {
         run_contour_testcase("λ (λ 61) 1");
+    }
+
+    #[test]
+    fn contour_fuzzer2() {
+        run_contour_testcase("(λ 1) λ 1");
+    }
+
+    #[test]
+    fn contour_fuzzer3() {
+        run_contour_testcase("λ λ (λ 2 512) 2");
     }
 }
