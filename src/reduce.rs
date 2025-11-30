@@ -359,24 +359,18 @@ mod test {
     #[track_caller]
     fn run_contour_testcase(testcase: &str) {
         let term = Debruijn::from_str(testcase).unwrap();
-        let mut reducer = Reducer::new(&term);
-        reducer.gc_strategy = Some(GarbageCollectionStrategy::with_ratio(0.0));
+        assert_test_case(&term, None);
+        assert_test_case(&term, Some(GarbageCollectionStrategy::with_ratio(0.0)));
+    }
 
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+    #[track_caller]
+    fn assert_test_case(debruijn: &Debruijn, gc_strategy: Option<GarbageCollectionStrategy>) {
+        let mut reducer = Reducer::new(debruijn);
+        reducer.gc_strategy = gc_strategy;
+        for _ in 0..10 {
+            assert_contour(&reducer);
+            reducer.reduce_one();
+        }
     }
 
     #[track_caller]
@@ -388,341 +382,96 @@ mod test {
 
     #[test]
     fn parent_usage_simplest() {
-        let term = Debruijn::from_str("λ (λ 1 1) (1 1)").unwrap();
-        let mut reducer = Reducer::new(&term);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase("λ (λ 1 1) (1 1)");
     }
 
     #[test]
     fn parent_usage_open_terms() {
-        let term = Debruijn::from_str("λ (λ 1 1) 99").unwrap();
-        let mut reducer = Reducer::new(&term);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase("λ (λ 1 1) 99");
     }
 
     #[test]
     fn parent_usage() {
-        let term =
-            Debruijn::from_str("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2").unwrap();
-        let mut reducer = Reducer::new(&term);
-
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase("(λ λ λ 3 1 (2 1)) ((λ λ 2) (λ λ λ 3 1 (2 1))) λ λ 2");
     }
 
     #[test]
     fn parent_usage_another() {
-        let term = Debruijn::from_str("(λ λ 3 2) (λ λ 2)").unwrap();
-        let mut reducer = Reducer::new(&term);
-
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase("(λ λ 3 2) (λ λ 2)")
     }
 
     #[test]
     fn parent_usage2() {
-        let term = Debruijn::from_str("(λ λ 1) 10").unwrap();
-        let mut reducer = Reducer::new(&term);
-
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase("(λ λ 1) 10");
     }
 
     #[test]
     fn usage3() {
-        let term = Debruijn::from_str("λ λ λ λ (λ λ 6) 2 1").unwrap();
-        let mut reducer = Reducer::new(&term);
-
-        reducer.reduce_one();
-        println!("{}", reducer.tree);
-        reducer.reduce_one();
-        println!("{}", reducer.tree);
-        assert_contour(&reducer);
+        run_contour_testcase("λ λ λ λ (λ λ 6) 2 1")
     }
 
     #[test]
     fn usage4() {
-        let term = Debruijn::from_str("λ ((λ λ 1) 99) 1 99").unwrap();
-        let mut reducer = Reducer::new(&term);
-
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase("λ ((λ λ 1) 99) 1 99")
     }
 
     #[test]
     fn usage4_simpler() {
-        let term = Debruijn::from_str("λ ((λ λ 1) 99) 1").unwrap();
-        let mut reducer = Reducer::new(&term);
-
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase("λ ((λ λ 1) 99) 1");
     }
 
     #[test]
     fn parent_usage_simpler() {
-        let term = Debruijn::from_str("λ (λ λ λ 2) 100").unwrap();
-        let mut reducer = Reducer::new(&term);
-
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase("λ (λ λ λ 2) 100");
     }
 
     #[test]
     fn from_fuzzer() {
-        let term = "λ (λ 1 λ 1) λ λ 3";
-        let term = Debruijn::from_str(term).unwrap();
-        let mut reducer = Reducer::new(&term);
-
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase("λ (λ 1 λ 1) λ λ 3");
     }
 
     #[test]
     fn from_fuzzer2() {
-        let term = "(λ 1 λ 3) λ 1";
-        let term = Debruijn::from_str(term).unwrap();
-        let mut reducer = Reducer::new(&term);
-
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase("(λ 1 λ 3) λ 1");
     }
 
     #[test]
     fn from_fuzzer3() {
-        let term = "(λ λ 2 1) λ 1";
-        let term = Debruijn::from_str(term).unwrap();
-        let mut reducer = Reducer::new(&term);
-
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase("(λ λ 2 1) λ 1");
     }
 
     #[test]
     fn parent_usage_simple_2() {
-        let term = Debruijn::from_str("λ (λ λ 1) 100").unwrap();
-        let mut reducer = Reducer::new(&term);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase("λ (λ λ 1) 100");
     }
 
     #[test]
     fn fuzzer4() {
-        let term = Debruijn::from_str("2 1 λ λ (λ λ 1 20 2) 20 λ 2 λ λ λ 22 λ λ λ λ λ λ λ λ λ 22 λ 5 λ λ λ 5 λ λ (λ λ 1 20 2) 20 λ 2 λ 1 22").unwrap();
-        let mut reducer = Reducer::new(&term);
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase(
+            "2 1 λ λ (λ λ 1 20 2) 20 λ 2 λ λ λ 22 λ λ λ λ λ λ λ λ λ 22 λ 5 λ λ λ 5 λ λ (λ λ 1 20 2) 20 λ 2 λ 1 22",
+        );
     }
 
     #[test]
     fn fuzzer5() {
-        let term = Debruijn::from_str(
+        run_contour_testcase(
             "λ λ λ (7 13) λ λ λ λ λ λ λ λ λ λ λ λ λ λ λ (λ λ λ λ λ λ λ λ λ λ λ λ λ 13 13) λ λ λ λ λ λ λ λ λ λ λ λ λ λ λ λ (λ λ λ λ λ λ λ λ λ λ λ λ λ λ λ 15 λ 15) 15 λ λ λ λ λ λ λ λ 255",
-        ).unwrap();
-        let mut reducer = Reducer::new(&term);
-
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        );
     }
 
     #[test]
     fn fuzzer6() {
-        let testcase = "(λ λ 1) 99 λ (λ λ 1 3) 99 99";
-        let term = Debruijn::from_str(testcase).unwrap();
-        let mut reducer = Reducer::new(&term);
-
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase("(λ λ 1) 99 λ (λ λ 1 3) 99 99");
     }
 
     #[test]
     fn fuzzer7() {
-        let testcase = "(λ 1 1) (λ 1) 11";
-        let term = Debruijn::from_str(testcase).unwrap();
-        let mut reducer = Reducer::new(&term);
-
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase("(λ 1 1) (λ 1) 11");
     }
 
     #[test]
     fn fuzzer8() {
-        let testcase = "λ (λ λ 2 1) (λ λ 2)";
-        let term = Debruijn::from_str(testcase).unwrap();
-        let mut reducer = Reducer::new(&term);
-
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
-        reducer.reduce_one();
-        assert_contour(&reducer);
+        run_contour_testcase("λ (λ λ 2 1) (λ λ 2)");
     }
 
     fn reference_reduce(term: &Debruijn) -> Debruijn {
@@ -756,8 +505,7 @@ mod test {
 
     #[test]
     fn fuzzer9() {
-        let testcase = "(λ (λ 255) λ 1) 10";
-        assert_matches_reference(testcase);
+        assert_matches_reference("(λ (λ 255) λ 1) 10");
     }
 
     #[test]
@@ -765,8 +513,7 @@ mod test {
         // λ λ λ 1 ((λ 1) ((λ 2) (λ 2))) 3
         // λ λ λ 1 ((λ 2) (λ 2)) 3
         // λ λ λ 1 1 3
-        let testcase = "λ λ λ 1 ((λ 1) ((λ 2) (λ 2))) 3";
-        assert_matches_reference(testcase);
+        assert_matches_reference("λ λ λ 1 ((λ 1) ((λ 2) (λ 2))) 3");
     }
 
     #[test]
@@ -776,8 +523,7 @@ mod test {
         // λ 256 λ (λ (λ λ (λ 3) 2)) (λ λ (λ 3) 2)
         // λ 256 λ λ λ (λ 3) 2
         // λ 256 λ λ λ 2
-        let testcase = "λ (λ 257 (1 1)) λ λ (λ 3) 2";
-        assert_matches_reference(testcase);
+        assert_matches_reference("λ (λ 257 (1 1)) λ λ (λ 3) 2");
     }
 
     #[test]
