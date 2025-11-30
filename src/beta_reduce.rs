@@ -1,7 +1,7 @@
 use crate::{
     flat_tree::{
-        AbsIndex, BackingIndex, BoundVarIndex, DebruijnDepth, FlatTree, Node, NodeRef, ParentEdge,
-        PrevIndex,
+        AbsIndex, AppIndex, BackingIndex, BoundVarIndex, DebruijnDepth, FlatTree, Node, NodeRef,
+        ParentEdge, PrevIndex,
     },
     graphviz,
 };
@@ -395,7 +395,7 @@ pub struct RedexMut {
 
     pub parent_to_app: ParentEdge,
     // The index of the redex application node
-    pub app_index: BackingIndex,
+    pub app_index: AppIndex,
     // The left child of the redex's application node. This should be an abstraction node
     pub func_index: AbsIndex,
     // The child of the left child of the redex application
@@ -442,20 +442,19 @@ impl RedexMut {
         tree: &FlatTree,
         debruijn_depth: DebruijnDepth,
         parent_to_app: ParentEdge,
-        app_index: BackingIndex,
+        app_index: AppIndex,
     ) -> Option<RedexMut> {
-        if let NodeRef::App(app, _) = tree.get_ref(app_index) {
-            if let NodeRef::Abs(abs, func_index) = tree.get_ref(app.func) {
-                let redex = RedexMut {
-                    debruijn_depth,
-                    parent_to_app,
-                    app_index,
-                    func_index,
-                    body_index: abs.body,
-                    arg_index: app.arg,
-                };
-                return Some(redex);
-            }
+        let app = tree.get_app(app_index);
+        if let NodeRef::Abs(abs, func_index) = tree.get_ref(app.func) {
+            let redex = RedexMut {
+                debruijn_depth,
+                parent_to_app,
+                app_index,
+                func_index,
+                body_index: abs.body,
+                arg_index: app.arg,
+            };
+            return Some(redex);
         }
         None
     }
@@ -478,14 +477,17 @@ impl FlatTree {
                     _get_redexes(ctx, abstraction.body, ParentEdge::AbsToBody(index));
                     ctx.debruijn_depth -= 1;
                 }
-                NodeRef::App(application, _) => {
-                    if let Some(redex) =
-                        RedexMut::try_get(ctx.tree, ctx.debruijn_depth, parent_to_current, index)
-                    {
+                NodeRef::App(application, app_index) => {
+                    if let Some(redex) = RedexMut::try_get(
+                        ctx.tree,
+                        ctx.debruijn_depth,
+                        parent_to_current,
+                        app_index,
+                    ) {
                         ctx.redexes.push(redex);
                     }
-                    _get_redexes(ctx, application.func, ParentEdge::AppToFunc(index));
-                    _get_redexes(ctx, application.arg, ParentEdge::AppToArg(index));
+                    _get_redexes(ctx, application.func, ParentEdge::AppToFunc(app_index));
+                    _get_redexes(ctx, application.arg, ParentEdge::AppToArg(app_index));
                 }
             }
         }

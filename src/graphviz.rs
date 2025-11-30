@@ -294,7 +294,7 @@ fn get_info_array(tree: &FlatTree) -> Vec<NodeInfo> {
 
         let redex_info = redexes
             .iter()
-            .find(|redex| redex.app_index.get() == index)
+            .find(|redex| redex.app_index.0.get() == index)
             .map(|redex| RedexInfo {
                 abs: redex.func_index,
                 arg: redex.arg_index,

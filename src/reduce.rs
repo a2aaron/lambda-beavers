@@ -134,10 +134,10 @@ impl WalkContext {
                         depth + 1,
                     ));
                 }
-                NodeRef::App(application, _) => {
+                NodeRef::App(application, app_index) => {
                     match state {
                         WalkState::FirstVisit => {
-                            if let Some(redex) = RedexMut::try_get(tree, depth, parent, index) {
+                            if let Some(redex) = RedexMut::try_get(tree, depth, parent, app_index) {
                                 // Don't push anything onto the stack--we expect this redex to be processed before returning to walk_one
                                 return WalkResult::Some(redex);
                             } else {
@@ -147,7 +147,7 @@ impl WalkContext {
                                 // time, redexes live in the function half rather than the argument half.
                                 self.push(WalkFrame::first_visit(
                                     application.func,
-                                    ParentEdge::AppToFunc(index),
+                                    ParentEdge::AppToFunc(app_index),
                                     depth,
                                 ));
                             }
@@ -156,7 +156,7 @@ impl WalkContext {
                             self.push(WalkFrame::third_visit(frame));
                             self.push(WalkFrame::first_visit(
                                 application.arg,
-                                ParentEdge::AppToArg(index),
+                                ParentEdge::AppToArg(app_index),
                                 depth,
                             ));
                         }

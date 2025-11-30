@@ -103,15 +103,15 @@ impl FlatTree {
         }
     }
 
-    pub fn get_app(&self, app: BackingIndex) -> &Application {
-        match self.get(app) {
+    pub fn get_app(&self, app: AppIndex) -> &Application {
+        match self.get(app.0) {
             Node::App(app) => app,
             node => panic!("Expected abstraction for term @ {app}, got {node:?}",),
         }
     }
 
-    pub fn get_app_mut(&mut self, app: BackingIndex) -> &mut Application {
-        match self.get_mut(app) {
+    pub fn get_app_mut(&mut self, app: AppIndex) -> &mut Application {
+        match self.get_mut(app.0) {
             Node::App(app) => app,
             node => panic!("Expected abstraction for term @ {app}, got {node:?}",),
         }
@@ -460,17 +460,17 @@ pub enum ParentEdge {
     /// The edge is an abstraction to body edge, and the BackingIndex here is the index for the abstraction
     AbsToBody(AbsIndex),
     /// The edge is an application to function edge, and the BackingIndex here is the index for the application
-    AppToFunc(BackingIndex),
+    AppToFunc(AppIndex),
     /// The edge is an application to argument edge, and the BackingIndex here is the index for the application
-    AppToArg(BackingIndex),
+    AppToArg(AppIndex),
 }
 impl ParentEdge {
     pub fn parent(&self) -> Option<BackingIndex> {
         match self {
             ParentEdge::IntoRoot => None,
             ParentEdge::AbsToBody(abs) => Some(abs.0),
-            ParentEdge::AppToFunc(app) => Some(*app),
-            ParentEdge::AppToArg(app) => Some(*app),
+            ParentEdge::AppToFunc(app) => Some(app.0),
+            ParentEdge::AppToArg(app) => Some(app.0),
         }
     }
 }
