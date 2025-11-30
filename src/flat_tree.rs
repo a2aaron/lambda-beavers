@@ -872,6 +872,12 @@ pub fn check_invariants(tree: &FlatTree) -> CheckResult<()> {
         alive: HashSet::new(),
     };
     get_alive_nodes(&mut ctx, tree.root)?;
+    if ctx.alive.len() != tree.alive_count() {
+        return Err(CheckError::WrongAliveCount {
+            expected: ctx.alive.len(),
+            actual: tree.alive_count(),
+        });
+    }
     walk(&mut ctx, tree.root)?;
 
     Ok(())
@@ -933,6 +939,10 @@ pub enum CheckError {
     ExpectedApp {
         index: AppIndex,
         actual: Node,
+    },
+    WrongAliveCount {
+        expected: usize,
+        actual: usize,
     },
 }
 
